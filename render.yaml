@@ -9,7 +9,3 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
-      - key: VITE_FRONTEND_URL
-        value: https://resturant-saas-1.onrender.com
-      - key: VITE_API_BASE_URL
-        value: https://resturant-saas.onrender.com/api
