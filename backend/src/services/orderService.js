@@ -69,7 +69,16 @@ export class OrderService {
       if (error) throw error;
 
       logger.info(`✅ Order created: ${order.id}`);
-      return this.transformOrder(order);
+
+      // If items are provided, add them to the order
+      if (orderData.items && orderData.items.length > 0) {
+        await this.addOrderItems(order.id, orderData.items);
+      }
+
+      // Fetch and return the complete order with items
+      const completeOrder = await this.getOrderById(finalRestaurantId, order.id);
+      
+      return completeOrder;
     } catch (error) {
       logger.error('❌ Create order error:', error);
       throw error;
@@ -111,6 +120,9 @@ export class OrderService {
             menu_item_id,
             quantity,
             unit_price
+          ),
+          tables!table_id (
+            table_number
           )
         `)
         .eq('id', orderId)
@@ -119,7 +131,13 @@ export class OrderService {
 
       if (error || !order) throw error || new Error('Order not found');
 
-      return this.transformOrder(order);
+      // Transform and include table information
+      const transformedOrder = this.transformOrder(order);
+      return {
+        ...transformedOrder,
+        tableNumber: order.tables?.table_number || null,
+        table: order.tables,
+      };
     } catch (error) {
       logger.error('❌ Get order error:', error);
       throw error;
@@ -137,6 +155,9 @@ export class OrderService {
             menu_item_id,
             quantity,
             unit_price
+          ),
+          tables!table_id (
+            table_number
           )
         `)
         .eq('restaurant_id', restaurantId);
@@ -159,7 +180,12 @@ export class OrderService {
 
       if (error) throw error;
 
-      return this.transformOrders(orders);
+      // Transform and include tableNumber for easier consumption
+      return (orders || []).map(order => ({
+        ...this.transformOrder(order),
+        tableNumber: order.tables?.table_number || null,
+        table: order.tables,
+      }));
     } catch (error) {
       logger.error('❌ Get orders error:', error);
       throw error;
@@ -354,6 +380,9 @@ export class OrderService {
             menu_item_id,
             quantity,
             unit_price
+          ),
+          tables!table_id (
+            table_number
           )
         `)
         .eq('restaurant_id', restaurantId);
@@ -378,9 +407,16 @@ export class OrderService {
 
       if (error) throw error;
 
+      // Transform to include tableNumber
+      const transformedOrders = (orders || []).map(order => ({
+        ...this.transformOrder(order),
+        tableNumber: order.tables?.table_number || null,
+        table: order.tables,
+      }));
+
       return {
-        items: orders || [],
-        total: orders?.length || 0,
+        items: transformedOrders,
+        total: transformedOrders?.length || 0,
         limit: filters.limit || 50,
         skip: filters.skip || 0,
       };
@@ -403,6 +439,9 @@ export class OrderService {
             menu_item_id,
             quantity,
             unit_price
+          ),
+          tables!table_id (
+            table_number
           )
         `)
         .eq('restaurant_id', restaurantId)
@@ -413,7 +452,12 @@ export class OrderService {
 
       if (error) throw error;
 
-      return orders || [];
+      // Transform to include tableNumber for easier consumption
+      return (orders || []).map(order => ({
+        ...this.transformOrder(order),
+        tableNumber: order.tables?.table_number || null,
+        table: order.tables,
+      }));
     } catch (error) {
       logger.error('❌ Get kitchen orders error:', error);
       throw error;

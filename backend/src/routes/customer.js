@@ -105,6 +105,41 @@ router.get('/menu/:qrCodeData/items', validateParams(tableSchema), async (req, r
 });
 
 // Create order as customer (no auth required, but table must be valid)
-router.post('/orders', optionalAuth, orderController.createOrder);
+// This handles table resolution from tableNumber to tableId
+router.post('/orders', optionalAuth, async (req, res, next) => {
+  try {
+    // If tableNumber is provided but not tableId, resolve it
+    if (req.body.tableNumber && !req.body.tableId) {
+      const { data: table, error: tableError } = await supabase
+        .from('tables')
+        .select('id, restaurant_id')
+        .eq('table_number', parseInt(req.body.tableNumber))
+        .single();
+
+      if (tableError || !table) {
+        return res.status(404).json({
+          statusCode: 404,
+          success: false,
+          message: `Table ${req.body.tableNumber} not found`,
+        });
+      }
+
+      // Add resolved IDs to request body
+      req.body.tableId = table.id;
+      req.restaurantId = table.restaurant_id;
+      console.log(`✅ Resolved Table #${req.body.tableNumber} → ID: ${table.id}`);
+    }
+
+    // Call the order controller
+    next();
+  } catch (error) {
+    console.error('❌ Error resolving table:', error.message);
+    return res.status(500).json({
+      statusCode: 500,
+      success: false,
+      message: 'Failed to process order',
+    });
+  }
+}, orderController.createOrder);
 
 export default router;
