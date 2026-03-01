@@ -8,44 +8,47 @@ const PORT = process.env.PORT || 3000;
 const DIST = path.join(__dirname, 'dist');
 const INDEX = path.join(DIST, 'index.html');
 
-console.log('🚀 Starting server...');
-console.log('📁 DIST:', DIST);
-console.log('✅ DIST exists:', fs.existsSync(DIST));
-console.log('✅ index.html exists:', fs.existsSync(INDEX));
+// Verify files exist
+if (!fs.existsSync(DIST)) {
+  console.error('❌ FATAL: dist/ not found');
+  process.exit(1);
+}
 
-if (!fs.existsSync(DIST) || !fs.existsSync(INDEX)) {
-  console.error('❌ Build files missing! Exiting...');
+if (!fs.existsSync(INDEX)) {
+  console.error('❌ FATAL: dist/index.html not found');
+  console.error('Available files:', fs.readdirSync(DIST));
   process.exit(1);
 }
 
 const app = express();
 
-// Serve all static files (JS, CSS, assets, etc)
-app.use(express.static(DIST, {
-  maxAge: '1d',
-  index: false  // Disable automatic index.html serving so we can handle it ourselves
-}));
+// CRITICAL: Serve static files first, then SPA fallback
+app.use(express.static(DIST));
 
-// Health check endpoint
+// Health check
 app.get('/health', (req, res) => {
   res.json({ ok: true });
 });
 
-// Root route
-app.get('/', (req, res) => {
-  res.sendFile(INDEX);
-});
-
-// SPA fallback - ALL other routes serve index.html
-// This is critical for React Router to work on direct URL access
+// SPA fallback for ALL routes - must be last
 app.get('*', (req, res) => {
-  console.log(`📍 SPA route: ${req.path}`);
-  res.sendFile(INDEX);
+  res.sendFile(INDEX, (err) => {
+    if (err) {
+      console.error('Error sending index.html:', err);
+      res.status(500).json({ error: 'Failed to load app' });
+    }
+  });
 });
 
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`✅ Server running on port ${PORT}`);
-  console.log(`🌐 URL: https://resturant-saas-1.onrender.com`);
+const server = app.listen(PORT, '0.0.0.0', () => {
+  console.log('✅ Frontend server running on port ' + PORT);
+});
+
+process.on('SIGTERM', () => {
+  server.close(() => {
+    console.log('Server closed');
+    process.exit(0);
+  });
 });
 
 
