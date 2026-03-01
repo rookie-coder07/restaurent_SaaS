@@ -64,6 +64,9 @@ export class OrderService {
             menu_item_id,
             quantity,
             unit_price
+          ),
+          tables!table_id (
+            table_number
           )
         `)
         .eq('id', orderId)
@@ -72,7 +75,12 @@ export class OrderService {
 
       if (error || !order) throw error || new Error('Order not found');
 
-      return order;
+      // Add tableNumber for easier consumption
+      return {
+        ...order,
+        tableNumber: order.tables?.table_number || null,
+        table: order.tables,
+      };
     } catch (error) {
       logger.error('❌ Get order error:', error);
       throw error;
@@ -90,6 +98,9 @@ export class OrderService {
             menu_item_id,
             quantity,
             unit_price
+          ),
+          tables!table_id (
+            table_number
           )
         `)
         .eq('restaurant_id', restaurantId);
@@ -112,7 +123,12 @@ export class OrderService {
 
       if (error) throw error;
 
-      return orders || [];
+      // Transform to include tableNumber for easier consumption
+      return (orders || []).map(order => ({
+        ...order,
+        tableNumber: order.tables?.table_number || null,
+        table: order.tables,
+      }));
     } catch (error) {
       logger.error('❌ Get orders error:', error);
       throw error;
