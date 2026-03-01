@@ -11,11 +11,13 @@ export default function QRCodeModal({ table, restaurantName, onClose }) {
 
     const generateQR = async () => {
       try {
-        // Generate QR code using actual current domain (auto-detects deployment URL)
-        const baseUrl = window.location.origin;
+        // Get frontend URL from environment variable (set in production)
+        // Falls back to current domain in development
+        const baseUrl = import.meta.env.VITE_FRONTEND_URL || window.location.origin;
         const qrValue = `${baseUrl}/menu?table=${table.tableNumber}`;
         console.log('📱 Generating QR Code URL:', qrValue, '(Table:', table.tableNumber, ')');
         console.log('📍 QR pointing to:', baseUrl);
+        console.log('📍 Using VITE_FRONTEND_URL:', import.meta.env.VITE_FRONTEND_URL || 'Not set');
 
         await QRCode.toCanvas(canvasRef.current, qrValue, {
           errorCorrectionLevel: 'H',

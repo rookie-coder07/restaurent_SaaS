@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: restaurant-frontend
+    env: node
+    plan: free
+    buildCommand: cd frontend && npm install && npm run build
+    startCommand: cd frontend && npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: VITE_FRONTEND_URL
+        value: https://resturant-saas-1.onrender.com
+      - key: VITE_API_BASE_URL
+        value: https://resturant-saas.onrender.com/api

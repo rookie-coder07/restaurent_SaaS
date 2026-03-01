@@ -8,11 +8,13 @@ import QRCode from 'qrcode';
  */
 export const generateTableQRCode = async (table) => {
   try {
-    // Use actual current domain (auto-detects wherever frontend is deployed)
-    const baseUrl = window.location.origin;
+    // Get frontend URL from environment variable (set in production)
+    // Falls back to current domain in development
+    const baseUrl = import.meta.env.VITE_FRONTEND_URL || window.location.origin;
     const qrValue = `${baseUrl}/menu?table=${table.tableNumber}`;
     console.log('📱 Generating QR for table', table.tableNumber, 'URL:', qrValue);
     console.log('📍 QR pointing to:', baseUrl);
+    console.log('📍 Using VITE_FRONTEND_URL:', import.meta.env.VITE_FRONTEND_URL || 'Not set');
 
     const imageData = await QRCode.toDataURL(qrValue, {
       errorCorrectionLevel: 'H',
