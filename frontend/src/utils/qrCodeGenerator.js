@@ -8,12 +8,11 @@ import QRCode from 'qrcode';
  */
 export const generateTableQRCode = async (table) => {
   try {
-    // Point to Render frontend where the actual app is deployed
-    const baseUrl = import.meta.env.PROD 
-      ? 'https://resturant-saas-1.onrender.com' 
-      : window.location.origin;
+    // Use actual current domain (auto-detects wherever frontend is deployed)
+    const baseUrl = window.location.origin;
     const qrValue = `${baseUrl}/menu?table=${table.tableNumber}`;
     console.log('📱 Generating QR for table', table.tableNumber, 'URL:', qrValue);
+    console.log('📍 QR pointing to:', baseUrl);
 
     const imageData = await QRCode.toDataURL(qrValue, {
       errorCorrectionLevel: 'H',
