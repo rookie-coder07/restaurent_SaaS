@@ -59,7 +59,19 @@ initCloudinary();
 
 // Request logging middleware
 app.use((req, res, next) => {
-  logger.info(`${req.method} ${req.path}`);
+  const timestamp = new Date().toISOString();
+  const origin = req.headers.origin || 'no-origin';
+  const userAgent = req.headers['user-agent'] || 'unknown';
+  
+  logger.info(`[${timestamp}] ${req.method} ${req.path}`);
+  logger.info(`  Origin: ${origin}`);
+  logger.info(`  IP: ${req.ip}`);
+  
+  // Log response when it's finished
+  res.on('finish', () => {
+    logger.info(`  Response: ${res.statusCode}`);
+  });
+  
   next();
 });
 
