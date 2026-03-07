@@ -22,17 +22,20 @@ app.use(express.urlencoded({ limit: '10mb', extended: true }));
 // Cookie parser
 app.use(cookieParser());
 
-// CORS configuration - More permissive for development
+// CORS configuration - Configured for development and production
 const corsOptions = {
   origin: function(origin, callback) {
     const allowedOrigins = [
+      // Development
       'http://localhost:5173',
       'http://localhost:5174',
       'http://127.0.0.1:5173',
       'http://127.0.0.1:5174',
       'http://localhost:3000',
-      'https://resturant-saas-1.onrender.com',
-      'https://restromaxsaas.vercel.app',
+      // Production
+      'https://restromaxsaas.vercel.app',  // Frontend on Vercel
+      'https://resturant-saas.onrender.com',  // Backend on Render
+      // Environment variable (for flexibility)
       config.corsOrigin
     ];
     
