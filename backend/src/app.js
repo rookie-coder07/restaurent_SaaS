@@ -33,7 +33,7 @@ const corsOptions = {
       'http://127.0.0.1:5174',
       'http://localhost:3000',
       // Production
-      'https://restromaxsaas.vercel.app',  // Frontend on Vercel
+      'https://restaurentsaas.vercel.app',  // Frontend on Vercel (correct domain)
       'https://resturant-saas.onrender.com',  // Backend on Render
       // Environment variable (for flexibility)
       config.corsOrigin
