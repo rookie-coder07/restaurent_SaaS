@@ -555,8 +555,8 @@ npm run dev
 
 ### Production URLs (After Deployment)
 ```
-Frontend: https://restromaxsaas.vercel.app
-Backend: https://restromaxsaas-api.onrender.com
+Frontend: https://restaurentsaas.vercel.app
+Backend: https://resturant-saas.onrender.com
 ```
 
 ### Environment Variables Ready
@@ -691,3 +691,4 @@ You now have a **production-grade, multi-tenant Restaurant Management SaaS** wit
 **Go-Live Ready**: YES  
 
 Start with: Read [QUICKSTART.md](./QUICKSTART.md) for 30-minute local setup!
+

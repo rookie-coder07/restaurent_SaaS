@@ -134,7 +134,7 @@ Result: ✅ If both yes → Backend is responding
 Step 1: Network tab → Failed request
         Look for "Access-Control-Allow-Origin" in response headers
         
-Step 2: Should show: restromaxsaas.vercel.app
+Step 2: Should show: restaurentsaas.vercel.app
        
 Result: ✅ If present → CORS is working
         ❌ If missing → Backend needs CORS update (already done)
@@ -192,3 +192,4 @@ Share these three things:
 3. **Render logs screenshot** showing if request reached backend
 
 With these three items, any issue is fixable in <5 minutes.
+

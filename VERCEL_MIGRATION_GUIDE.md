@@ -37,7 +37,7 @@ VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
 #### `.env.production` (Production - Vercel)
 ```dotenv
 VITE_API_BASE_URL=https://resturant-saas.onrender.com/api
-VITE_FRONTEND_URL=https://restromaxsaas.vercel.app
+VITE_FRONTEND_URL=https://restaurentsaas.vercel.app
 VITE_CLOUDINARY_CLOUD_NAME=dof234wuj
 VITE_APP_NAME=Restaurant Management SaaS
 VITE_SUPABASE_URL=https://pzjjuuqwpbfbfosgblzv.supabase.co
@@ -141,7 +141,7 @@ VITE_SUPABASE_ANON_KEY = sb_publishable_h2HoLV5oiZpBIaMK4EQHiQ_UY6HjMZn
 ### Step 5: Custom Domain (Optional)
 
 1. In Vercel Dashboard → Domains
-2. Add your custom domain (e.g., `restromaxsaas.vercel.app`)
+2. Add your custom domain (e.g., `restaurentsaas.vercel.app`)
 3. Update DNS records as instructed
 4. Update `VITE_FRONTEND_URL` in environment variables
 
@@ -162,7 +162,7 @@ Ensure `backend/src/app.js` includes:
 ```javascript
 const corsOptions = {
   origin: [
-    'https://restromaxsaas.vercel.app',  // Production Vercel URL
+    'https://restaurentsaas.vercel.app',  // Production Vercel URL
     'http://localhost:5173'                // Local development
   ],
   credentials: true,
@@ -200,13 +200,13 @@ QR → https://resturant-saas-1.onrender.com/menu?table=1
 
 **After (Vercel):**
 ```
-QR → https://restromaxsaas.vercel.app/menu?table=1
+QR → https://restaurentsaas.vercel.app/menu?table=1
 ```
 
 Update QR generation in backend to use the new Vercel frontend URL:
 
 ```javascript
-const baseUrl = process.env.FRONTEND_URL || 'https://restromaxsaas.vercel.app';
+const baseUrl = process.env.FRONTEND_URL || 'https://restaurentsaas.vercel.app';
 const qrUrl = `${baseUrl}/menu?table=${tableId}`;
 ```
 
@@ -303,7 +303,7 @@ Serves the built `dist/` locally on `http://localhost:4173`
 | Variable | Development | Production |
 |----------|-------------|------------|
 | `VITE_API_BASE_URL` | `http://localhost:3000/api` | `https://resturant-saas.onrender.com/api` |
-| `VITE_FRONTEND_URL` | `http://localhost:5173` | `https://restromaxsaas.vercel.app` |
+| `VITE_FRONTEND_URL` | `http://localhost:5173` | `https://restaurentsaas.vercel.app` |
 | `VITE_CLOUDINARY_CLOUD_NAME` | `dmy6lfb8b` | `dof234wuj` |
 | `VITE_SUPABASE_URL` | Same | Same |
 | `VITE_SUPABASE_ANON_KEY` | Same | Same |
@@ -372,3 +372,4 @@ If needed to revert to Render:
 
 **Migration Date**: March 7, 2026  
 **Status**: ✅ Ready for Deployment
+

@@ -333,4 +333,5 @@ Proprietary - RestroMaxx SaaS
 
 ## Support
 
-For issues or questions, contact support@restromaxsaas.com
+For issues or questions, contact support@restaurentsaas.com
+

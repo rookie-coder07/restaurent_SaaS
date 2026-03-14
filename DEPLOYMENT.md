@@ -40,7 +40,7 @@ Complete deployment instructions for Render (backend) and Vercel (frontend).
 2. Connect GitHub repository
 3. Select `Restaurant_management` repository
 4. Configure:
-   - **Name**: `restromaxsaas-api`
+   - **Name**: `resturant-saas`
    - **Root Directory**: `backend`
    - **Environment**: `Node`
    - **Build Command**: `npm install`
@@ -52,7 +52,7 @@ Complete deployment instructions for Render (backend) and Vercel (frontend).
 In Render dashboard, go to **Environment** and add:
 
 ```
-MONGODB_URI=mongodb+srv://user:password@cluster0.mongodb.net/restromaxsaas
+MONGODB_URI=mongodb+srv://user:password@cluster0.mongodb.net/restaurentsaas
 CLOUDINARY_NAME=your-cloud-name
 CLOUDINARY_API_KEY=your-api-key
 CLOUDINARY_API_SECRET=your-api-secret
@@ -82,14 +82,14 @@ Add start script:
 3. Wait for build to complete (2-3 minutes)
 4. Copy API URL from Render dashboard
 
-**Expected URL**: `https://restromaxsaas-api.onrender.com`
+**Expected URL**: `https://resturant-saas.onrender.com`
 
 ### Verification
 
 Test deployment:
 
 ```bash
-curl https://restromaxsaas-api.onrender.com/v1/auth/register \
+curl https://resturant-saas.onrender.com/v1/auth/register \
   -H "Content-Type: application/json" \
   -X POST \
   -d '{"email":"test@example.com","password":"Test123@456"}'
@@ -133,7 +133,7 @@ Output Directory: dist
 In Vercel project settings → **Environment Variables**:
 
 ```
-VITE_API_URL=https://restromaxsaas-api.onrender.com
+VITE_API_URL=https://resturant-saas.onrender.com
 ```
 
 ### Step 5: Deploy
@@ -142,7 +142,7 @@ VITE_API_URL=https://restromaxsaas-api.onrender.com
 2. Vercel builds and deploys automatically
 3. Get frontend URL from dashboard
 
-**Expected URL**: `https://restromaxsaas.vercel.app`
+**Expected URL**: `https://restaurentsaas.vercel.app`
 
 ---
 
@@ -155,7 +155,7 @@ Update `backend/src/app.js`:
 ```javascript
 const corsOptions = {
   origin: [
-    'https://restromaxsaas.vercel.app',  // Production
+    'https://restaurentsaas.vercel.app',  // Production
     'http://localhost:5173'               // Local development
   ],
   credentials: true,
@@ -170,7 +170,7 @@ app.use(cors(corsOptions));
 Update `frontend/.env.production`:
 
 ```
-VITE_API_URL=https://restromaxsaas-api.onrender.com
+VITE_API_URL=https://resturant-saas.onrender.com
 ```
 
 ### Redeploy Both
@@ -190,20 +190,20 @@ git push origin main
 ### Add Custom Domain to Vercel
 
 1. In Vercel project → **Settings** → **Domains**
-2. Enter your domain: `app.restromaxsaas.com`
+2. Enter your domain: `app.restaurentsaas.com`
 3. Add DNS records (Vercel provides):
    ```
-   CNAME: app.restromaxsaas.com → cname.vercel.com
+   CNAME: app.restaurentsaas.com → cname.vercel.com
    ```
 4. Vercel auto-provisions SSL certificate
 
 ### Add Custom Domain to Render
 
 1. In Render service → **Settings** → **Custom Domains**
-2. Enter domain: `api.restromaxsaas.com`
+2. Enter domain: `api.resturant-saas.com`
 3. Add CNAME record via DNS provider:
    ```
-   CNAME: api.restromaxsaas.com → api.onrender.com
+   CNAME: api.resturant-saas.com → api.onrender.com
    ```
 
 ---
@@ -474,9 +474,9 @@ git checkout <commit-hash>  # Rollback if needed
 
 Once deployed, monitor:
 
-1. **Frontend**: https://restromaxsaas.vercel.app
-2. **Backend**: https://restromaxsaas-api.onrender.com
-3. **API Health**: https://restromaxsaas-api.onrender.com/health
+1. **Frontend**: https://restaurentsaas.vercel.app
+2. **Backend**: https://resturant-saas.onrender.com
+3. **API Health**: https://resturant-saas.onrender.com/health
 4. **MongoDB Atlas**: https://cloud.mongodb.com
 5. **Cloudinary**: https://cloudinary.com/console
 
@@ -521,3 +521,5 @@ After deployment, track:
 **Deployment Status**: Ready ✓  
 **Estimated Setup Time**: 30-60 minutes  
 **Go-Live Ready**: Yes
+
+

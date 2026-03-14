@@ -14,7 +14,7 @@ User scans QR code → https://resturant-saas.onrender.com/menu?table=1
 
 ### ✅ AFTER (Working)
 ```
-User scans QR code → https://restromaxsaas.vercel.app/menu?table=1
+User scans QR code → https://restaurentsaas.vercel.app/menu?table=1
                     ↓
               FRONTEND (Vercel)
               (has /menu route)
@@ -36,9 +36,9 @@ User scans QR code → https://restromaxsaas.vercel.app/menu?table=1
 
 | Purpose | URL | Notes |
 |---------|-----|-------|
-| **Frontend App** | `https://restromaxsaas.vercel.app` | Deployed on Vercel |
+| **Frontend App** | `https://restaurentsaas.vercel.app` | Deployed on Vercel |
 | **Backend API** | `https://resturant-saas.onrender.com` | Deployed on Render |
-| **QR Code Destination** | `https://restromaxsaas.vercel.app/menu?table=1` | Points to frontend |
+| **QR Code Destination** | `https://restaurentsaas.vercel.app/menu?table=1` | Points to frontend |
 | **Menu API** | `https://resturant-saas.onrender.com/api/v1/customer/menu/items` | Backend endpoint |
 
 ### Development URLs (Local)
@@ -79,7 +79,7 @@ POST /api/v1/customer/orders               → Create order (public)
 
 1. **QR Code triggers**
    ```
-   Click/Scan → https://restromaxsaas.vercel.app/menu?table=1
+   Click/Scan → https://restaurentsaas.vercel.app/menu?table=1
    ```
 
 2. **Frontend Route matches**
@@ -142,7 +142,7 @@ POST /api/v1/customer/orders               → Create order (public)
 ## 🔐 Security Notes
 
 - ❌ Do NOT expose API directly: `https://resturant-saas.onrender.com/menu`
-- ✅ Always route through frontend first: `https://restromaxsaas.vercel.app/menu`
+- ✅ Always route through frontend first: `https://restaurentsaas.vercel.app/menu`
 - ✅ Backend `/v1/customer/*` routes are public (no auth required)
 - ✅ Backend `/v1/admin/*` routes are protected (require auth token)
 
@@ -152,7 +152,7 @@ POST /api/v1/customer/orders               → Create order (public)
 
 ### Test in Browser
 ```
-1. Open: https://restromaxsaas.vercel.app/menu?table=1
+1. Open: https://restaurentsaas.vercel.app/menu?table=1
 2. Should load customer menu for table 1
 3. Open DevTools → Network
 4. Should see GET request to /api/v1/customer/menu/items?table=1
@@ -177,7 +177,7 @@ POST /api/v1/customer/orders               → Create order (public)
 | 404 GET /menu on backend | QR points to backend | Update QR to point to Vercel frontend |
 | Menu doesn't load | Table not found in DB | Ensure table was created with correct table_number |
 | Blank menu | Restaurant has no menu items | Add menu items for the restaurant |
-| CORS error | Backend blocks Vercel domain | Add `https://restromaxsaas.vercel.app` to CORS origins |
+| CORS error | Backend blocks Vercel domain | Add `https://restaurentsaas.vercel.app` to CORS origins |
 | API returns 500 | Database connection issue | Check Supabase credentials in .env |
 
 ---
@@ -215,7 +215,7 @@ Customer scans QR
          ↓
     Does page load?
     ├─ NO  → Check QR URL in browser address bar
-    │       Should be: https://restromaxsaas.vercel.app/menu?table=X
+    │       Should be: https://restaurentsaas.vercel.app/menu?table=X
     │
     └─ YES → Does menu appear?
             ├─ NO  → Open DevTools
@@ -228,3 +228,4 @@ Customer scans QR
                     │
                     └─ YES → 🎉 Everything works!
 ```
+

@@ -4,7 +4,7 @@
 
 **Issue**: Scanning QR codes resulted in "404 Route not found: GET /menu"
 
-**Root Cause**: QR codes were pointing to the Render backend (`https://resturant-saas.onrender.com/menu`) instead of the Vercel frontend (`https://restromaxsaas.vercel.app/menu`)
+**Root Cause**: QR codes were pointing to the Render backend (`https://resturant-saas.onrender.com/menu`) instead of the Vercel frontend (`https://restaurentsaas.vercel.app/menu`)
 
 **Solution**: Updated QR code generation to use the correct frontend URL
 
@@ -19,7 +19,7 @@
                  │
                  ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│  QR CONTAINS: https://restromaxsaas.vercel.app/menu?table=1    │
+│  QR CONTAINS: https://restaurentsaas.vercel.app/menu?table=1    │
 │  ✅ Points to FRONTEND (Vercel), not backend                     │
 └────────────────┬────────────────────────────────────────────────┘
                  │
@@ -86,7 +86,7 @@
 ```javascript
 // Production URL (Vercel)
 const baseUrl = import.meta.env.PROD 
-  ? 'https://restromaxsaas.vercel.app'  // ✅ CORRECT - Frontend
+  ? 'https://restaurentsaas.vercel.app'  // ✅ CORRECT - Frontend
   : window.location.origin;
 
 const qrValue = `${baseUrl}/menu?table=${table.tableNumber}`;
@@ -114,7 +114,7 @@ router.get('/menu/items', async (req, res) => {
 ## ✅ Verification Checklist
 
 ### 1. **QR Code Points to Frontend**
-- [ ] QR code URL contains: `https://restromaxsaas.vercel.app/menu?table=1`
+- [ ] QR code URL contains: `https://restaurentsaas.vercel.app/menu?table=1`
 - [ ] NOT: `https://resturant-saas.onrender.com/menu` (❌ backend)
 - [ ] Test: Scan QR or manually visit URL in browser
 
@@ -160,7 +160,7 @@ console.log('API URL:', import.meta.env.VITE_API_BASE_URL);
 // Should be: https://resturant-saas.onrender.com/api
 
 // Check QR value
-const qrValue = 'https://restromaxsaas.vercel.app/menu?table=1';
+const qrValue = 'https://restaurentsaas.vercel.app/menu?table=1';
 console.log('QR Points To:', qrValue);
 
 // Check if table param exists
@@ -203,7 +203,7 @@ VITE_SUPABASE_ANON_KEY=sb_publishable_...
 const baseUrl = 'http://localhost:5173'  // Local frontend
 
 // Production  
-const baseUrl = 'https://restromaxsaas.vercel.app'  // Vercel frontend
+const baseUrl = 'https://restaurentsaas.vercel.app'  // Vercel frontend
 ```
 
 ---
@@ -211,7 +211,7 @@ const baseUrl = 'https://restromaxsaas.vercel.app'  // Vercel frontend
 ## 🚀 Deployment Checklist
 
 - [ ] **Frontend Deployed to Vercel**
-  - URL: `https://restromaxsaas.vercel.app`
+  - URL: `https://restaurentsaas.vercel.app`
   - Environment variables set in Vercel dashboard
   
 - [ ] **Backend Deployed to Render**
@@ -223,7 +223,7 @@ const baseUrl = 'https://restromaxsaas.vercel.app'  // Vercel frontend
   - New QRs contain correct Vercel frontend URL
 
 - [ ] **CORS Configured** on backend
-  - ✅ Backend allows requests from `https://restromaxsaas.vercel.app`
+  - ✅ Backend allows requests from `https://restaurentsaas.vercel.app`
   - Found in `backend/src/app.js` corsOptions
 
 - [ ] **Database Tables Exist**
@@ -237,9 +237,10 @@ const baseUrl = 'https://restromaxsaas.vercel.app'  // Vercel frontend
 
 | Component | Deployment | URL |
 |-----------|------------|-----|
-| **Frontend** | Vercel | `https://restromaxsaas.vercel.app` |
+| **Frontend** | Vercel | `https://restaurentsaas.vercel.app` |
 | **Backend API** | Render | `https://resturant-saas.onrender.com` |
 | **QR Destination** | → Frontend | `/menu?table=X` |
 | **API Calls** | → Backend | `/api/v1/customer/menu/items?table=X` |
 
 ✅ **The flow is now correctly set up!**
+

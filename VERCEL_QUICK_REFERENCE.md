@@ -34,9 +34,9 @@
 - Backend: `https://resturant-saas.onrender.com/api`
 
 ### After (Vercel + Render)
-- Frontend: `https://restromaxsaas.vercel.app`
+- Frontend: `https://restaurentsaas.vercel.app`
 - Backend: `https://resturant-saas.onrender.com/api`
-- QR Codes: Now point to `https://restromaxsaas.vercel.app/menu?table=X`
+- QR Codes: Now point to `https://restaurentsaas.vercel.app/menu?table=X`
 
 ---
 
@@ -59,7 +59,7 @@ For Vercel Dashboard, set:
 
 ```
 VITE_API_BASE_URL = https://resturant-saas.onrender.com/api
-VITE_FRONTEND_URL = https://restromaxsaas.vercel.app
+VITE_FRONTEND_URL = https://restaurentsaas.vercel.app
 VITE_CLOUDINARY_CLOUD_NAME = dof234wuj
 VITE_APP_NAME = Restaurant Management SaaS
 VITE_SUPABASE_URL = https://pzjjuuqwpbfbfosgblzv.supabase.co
@@ -132,12 +132,12 @@ VITE_SUPABASE_ANON_KEY = sb_publishable_h2HoLV5oiZpBIaMK4EQHiQ_UY6HjMZn
 
 1. ⚠️ **Backend**: Update CORS in `backend/src/app.js`
    ```javascript
-   origin: ['https://restromaxsaas.vercel.app', 'http://localhost:5173']
+   origin: ['https://restaurentsaas.vercel.app', 'http://localhost:5173']
    ```
 
 2. ⚠️ **QR Codes**: Update frontend URL in QR generation
    ```javascript
-   const baseUrl = 'https://restromaxsaas.vercel.app'; // Or from env var
+   const baseUrl = 'https://restaurentsaas.vercel.app'; // Or from env var
    ```
 
 3. ✅ **Deploy to Vercel**: Follow full guide at `VERCEL_MIGRATION_GUIDE.md`
@@ -164,3 +164,4 @@ npm run test:e2e     # Run E2E tests with Playwright
 ---
 
 **For detailed information, see: `VERCEL_MIGRATION_GUIDE.md`**
+
