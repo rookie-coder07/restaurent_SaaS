@@ -23,11 +23,17 @@ export default function Tables() {
   const [success, setSuccess] = useState(null);
   const [showQRModal, setShowQRModal] = useState(false);
   const [selectedTableForQR, setSelectedTableForQR] = useState(null);
+  const [showReservationForm, setShowReservationForm] = useState(false);
+  const [reservationTable, setReservationTable] = useState(null);
   const [formData, setFormData] = useState({
     tableNumber: '',
     seatCapacity: '',
     status: 'available',
     location: '',
+  });
+  const [reservationData, setReservationData] = useState({
+    reservedBy: '',
+    reservationTime: '',
   });
 
   const tables = tablesData?.tables || [];
@@ -132,6 +138,52 @@ export default function Tables() {
   const handleShowQRCode = (table) => {
     setSelectedTableForQR(table);
     setShowQRModal(true);
+  };
+
+  const handleOpenReservation = (table) => {
+    setReservationTable(table);
+    setReservationData({
+      reservedBy: table.reservedBy || '',
+      reservationTime: table.reservationTime
+        ? new Date(table.reservationTime).toISOString().slice(0, 16)
+        : '',
+    });
+    setShowReservationForm(true);
+  };
+
+  const handleReserveTable = async (e) => {
+    e.preventDefault();
+    if (!reservationTable) return;
+
+    try {
+      setSubmitting(true);
+      setError(null);
+      await tableAPI.reserveTable(reservationTable.id, {
+        reservedBy: reservationData.reservedBy,
+        reservationTime: new Date(reservationData.reservationTime).toISOString(),
+      });
+      setSuccess('Table reserved successfully');
+      setShowReservationForm(false);
+      setReservationTable(null);
+      await refetch();
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to reserve table');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleReleaseTable = async (tableId) => {
+    try {
+      setError(null);
+      await tableAPI.releaseTable(tableId);
+      setSuccess('Table released successfully');
+      await refetch();
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to release table');
+    }
   };
 
   const handleBulkExportQR = async () => {
@@ -244,6 +296,15 @@ export default function Tables() {
                 <p className="text-sm text-gray-600 mb-4">📍 {table.location}</p>
               )}
 
+              {table.reservedBy && (
+                <div className="mb-4 rounded-lg bg-amber-50 border border-amber-200 p-3 text-sm text-amber-900">
+                  <p className="font-semibold">Reserved for {table.reservedBy}</p>
+                  {table.reservationTime && (
+                    <p>{new Date(table.reservationTime).toLocaleString()}</p>
+                  )}
+                </div>
+              )}
+
               <div className="flex gap-2 mb-4">
                 <select
                   value={table.status}
@@ -265,6 +326,21 @@ export default function Tables() {
                   <QrCode className="w-4 h-4" />
                   QR Code
                 </button>
+                {table.status === 'reserved' ? (
+                  <button
+                    onClick={() => handleReleaseTable(table.id)}
+                    className="flex-1 p-2 hover:bg-amber-100 rounded-lg text-amber-700 transition flex items-center justify-center gap-2"
+                  >
+                    Release
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => handleOpenReservation(table)}
+                    className="flex-1 p-2 hover:bg-amber-100 rounded-lg text-amber-700 transition flex items-center justify-center gap-2"
+                  >
+                    Reserve
+                  </button>
+                )}
                 <button
                   onClick={() => handleEditTable(table)}
                   className="flex-1 p-2 hover:bg-blue-100 rounded-lg text-blue-600 transition flex items-center justify-center gap-2"
@@ -306,6 +382,69 @@ export default function Tables() {
             setSelectedTableForQR(null);
           }}
         />
+      )}
+
+      {showReservationForm && reservationTable && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg shadow-lg max-w-md w-full">
+            <div className="p-6 border-b border-gray-200 flex items-center justify-between">
+              <h2 className="text-xl font-bold text-gray-900">Reserve Table {reservationTable.tableNumber}</h2>
+              <button
+                onClick={() => {
+                  setShowReservationForm(false);
+                  setReservationTable(null);
+                }}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+
+            <form onSubmit={handleReserveTable} className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Reserved By *</label>
+                <input
+                  type="text"
+                  value={reservationData.reservedBy}
+                  onChange={(e) => setReservationData({ ...reservationData, reservedBy: e.target.value })}
+                  className="input w-full"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Reservation Time *</label>
+                <input
+                  type="datetime-local"
+                  value={reservationData.reservationTime}
+                  onChange={(e) => setReservationData({ ...reservationData, reservationTime: e.target.value })}
+                  className="input w-full"
+                  required
+                />
+              </div>
+
+              <div className="flex gap-4 pt-4 border-t border-gray-200">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowReservationForm(false);
+                    setReservationTable(null);
+                  }}
+                  className="flex-1 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 font-medium"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  className="flex-1 px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 disabled:bg-gray-400 font-medium"
+                >
+                  {submitting ? 'Saving...' : 'Reserve Table'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
 
       {/* Form Modal */}

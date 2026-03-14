@@ -2,7 +2,6 @@ import logger from '../utils/logger.js';
 
 const requiredEnvVars = [
   'NODE_ENV',
-  'PORT',
   'SUPABASE_URL',
   'SUPABASE_ANON_KEY',
   'JWT_SECRET',
@@ -11,6 +10,22 @@ const requiredEnvVars = [
   'CLOUDINARY_API_KEY',
   'CLOUDINARY_API_SECRET',
 ];
+
+const parseNumber = (value, fallback) => {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isNaN(parsed) ? fallback : parsed;
+};
+
+const parseCorsOrigins = (value) => {
+  if (!value) {
+    return ['http://localhost:5173'];
+  }
+
+  return value
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+};
 
 export const validateEnvironment = () => {
   const missing = requiredEnvVars.filter(
@@ -26,8 +41,8 @@ export const validateEnvironment = () => {
 };
 
 export const getConfig = () => ({
-  nodeEnv: process.env.NODE_ENV,
-  port: parseInt(process.env.PORT, 10) || 3000,
+  nodeEnv: process.env.NODE_ENV || 'development',
+  port: parseNumber(process.env.PORT || process.env.APP_PORT, 5000),
   supabase: {
     url: process.env.SUPABASE_URL,
     anonKey: process.env.SUPABASE_ANON_KEY,
@@ -42,10 +57,10 @@ export const getConfig = () => ({
     apiKey: process.env.CLOUDINARY_API_KEY,
     apiSecret: process.env.CLOUDINARY_API_SECRET,
   },
-  corsOrigin: process.env.CORS_ORIGIN || 'http://localhost:5173',
+  corsOrigins: parseCorsOrigins(process.env.CORS_ORIGIN),
   logLevel: process.env.LOG_LEVEL || 'info',
   logFile: process.env.LOG_FILE || 'logs/app.log',
-  rateLimitWindowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS, 10) || 900000,
-  rateLimitMaxRequests: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS, 10) || 100,
+  rateLimitWindowMs: parseNumber(process.env.RATE_LIMIT_WINDOW_MS, 900000),
+  rateLimitMaxRequests: parseNumber(process.env.RATE_LIMIT_MAX_REQUESTS, 100),
   apiVersion: process.env.API_VERSION || 'v1',
 });

@@ -11,7 +11,7 @@ export const generateTableQRCode = async (table) => {
     // Get frontend URL from environment variable (set in production)
     // Falls back to current domain in development
     const baseUrl = import.meta.env.VITE_FRONTEND_URL || window.location.origin;
-    const qrValue = `${baseUrl}/menu?table=${table.tableNumber}`;
+    const qrValue = `${baseUrl}/menu?table=${table.tableNumber}&tableId=${table.id}`;
     console.log('📱 Generating QR for table', table.tableNumber, 'URL:', qrValue);
     console.log('📍 QR pointing to:', baseUrl);
     console.log('📍 Using VITE_FRONTEND_URL:', import.meta.env.VITE_FRONTEND_URL || 'Not set');

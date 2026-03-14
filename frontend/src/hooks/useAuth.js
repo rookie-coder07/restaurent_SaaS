@@ -6,9 +6,25 @@ export const useAuth = () => {
   const navigate = useNavigate();
   const authStore = useAuthStore();
 
+  const normalizeUser = (restaurant, user, isStaff) => {
+    if (user) {
+      return user;
+    }
+
+    if (restaurant) {
+      return {
+        ...restaurant,
+        role: restaurant.role || (isStaff ? 'staff' : 'owner'),
+      };
+    }
+
+    return null;
+  };
+
   const login = async (email, password, isStaff = false) => {
     try {
       authStore.setLoading(true);
+      authStore.setError(null);
       const response = isStaff
         ? await authAPI.staffLogin(email, password)
         : await authAPI.login(email, password);
@@ -19,7 +35,7 @@ export const useAuth = () => {
       localStorage.setItem('refreshToken', refreshToken);
 
       authStore.setTokens(accessToken, refreshToken);
-      authStore.setUser(restaurant || user);
+      authStore.setUser(normalizeUser(restaurant, user, isStaff));
       authStore.setError(null);
 
       return true;
@@ -35,6 +51,7 @@ export const useAuth = () => {
   const register = async (data) => {
     try {
       authStore.setLoading(true);
+      authStore.setError(null);
       const response = await authAPI.register(data);
 
       const { accessToken, refreshToken, restaurant } = response.data.data;
@@ -43,7 +60,7 @@ export const useAuth = () => {
       localStorage.setItem('refreshToken', refreshToken);
 
       authStore.setTokens(accessToken, refreshToken);
-      authStore.setUser(restaurant);
+      authStore.setUser(normalizeUser(restaurant, null, false));
       authStore.setError(null);
 
       return true;

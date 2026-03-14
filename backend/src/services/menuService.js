@@ -2,6 +2,41 @@ import logger from '../utils/logger.js';
 import supabase from '../config/supabase.js';
 
 export class MenuService {
+  static transformCategory(category) {
+    if (!category) return null;
+
+    return {
+      id: category.id,
+      restaurantId: category.restaurant_id,
+      name: category.name,
+      description: category.description || '',
+      displayOrder: category.display_order || 0,
+      status: category.status || 'active',
+      createdAt: category.created_at,
+      updatedAt: category.updated_at,
+    };
+  }
+
+  static transformMenuItem(item) {
+    if (!item) return null;
+
+    return {
+      id: item.id,
+      restaurantId: item.restaurant_id,
+      categoryId: item.category_id,
+      name: item.name,
+      description: item.description || '',
+      price: Number(item.price || 0),
+      cloudinaryImageUrl: item.image_url || '',
+      preparationTime: item.preparation_time || 15,
+      tags: item.tags ? item.tags.split(',').map((tag) => tag.trim()).filter(Boolean) : [],
+      isAvailable: item.status === 'active',
+      status: item.status || 'active',
+      createdAt: item.created_at,
+      updatedAt: item.updated_at,
+    };
+  }
+
   // ============ CATEGORIES ============
   
   static async createCategory(restaurantId, categoryData) {
@@ -20,7 +55,7 @@ export class MenuService {
       if (error) throw error;
 
       logger.info(`✅ Category created: ${category.id}`);
-      return category;
+      return this.transformCategory(category);
     } catch (error) {
       logger.error('❌ Create category error:', error);
       throw error;
@@ -38,7 +73,7 @@ export class MenuService {
 
       if (error) throw error;
 
-      return categories || [];
+      return (categories || []).map((category) => this.transformCategory(category));
     } catch (error) {
       logger.error('❌ Get categories error:', error);
       throw error;
@@ -63,7 +98,7 @@ export class MenuService {
       if (error || !category) throw error || new Error('Category not found');
 
       logger.info(`✅ Category updated: ${categoryId}`);
-      return category;
+      return this.transformCategory(category);
     } catch (error) {
       logger.error('❌ Update category error:', error);
       throw error;
@@ -104,7 +139,7 @@ export class MenuService {
 
   // ============ MENU ITEMS ============
   
-  static async createMenuItem(restaurantId, itemData) {
+  static async createMenuItem(restaurantId, itemData, imageData = null) {
     try {
       const { data: menuItem, error } = await supabase
         .from('menu_items')
@@ -114,6 +149,7 @@ export class MenuService {
           name: itemData.name,
           description: itemData.description,
           price: itemData.price,
+          image_url: imageData?.url || null,
           preparation_time: itemData.preparationTime,
           tags: itemData.tags ? itemData.tags.join(',') : '',
         }])
@@ -123,10 +159,7 @@ export class MenuService {
       if (error) throw error;
 
       logger.info(`✅ Menu item created: ${menuItem.id}`);
-      return {
-        ...menuItem,
-        tags: menuItem.tags ? menuItem.tags.split(',') : [],
-      };
+      return this.transformMenuItem(menuItem);
     } catch (error) {
       logger.error('❌ Create menu item error:', error);
       throw error;
@@ -149,10 +182,7 @@ export class MenuService {
 
       if (error) throw error;
 
-      return (items || []).map(item => ({
-        ...item,
-        tags: item.tags ? item.tags.split(',') : [],
-      }));
+      return (items || []).map((item) => this.transformMenuItem(item));
     } catch (error) {
       logger.error('❌ Get menu items error:', error);
       throw error;
@@ -170,28 +200,31 @@ export class MenuService {
 
       if (error || !item) throw error || new Error('Menu item not found');
 
-      return {
-        ...item,
-        tags: item.tags ? item.tags.split(',') : [],
-      };
+      return this.transformMenuItem(item);
     } catch (error) {
       logger.error('❌ Get menu item error:', error);
       throw error;
     }
   }
 
-  static async updateMenuItem(restaurantId, itemId, updateData) {
+  static async updateMenuItem(restaurantId, itemId, updateData, imageData = null) {
     try {
+      const payload = {
+        name: updateData.name,
+        description: updateData.description,
+        price: updateData.price,
+        preparation_time: updateData.preparationTime,
+        tags: updateData.tags ? updateData.tags.join(',') : '',
+        updated_at: new Date(),
+      };
+
+      if (imageData?.url) {
+        payload.image_url = imageData.url;
+      }
+
       const { data: item, error } = await supabase
         .from('menu_items')
-        .update({
-          name: updateData.name,
-          description: updateData.description,
-          price: updateData.price,
-          preparation_time: updateData.preparationTime,
-          tags: updateData.tags ? updateData.tags.join(',') : '',
-          updated_at: new Date(),
-        })
+        .update(payload)
         .eq('id', itemId)
         .eq('restaurant_id', restaurantId)
         .select()
@@ -200,10 +233,7 @@ export class MenuService {
       if (error || !item) throw error || new Error('Menu item not found');
 
       logger.info(`✅ Menu item updated: ${itemId}`);
-      return {
-        ...item,
-        tags: item.tags ? item.tags.split(',') : [],
-      };
+      return this.transformMenuItem(item);
     } catch (error) {
       logger.error('❌ Update menu item error:', error);
       throw error;
@@ -228,7 +258,7 @@ export class MenuService {
     }
   }
 
-  static async toggleMenuItemStatus(restaurantId, itemId) {
+  static async toggleMenuItemStatus(restaurantId, itemId, isAvailable) {
     try {
       const { data: item } = await supabase
         .from('menu_items')
@@ -237,7 +267,12 @@ export class MenuService {
         .eq('restaurant_id', restaurantId)
         .single();
 
-      const newStatus = item?.status === 'active' ? 'inactive' : 'active';
+      const newStatus =
+        typeof isAvailable === 'boolean'
+          ? (isAvailable ? 'active' : 'inactive')
+          : item?.status === 'active'
+            ? 'inactive'
+            : 'active';
 
       const { data: updated, error } = await supabase
         .from('menu_items')
@@ -250,10 +285,7 @@ export class MenuService {
       if (error) throw error;
 
       logger.info(`✅ Menu item status toggled: ${itemId} → ${newStatus}`);
-      return {
-        ...updated,
-        tags: updated.tags ? updated.tags.split(',') : [],
-      };
+      return this.transformMenuItem(updated);
     } catch (error) {
       logger.error('❌ Toggle status error:', error);
       throw error;
@@ -272,10 +304,7 @@ export class MenuService {
 
       if (error) throw error;
 
-      return (items || []).map(item => ({
-        ...item,
-        tags: item.tags ? item.tags.split(',') : [],
-      }));
+      return (items || []).map((item) => this.transformMenuItem(item));
     } catch (error) {
       logger.error('❌ Search menu items error:', error);
       throw error;

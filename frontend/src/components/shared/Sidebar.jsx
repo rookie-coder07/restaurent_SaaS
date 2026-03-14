@@ -37,7 +37,7 @@ const menuItems = [
     icon: ChefHat,
     label: 'Kitchen',
     href: '/kitchen',
-    roles: ['kitchen_staff', 'manager'],
+    roles: ['kitchen_staff', 'manager', 'owner'],
   },
   {
     icon: TableProperties,

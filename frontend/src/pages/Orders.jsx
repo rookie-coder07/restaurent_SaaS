@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useApi } from '../hooks/useApi';
 import { orderAPI, menuAPI, tableAPI } from '../services/apiEndpoints';
-import { Loader, Filter, Download, Plus, X, AlertCircle, ChevronDown } from 'lucide-react';
+import { Loader, Download, Plus, X, AlertCircle } from 'lucide-react';
 import { formatCurrency, formatDate } from '../utils/formatters';
 
 const STATUS_COLORS = {
@@ -35,7 +35,7 @@ export default function Orders() {
   const [selectedItems, setSelectedItems] = useState([]);
   const [selectedTable, setSelectedTable] = useState('');
 
-  const orders = ordersData?.orders || [];
+  const orders = ordersData?.items || [];
   const items = itemsData?.items || [];
   const tables = tablesData?.tables || [];
 
@@ -44,10 +44,10 @@ export default function Orders() {
     : orders.filter(order => order.status === filterStatus);
 
   const handleAddItem = (item) => {
-    const existing = selectedItems.find(i => i._id === item._id);
+    const existing = selectedItems.find(i => i.id === item.id);
     if (existing) {
       setSelectedItems(selectedItems.map(i =>
-        i._id === item._id ? { ...i, quantity: i.quantity + 1 } : i
+        i.id === item.id ? { ...i, quantity: i.quantity + 1 } : i
       ));
     } else {
       setSelectedItems([...selectedItems, { ...item, quantity: 1 }]);
@@ -55,7 +55,7 @@ export default function Orders() {
   };
 
   const handleRemoveItem = (itemId) => {
-    setSelectedItems(selectedItems.filter(i => i._id !== itemId));
+    setSelectedItems(selectedItems.filter(i => i.id !== itemId));
   };
 
   const handleQuantityChange = (itemId, quantity) => {
@@ -63,7 +63,7 @@ export default function Orders() {
       handleRemoveItem(itemId);
     } else {
       setSelectedItems(selectedItems.map(i =>
-        i._id === itemId ? { ...i, quantity } : i
+        i.id === itemId ? { ...i, quantity } : i
       ));
     }
   };
@@ -89,12 +89,12 @@ export default function Orders() {
       const orderData = {
         tableId: selectedTable,
         items: selectedItems.map(item => ({
-          itemId: item._id,
+          menuItemId: item.id,
           quantity: item.quantity,
-          name: item.name,
-          price: item.price,
+          unitPrice: item.price,
         })),
-        specialRequests: (e.target.specialRequests?.value || '').trim(),
+        notes: (e.target.specialRequests?.value || '').trim(),
+        totalAmount: selectedItems.reduce((sum, item) => sum + (item.price * item.quantity), 0),
       };
 
       await orderAPI.createOrder(orderData);
@@ -130,7 +130,7 @@ export default function Orders() {
     );
   }
 
-  const totalRevenue = filteredOrders.reduce((sum, order) => sum + (order.total || 0), 0);
+  const totalRevenue = filteredOrders.reduce((sum, order) => sum + (order.totalAmount || order.total || 0), 0);
 
   return (
     <div className="space-y-6">
@@ -225,15 +225,15 @@ export default function Orders() {
           </thead>
           <tbody>
             {filteredOrders.map((order) => (
-              <tr key={order._id} className="border-b border-gray-100 hover:bg-gray-50">
-                <td className="px-6 py-4 font-mono text-blue-600 text-xs">#{order._id?.slice(-8)}</td>
+              <tr key={order.id} className="border-b border-gray-100 hover:bg-gray-50">
+                <td className="px-6 py-4 font-mono text-blue-600 text-xs">#{order.id?.slice(-8)}</td>
                 <td className="px-6 py-4 font-semibold text-gray-900">{order.tableNumber || 'N/A'}</td>
                 <td className="px-6 py-4 text-gray-600">{order.items?.length || 0} items</td>
-                <td className="px-6 py-4 font-semibold text-gray-900">{formatCurrency(order.total || 0)}</td>
+                <td className="px-6 py-4 font-semibold text-gray-900">{formatCurrency(order.totalAmount || order.total || 0)}</td>
                 <td className="px-6 py-4">
                   <select
                     value={order.status}
-                    onChange={(e) => handleStatusUpdate(order._id, e.target.value)}
+                    onChange={(e) => handleStatusUpdate(order.id, e.target.value)}
                     className={`px-3 py-1 rounded-full text-xs font-semibold cursor-pointer border-0 ${STATUS_COLORS[order.status]}`}
                   >
                     <option value="pending">Pending</option>
@@ -300,8 +300,8 @@ export default function Orders() {
                 >
                   <option value="">Choose a table...</option>
                   {tables.map(table => (
-                    <option key={table._id} value={table._id}>
-                      Table {table.tableNumber} (Capacity: {table.capacity})
+                    <option key={table.id} value={table.id}>
+                      Table {table.tableNumber} (Capacity: {table.seatCapacity})
                     </option>
                   ))}
                 </select>
@@ -312,7 +312,7 @@ export default function Orders() {
                 <label className="block text-sm font-medium text-gray-700 mb-2">Add Items *</label>
                 <div className="border border-gray-200 rounded-lg p-3 max-h-40 overflow-y-auto space-y-2">
                   {items.map(item => (
-                    <div key={item._id} className="flex items-center justify-between p-2 hover:bg-gray-50 rounded">
+                    <div key={item.id} className="flex items-center justify-between p-2 hover:bg-gray-50 rounded">
                       <div className="flex-1">
                         <p className="font-medium text-sm text-gray-900">{item.name}</p>
                         <p className="text-xs text-gray-600">{formatCurrency(item.price)}</p>
@@ -335,7 +335,7 @@ export default function Orders() {
                   <label className="block text-sm font-medium text-gray-700 mb-2">Selected Items</label>
                   <div className="space-y-2 border border-gray-200 rounded-lg p-3">
                     {selectedItems.map(item => (
-                      <div key={item._id} className="flex items-center justify-between p-2 bg-blue-50 rounded">
+                      <div key={item.id} className="flex items-center justify-between p-2 bg-blue-50 rounded">
                         <div>
                           <p className="text-sm font-medium text-gray-900">{item.name}</p>
                           <p className="text-xs text-gray-600">{formatCurrency(item.price)} each</p>
@@ -345,12 +345,12 @@ export default function Orders() {
                             type="number"
                             min="1"
                             value={item.quantity}
-                            onChange={(e) => handleQuantityChange(item._id, Number(e.target.value))}
+                            onChange={(e) => handleQuantityChange(item.id, Number(e.target.value))}
                             className="w-12 px-2 py-1 border border-gray-300 rounded text-center text-sm"
                           />
                           <button
                             type="button"
-                            onClick={() => handleRemoveItem(item._id)}
+                            onClick={() => handleRemoveItem(item.id)}
                             className="text-red-600 hover:text-red-800"
                           >
                             <X className="w-4 h-4" />
@@ -421,7 +421,7 @@ export default function Orders() {
             <div className="p-6 space-y-4">
               <div>
                 <p className="text-xs text-gray-500 uppercase tracking-wide">Order ID</p>
-                <p className="font-mono text-sm text-gray-900">#{selectedOrder._id?.slice(-8)}</p>
+                <p className="font-mono text-sm text-gray-900">#{selectedOrder.id?.slice(-8)}</p>
               </div>
 
               <div>
@@ -437,7 +437,7 @@ export default function Orders() {
                   {selectedOrder.items?.map((item, idx) => (
                     <div key={idx} className="flex justify-between text-sm">
                       <span>{item.quantity}x {item.name}</span>
-                      <span className="text-gray-600">{formatCurrency(item.price * item.quantity)}</span>
+                      <span className="text-gray-600">{formatCurrency((item.unitPrice || item.price) * item.quantity)}</span>
                     </div>
                   ))}
                 </div>
@@ -446,7 +446,7 @@ export default function Orders() {
               <div className="border-t border-gray-200 pt-4">
                 <div className="flex justify-between font-semibold">
                   <span>Total</span>
-                  <span>{formatCurrency(selectedOrder.total || 0)}</span>
+                  <span>{formatCurrency(selectedOrder.totalAmount || selectedOrder.total || 0)}</span>
                 </div>
               </div>
 

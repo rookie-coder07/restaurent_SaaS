@@ -35,8 +35,8 @@ const corsOptions = {
       // Production
       'https://restaurentsaas.vercel.app',  // Frontend on Vercel (correct domain)
       'https://resturant-saas.onrender.com',  // Backend on Render
-      // Environment variable (for flexibility)
-      config.corsOrigin
+      // Environment variables (for flexibility)
+      ...config.corsOrigins
     ];
     
     // Allow requests with no origin (like mobile apps or curl requests)
@@ -53,6 +53,10 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
+
+app.get('/health', (req, res) => {
+  res.status(200).send('Server running');
+});
 
 // Initialize Cloudinary
 initCloudinary();
@@ -77,7 +81,7 @@ app.use((req, res, next) => {
 
 // Global rate limiter (except health check)
 app.use((req, res, next) => {
-  if (req.path === '/health') {
+  if (req.path === '/health' || req.path === '/api/health') {
     return next();
   }
   apiLimiter(req, res, next);

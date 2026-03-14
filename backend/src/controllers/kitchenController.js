@@ -5,9 +5,9 @@ import OrderService from '../services/orderService.js';
 
 // Kitchen dashboard - get active orders
 export const getKitchenOrders = asyncHandler(async (req, res) => {
-  // Get pending and preparing orders
+  // Include ready orders so the kitchen can complete the full workflow.
   const orders = await OrderService.getKitchenOrders(req.restaurantId, {
-    statuses: ['pending', 'preparing'],
+    statuses: ['pending', 'preparing', 'ready'],
   });
 
   return sendSuccess(res, 200, orders, 'Kitchen orders fetched successfully');

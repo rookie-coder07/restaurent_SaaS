@@ -5,19 +5,18 @@ import QRCode from 'qrcode';
 export default function QRCodeModal({ table, restaurantName, onClose }) {
   const canvasRef = useRef(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
   useEffect(() => {
-    if (!canvasRef.current || !table) return;
+    if (!table || !canvasRef.current) return;
 
     const generateQR = async () => {
+      setLoading(true);
+      setError('');
+
       try {
-        // Get frontend URL from environment variable (set in production)
-        // Falls back to current domain in development
         const baseUrl = import.meta.env.VITE_FRONTEND_URL || window.location.origin;
-        const qrValue = `${baseUrl}/menu?table=${table.tableNumber}`;
-        console.log('📱 Generating QR Code URL:', qrValue, '(Table:', table.tableNumber, ')');
-        console.log('📍 QR pointing to:', baseUrl);
-        console.log('📍 Using VITE_FRONTEND_URL:', import.meta.env.VITE_FRONTEND_URL || 'Not set');
+        const qrValue = `${baseUrl}/menu?table=${table.tableNumber}&tableId=${table.id}`;
 
         await QRCode.toCanvas(canvasRef.current, qrValue, {
           errorCorrectionLevel: 'H',
@@ -34,6 +33,7 @@ export default function QRCodeModal({ table, restaurantName, onClose }) {
         setLoading(false);
       } catch (err) {
         console.error('Error generating QR code:', err);
+        setError('Failed to generate QR code');
         setLoading(false);
       }
     };
@@ -42,7 +42,7 @@ export default function QRCodeModal({ table, restaurantName, onClose }) {
   }, [table]);
 
   const handleDownload = () => {
-    if (!canvasRef.current) return;
+    if (!canvasRef.current || loading || error) return;
 
     const link = document.createElement('a');
     link.href = canvasRef.current.toDataURL('image/png');
@@ -53,9 +53,11 @@ export default function QRCodeModal({ table, restaurantName, onClose }) {
   };
 
   const handlePrint = () => {
-    if (!canvasRef.current) return;
+    if (!canvasRef.current || loading || error) return;
 
     const printWindow = window.open('', '_blank');
+    if (!printWindow) return;
+
     const qrImage = canvasRef.current.toDataURL('image/png');
 
     printWindow.document.write(`
@@ -120,11 +122,12 @@ export default function QRCodeModal({ table, restaurantName, onClose }) {
     }, 250);
   };
 
+  const qrLink = `${window.location.origin}/menu?table=${table.tableNumber}&tableId=${table.id}`;
+
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-lg shadow-lg max-w-md w-full overflow-hidden">
-        {/* Header */}
-        <div className="p-6 border-b border-gray-200 flex items-center justify-between">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="w-full max-w-md overflow-hidden rounded-lg bg-white shadow-lg">
+        <div className="flex items-center justify-between border-b border-gray-200 p-6">
           <h2 className="text-xl font-bold text-gray-900">
             Table {table.tableNumber} - QR Code
           </h2>
@@ -132,73 +135,75 @@ export default function QRCodeModal({ table, restaurantName, onClose }) {
             onClick={onClose}
             className="text-gray-500 hover:text-gray-700"
           >
-            <X className="w-6 h-6" />
+            <X className="h-6 w-6" />
           </button>
         </div>
 
-        {/* Content */}
-        <div className="p-6 flex flex-col items-center">
-          {loading ? (
-            <div className="flex items-center justify-center h-64">
-              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-            </div>
-          ) : (
-            <>
-              <div className="mb-6 p-4 bg-gray-50 rounded-lg">
-                <canvas
-                  ref={canvasRef}
-                  className="w-full h-auto"
-                />
-              </div>
+        <div className="flex flex-col items-center p-6">
+          <div className="relative mb-6 rounded-lg bg-gray-50 p-4">
+            <canvas
+              ref={canvasRef}
+              className={error ? 'hidden' : 'h-auto w-full'}
+            />
 
-              {/* Table Info */}
-              <div className="w-full text-center mb-6 p-4 bg-blue-50 rounded-lg">
+            {loading && (
+              <div className="absolute inset-0 flex items-center justify-center bg-white/80">
+                <div className="h-12 w-12 animate-spin rounded-full border-b-2 border-blue-600"></div>
+              </div>
+            )}
+          </div>
+
+          {error && (
+            <div className="mb-6 w-full rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+              {error}
+            </div>
+          )}
+
+          {!loading && !error && (
+            <>
+              <div className="mb-6 w-full rounded-lg bg-blue-50 p-4 text-center">
                 <p className="text-sm text-gray-600">
                   <strong>Seat Capacity:</strong> {table.seatCapacity} persons
                 </p>
                 {table.location && (
-                  <p className="text-sm text-gray-600 mt-2">
+                  <p className="mt-2 text-sm text-gray-600">
                     <strong>Location:</strong> {table.location}
                   </p>
                 )}
-                <p className="text-xs text-gray-500 mt-3">
-                  Link: <code className="bg-white px-2 py-1 rounded text-xs">
-                    {window.location.origin}/menu?table={table.tableNumber}
-                  </code>
+                <p className="mt-3 text-xs text-gray-500">
+                  Link: <code className="rounded bg-white px-2 py-1 text-xs">{qrLink}</code>
                 </p>
               </div>
 
-              {/* Instructions */}
-              <div className="w-full text-center mb-6 p-4 bg-amber-50 border border-amber-200 rounded-lg">
+              <div className="mb-6 w-full rounded-lg border border-amber-200 bg-amber-50 p-4 text-center">
                 <p className="text-sm text-amber-800">
-                  📲 Customers scan this QR code to access the menu and place orders
+                  Customers can scan this QR code to access the menu and place orders.
                 </p>
               </div>
             </>
           )}
         </div>
 
-        {/* Footer */}
-        <div className="p-6 border-t border-gray-200 flex gap-3">
+        <div className="flex gap-3 border-t border-gray-200 p-6">
           <button
             onClick={handleDownload}
-            disabled={loading}
-            className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 font-medium transition"
+            disabled={loading || !!error}
+            className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 font-medium text-white transition hover:bg-blue-700 disabled:bg-gray-400"
           >
-            <Download className="w-4 h-4" />
+            <Download className="h-4 w-4" />
             Download
           </button>
           <button
             onClick={handlePrint}
-            disabled={loading}
-            className="flex-1 flex items-center justify-center gap-2 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 disabled:bg-gray-100 font-medium transition"
+            disabled={loading || !!error}
+            className="flex flex-1 items-center justify-center gap-2 rounded-lg border border-gray-300 px-4 py-2 font-medium text-gray-700 transition hover:bg-gray-50 disabled:bg-gray-100"
           >
-            <Printer className="w-4 h-4" />
+            <Printer className="h-4 w-4" />
             Print
           </button>
           <button
             onClick={onClose}
-            className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 font-medium transition"
+            className="flex-1 rounded-lg border border-gray-300 px-4 py-2 font-medium text-gray-700 transition hover:bg-gray-50"
           >
             Close
           </button>

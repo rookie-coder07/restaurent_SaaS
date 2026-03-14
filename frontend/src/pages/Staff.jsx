@@ -6,13 +6,13 @@ import { Plus, Trash2, X, AlertCircle, Loader, Shield, User, ChefHat } from 'luc
 const ROLE_COLORS = {
   manager: 'bg-purple-100 text-purple-800',
   staff: 'bg-blue-100 text-blue-800',
-  kitchen: 'bg-orange-100 text-orange-800',
+  kitchen_staff: 'bg-orange-100 text-orange-800',
 };
 
 const ROLE_ICONS = {
   manager: Shield,
   staff: User,
-  kitchen: ChefHat,
+  kitchen_staff: ChefHat,
 };
 
 export default function StaffManagement() {
@@ -94,7 +94,7 @@ export default function StaffManagement() {
 
   const managerCount = staff.filter(s => s.role === 'manager').length;
   const staffCount = staff.filter(s => s.role === 'staff').length;
-  const kitchenCount = staff.filter(s => s.role === 'kitchen').length;
+  const kitchenCount = staff.filter(s => s.role === 'kitchen_staff').length;
 
   return (
     <div className="space-y-6">
@@ -265,7 +265,7 @@ export default function StaffManagement() {
                   required
                 >
                   <option value="staff">Staff</option>
-                  <option value="kitchen">Kitchen Staff</option>
+                  <option value="kitchen_staff">Kitchen Staff</option>
                   <option value="manager">Manager</option>
                 </select>
               </div>

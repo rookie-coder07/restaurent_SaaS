@@ -9,6 +9,7 @@ export default function CustomerMenu() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const tableNumber = searchParams.get('table');
+  const tableId = searchParams.get('tableId');
 
   const [cart, setCart] = useState([]);
   const [showCart, setShowCart] = useState(false);
@@ -18,9 +19,11 @@ export default function CustomerMenu() {
 
   console.log('🔍 CustomerMenu loaded - Query params:', Object.fromEntries(searchParams));
   console.log('📊 Table number from QR:', tableNumber);
+  console.log('🆔 Table id from QR:', tableId);
 
   const { data: menuItems = [], loading, error: apiError } = useApi(
-    () => customerAPI.getPublicMenu(tableNumber)
+    () => customerAPI.getPublicMenu({ tableNumber, tableId }),
+    [tableNumber, tableId]
   );
 
   // Log API errors
@@ -28,7 +31,7 @@ export default function CustomerMenu() {
     console.error('❌ API Error fetching menu:', apiError);
   }
 
-  if (!tableNumber) {
+  if (!tableNumber && !tableId) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-6">
         <div className="text-center">
@@ -80,7 +83,8 @@ export default function CustomerMenu() {
 
     try {
       const orderData = {
-        tableNumber: parseInt(tableNumber),
+        ...(tableId ? { tableId } : {}),
+        ...(tableNumber ? { tableNumber: parseInt(tableNumber, 10) } : {}),
         items: cart.map(item => ({
           menuItemId: item.id,
           quantity: item.quantity,
@@ -94,6 +98,7 @@ export default function CustomerMenu() {
       console.log('📤 Submitting order:', orderData);
 
       const response = await customerAPI.placeOrder(orderData);
+      const createdOrder = response.data?.data;
 
       console.log('✅ Order placed successfully:', response);
 
@@ -103,7 +108,7 @@ export default function CustomerMenu() {
       setShowCart(false);
 
       setTimeout(() => {
-        navigate(`/order-status?order=${response.id}&table=${tableNumber}`);
+        navigate(`/order-status?order=${createdOrder?.id}&table=${tableNumber || ''}`);
       }, 3000);
     } catch (error) {
       console.error('❌ Error placing order:', error);
@@ -128,7 +133,7 @@ export default function CustomerMenu() {
   }
 
   if (apiError) {
-    const apiUrl = `${import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000/api'}/v1/customer/menu/items?table=${tableNumber}`;
+    const apiUrl = `${import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000/api'}/v1/customer/menu/items?table=${tableNumber || ''}${tableId ? `&tableId=${tableId}` : ''}`;
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-6">
         <div className="text-center max-w-md">
@@ -182,7 +187,7 @@ export default function CustomerMenu() {
         <div className="max-w-4xl mx-auto px-6 py-4 flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold text-gray-900">Menu</h1>
-            <p className="text-sm text-gray-600">Table {tableNumber}</p>
+            <p className="text-sm text-gray-600">Table {tableNumber || 'Guest'}</p>
           </div>
           <button
             onClick={() => setShowCart(!showCart)}
@@ -273,7 +278,7 @@ export default function CustomerMenu() {
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {menuItems?.items?.map(item => (
+            {menuItems?.map(item => (
               <div key={item.id} className="bg-white rounded-lg shadow-soft hover:shadow-md-soft transition overflow-hidden">
                 {item.cloudinaryImageUrl && (
                   <img
@@ -301,6 +306,11 @@ export default function CustomerMenu() {
                 </div>
               </div>
             ))}
+            {menuItems?.length === 0 && (
+              <div className="col-span-full text-center py-12">
+                <p className="text-gray-600">No menu items are available for this table yet.</p>
+              </div>
+            )}
           </div>
         )}
       </div>

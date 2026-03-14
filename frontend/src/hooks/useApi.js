@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 
-export const useApi = (apiFunction) => {
+export const useApi = (apiFunction, deps = []) => {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -15,29 +15,13 @@ export const useApi = (apiFunction) => {
       try {
         setLoading(true);
         setError(null);
-        console.log('🌐 API request:', apiFunctionRef.current.toString());
-        
-        // Add timeout to prevent hanging indefinitely
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
-        
-        let response;
-        try {
-          response = await apiFunctionRef.current(...args, { signal: controller.signal });
-        } finally {
-          clearTimeout(timeoutId);
-        }
-        
+
+        const response = await apiFunctionRef.current(...args);
         const result = response.data?.data || response;
-        console.log('✅ API response:', result);
         setData(result);
         return result;
       } catch (err) {
-        const errorMessage = 
-          err.name === 'AbortError' 
-            ? 'API request timeout - server may be offline'
-            : err.response?.data?.message || err.message;
-        console.error('❌ API error:', errorMessage);
+        const errorMessage = err.response?.data?.message || err.message;
         setError(errorMessage);
         throw err;
       } finally {
@@ -49,28 +33,26 @@ export const useApi = (apiFunction) => {
 
   useEffect(() => {
     if (apiFunctionRef.current) {
-      console.log('🚀 useApi: Initial load triggered');
       execute().catch(() => {
-        // Silently catch errors - error state is already set
+        // Error state is already captured in the hook.
       });
     }
-  }, [execute]);
+  }, [execute, ...deps]);
 
-  // Refetch function that properly refreshes data
   const refetch = useCallback(async () => {
     try {
-      console.log('🔄 useApi: Refetch triggered');
+      setLoading(true);
       setError(null);
       const response = await apiFunctionRef.current();
       const result = response.data?.data || response;
-      console.log('📊 Refetch result:', result);
       setData(result);
       return result;
     } catch (err) {
       const errorMessage = err.response?.data?.message || err.message;
-      console.error('❌ Refetch error:', errorMessage);
       setError(errorMessage);
       throw err;
+    } finally {
+      setLoading(false);
     }
   }, []);
 

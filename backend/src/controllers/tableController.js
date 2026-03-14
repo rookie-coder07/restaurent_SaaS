@@ -51,6 +51,20 @@ export const updateTable = asyncHandler(async (req, res) => {
   return sendSuccess(res, 200, table, 'Table updated successfully');
 });
 
+export const reserveTable = asyncHandler(async (req, res) => {
+  const { tableId } = req.params;
+  const table = await TableService.reserveTable(req.user.restaurantId, tableId, req.body);
+
+  return sendSuccess(res, 200, table, 'Table reserved successfully');
+});
+
+export const releaseTable = asyncHandler(async (req, res) => {
+  const { tableId } = req.params;
+  const table = await TableService.releaseTable(req.user.restaurantId, tableId);
+
+  return sendSuccess(res, 200, table, 'Table released successfully');
+});
+
 export const deleteTable = asyncHandler(async (req, res) => {
   const { tableId } = req.params;
   logger.info(`📨 DELETE /tables/${tableId} - Deleting table`);

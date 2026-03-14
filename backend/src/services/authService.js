@@ -22,10 +22,12 @@ export class AuthService {
   }
 
   // Generate refresh token
-  static generateRefreshToken(userId, restaurantId) {
+  static generateRefreshToken(userId, restaurantId, email, role) {
     const payload = {
       userId,
       restaurantId,
+      email,
+      role,
       type: 'refresh',
     };
 
@@ -98,17 +100,23 @@ export class AuthService {
         'owner'
       );
 
-      const refreshToken = this.generateRefreshToken(restaurant.id, restaurant.id);
+      const restaurantPayload = {
+        id: restaurant.id,
+        name: restaurant.name,
+        email: restaurant.email,
+        city: restaurant.city,
+        role: 'owner',
+      };
 
       return {
-        restaurant: {
-          id: restaurant.id,
-          name: restaurant.name,
-          email: restaurant.email,
-          city: restaurant.city,
-        },
+        restaurant: restaurantPayload,
         accessToken,
-        refreshToken,
+        refreshToken: this.generateRefreshToken(
+          restaurant.id,
+          restaurant.id,
+          restaurant.email,
+          'owner'
+        ),
       };
     } catch (error) {
       logger.error('Registration error:', error);
@@ -144,7 +152,12 @@ export class AuthService {
         'owner'
       );
 
-      const refreshToken = this.generateRefreshToken(restaurant.id, restaurant.id);
+      const refreshToken = this.generateRefreshToken(
+        restaurant.id,
+        restaurant.id,
+        restaurant.email,
+        'owner'
+      );
 
       return {
         restaurant: {
@@ -152,6 +165,7 @@ export class AuthService {
           name: restaurant.name,
           email: restaurant.email,
           city: restaurant.city,
+          role: 'owner',
         },
         accessToken,
         refreshToken,
@@ -191,7 +205,12 @@ export class AuthService {
         user.role
       );
 
-      const refreshToken = this.generateRefreshToken(user.id, user.restaurant_id);
+      const refreshToken = this.generateRefreshToken(
+        user.id,
+        user.restaurant_id,
+        user.email,
+        user.role
+      );
 
       logger.info(`✅ Staff login successful: ${user.id}`);
 
@@ -226,8 +245,8 @@ export class AuthService {
       const accessToken = this.generateAccessToken(
         decoded.userId,
         decoded.restaurantId,
-        'user@restaurant',
-        'user'
+        decoded.email || 'user@restaurant',
+        decoded.role || 'owner'
       );
 
       return { accessToken, refreshToken };

@@ -15,6 +15,7 @@ const startServer = async () => {
     logger.info('✅ All required environment variables are set');
 
     const config = getConfig();
+    const PORT = process.env.PORT || process.env.APP_PORT || config.port || 5000;
 
     // Connect to Supabase
     logger.info('📦 Connecting to Supabase PostgreSQL...');
@@ -41,24 +42,25 @@ const startServer = async () => {
       });
 
     // Start server immediately
-    const server = app.listen(config.port, () => {
+    const server = app.listen(PORT, () => {
       logger.info('');
       logger.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
       logger.info('✅ BACKEND HTTP SERVER STARTED');
       logger.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
       logger.info('');
       logger.info(`🌍 Environment: ${config.nodeEnv || 'development'}`);
-      logger.info(`🎯 Server URL: http://localhost:${config.port}`);
-      logger.info(`📊 API Base: http://localhost:${config.port}/api`);
+      logger.info(`🎯 Server URL: http://localhost:${PORT}`);
+      logger.info(`📊 API Base: http://localhost:${PORT}/api`);
       logger.info(`📝 API Version: ${config.apiVersion || 'v1'}`);
       logger.info('');
       logger.info('📌 Key Endpoints:');
-      logger.info(`   - GET    http://localhost:${config.port}/api/health (Health Check)`);
-      logger.info(`   - POST   http://localhost:${config.port}/api/v1/auth/register (Register)`);
-      logger.info(`   - POST   http://localhost:${config.port}/api/v1/auth/login (Login)`);
-      logger.info(`   - GET    http://localhost:${config.port}/api/v1/menu (Get Menu)`);
-      logger.info(`   - POST   http://localhost:${config.port}/api/v1/orders (Create Order)`);
-      logger.info(`   - GET    http://localhost:${config.port}/api/v1/kitchen (Kitchen Queue)`);
+      logger.info(`   - GET    http://localhost:${PORT}/health (Health Check)`);
+      logger.info(`   - GET    http://localhost:${PORT}/api/health (API Health Check)`);
+      logger.info(`   - POST   http://localhost:${PORT}/api/v1/auth/register (Register)`);
+      logger.info(`   - POST   http://localhost:${PORT}/api/v1/auth/login (Login)`);
+      logger.info(`   - GET    http://localhost:${PORT}/api/v1/menu (Get Menu)`);
+      logger.info(`   - POST   http://localhost:${PORT}/api/v1/orders (Create Order)`);
+      logger.info(`   - GET    http://localhost:${PORT}/api/v1/kitchen (Kitchen Queue)`);
       logger.info('');
       logger.info(`☁️  Cloudinary: ✅ Configured`);
       logger.info(`🔐 Authentication: ✅ JWT + Cookies`);

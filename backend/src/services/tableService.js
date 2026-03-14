@@ -15,6 +15,7 @@ export class TableService {
       reservedBy: table.reserved_by,
       reservationTime: table.reservation_time,
       qrCode: table.qr_code,
+      qrCodeData: table.qr_code,
       isActive: table.is_active,
       createdAt: table.created_at,
       updatedAt: table.updated_at,
@@ -130,14 +131,20 @@ export class TableService {
 
   static async updateTable(restaurantId, tableId, updateData) {
     try {
+      const payload = {
+        updated_at: new Date().toISOString(),
+      };
+
+      if (updateData.tableNumber !== undefined) payload.table_number = updateData.tableNumber;
+      if (updateData.seatCapacity !== undefined) payload.capacity = updateData.seatCapacity;
+      if (updateData.location !== undefined) payload.location = updateData.location;
+      if (updateData.status !== undefined) payload.status = updateData.status;
+      if (updateData.reservedBy !== undefined) payload.reserved_by = updateData.reservedBy;
+      if (updateData.reservationTime !== undefined) payload.reservation_time = updateData.reservationTime;
+
       const { data: table, error } = await supabase
         .from('tables')
-        .update({
-          table_number: updateData.tableNumber,
-          capacity: updateData.seatCapacity,
-          location: updateData.location,
-          updated_at: new Date(),
-        })
+        .update(payload)
         .eq('id', tableId)
         .eq('restaurant_id', restaurantId)
         .select()
@@ -216,7 +223,7 @@ export class TableService {
           status: 'reserved',
           reserved_by: reservationData.reservedBy,
           reservation_time: reservationData.reservationTime,
-          updated_at: new Date(),
+          updated_at: new Date().toISOString(),
         })
         .eq('id', tableId)
         .eq('restaurant_id', restaurantId)
@@ -241,7 +248,7 @@ export class TableService {
           status: 'available',
           reserved_by: null,
           reservation_time: null,
-          updated_at: new Date(),
+          updated_at: new Date().toISOString(),
         })
         .eq('id', tableId)
         .eq('restaurant_id', restaurantId)

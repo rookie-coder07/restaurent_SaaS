@@ -12,7 +12,8 @@ export default function QRTest() {
   const tables = tablesData?.tables || [];
 
   const generateQRUrl = (table) => {
-    const url = `http://localhost:5173/menu?table=${table.qrCodeData}`;
+    const baseUrl = import.meta.env.VITE_FRONTEND_URL || window.location.origin;
+    const url = `${baseUrl}/menu?table=${table.tableNumber}&tableId=${table.id}`;
     setQrUrl(url);
     setSelectedTable(table);
   };
@@ -51,10 +52,10 @@ export default function QRTest() {
                       ? 'border-blue-600 bg-blue-50'
                       : 'border-gray-200 hover:border-blue-400'
                   }`}
-                >
+                  >
                   <p className="font-semibold text-gray-900">Table {table.tableNumber}</p>
-                  <p className="text-sm text-gray-600">Capacity: {table.capacity}</p>
-                  <p className="text-xs text-gray-500 mt-1 truncate">{table.qrCodeData}</p>
+                  <p className="text-sm text-gray-600">Capacity: {table.seatCapacity}</p>
+                  <p className="text-xs text-gray-500 mt-1 truncate">{table.qrCode || `table=${table.tableNumber}`}</p>
                 </button>
               ))}
             </div>
@@ -99,7 +100,7 @@ export default function QRTest() {
                 <p className="font-semibold text-gray-900 mb-2">Selected Table:</p>
                 <div className="space-y-1 text-gray-700">
                   <p>• Table Number: {selectedTable.tableNumber}</p>
-                  <p>• Capacity: {selectedTable.capacity}</p>
+                  <p>• Capacity: {selectedTable.seatCapacity}</p>
                   <p>• Status: {selectedTable.status}</p>
                   <p>• Location: {selectedTable.location}</p>
                 </div>

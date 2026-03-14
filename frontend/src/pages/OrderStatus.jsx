@@ -19,8 +19,8 @@ export default function OrderStatus() {
 
   const [pollingInterval, setPollingInterval] = useState(2000); // Poll every 2 seconds
   const { data: order = {}, loading, error, execute: refetchOrder } = useApi(
-    () => (orderId ? customerAPI.getOrder(orderId) : Promise.resolve(null)),
-    [orderId]
+    () => (orderId ? customerAPI.getOrder(orderId, tableNumber) : Promise.resolve(null)),
+    [orderId, tableNumber]
   );
 
   // Auto-refetch order status

@@ -1,6 +1,6 @@
 import { useApi } from '../hooks/useApi';
 import { orderAPI } from '../services/apiEndpoints';
-import { Loader, Download, TrendingUp } from 'lucide-react';
+import { Loader, Download } from 'lucide-react';
 import { useState } from 'react';
 import { formatCurrency, formatDate } from '../utils/formatters';
 import {
@@ -19,8 +19,6 @@ import {
   Cell,
 } from 'recharts';
 
-const COLORS = ['#3B82F6', '#EF4444', '#10B981', '#F59E0B', '#8B5CF6'];
-
 export default function Analytics() {
   const [dateRange, setDateRange] = useState({
     start: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
@@ -31,11 +29,11 @@ export default function Analytics() {
     orderAPI.getOrders({ limit: 1000 })
   );
 
-  const orders = ordersData?.orders || [];
+  const orders = ordersData?.items || [];
 
   // Calculate metrics
   const totalOrders = orders.length;
-  const totalRevenue = orders.reduce((sum, order) => sum + (order.total || 0), 0);
+  const totalRevenue = orders.reduce((sum, order) => sum + (order.totalAmount || order.total || 0), 0);
   const avgOrderValue = totalOrders > 0 ? totalRevenue / totalOrders : 0;
   const completedOrders = orders.filter(o => o.status === 'served' || o.status === 'completed').length;
 
@@ -47,7 +45,7 @@ export default function Analytics() {
       dailyData[date] = { date, orders: 0, revenue: 0 };
     }
     dailyData[date].orders++;
-    dailyData[date].revenue += order.total || 0;
+    dailyData[date].revenue += order.totalAmount || order.total || 0;
   });
 
   const chartData = Object.values(dailyData).sort((a, b) => {
@@ -249,7 +247,7 @@ export default function Analytics() {
               {orders.slice(0, 10).map((order) => (
                 <tr key={order.id} className="border-b border-gray-100 hover:bg-gray-50">
                   <td className="px-6 py-3 font-mono text-blue-600 text-xs">#{order.id?.slice(-8)}</td>
-                  <td className="px-6 py-3 font-semibold">{formatCurrency(order.total || 0)}</td>
+                  <td className="px-6 py-3 font-semibold">{formatCurrency(order.totalAmount || order.total || 0)}</td>
                   <td className="px-6 py-3">
                     <span className="px-2 py-1 rounded text-xs font-semibold bg-gray-100 text-gray-800">
                       {order.status}

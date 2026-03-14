@@ -44,3 +44,8 @@ export const batchCreateTablesSchema = Joi.object({
     .min(1)
     .required(),
 });
+
+export const reserveTableSchema = Joi.object({
+  reservedBy: Joi.string().trim().min(2).max(100).required(),
+  reservationTime: Joi.date().iso().required(),
+});

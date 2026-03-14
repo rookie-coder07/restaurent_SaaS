@@ -1,16 +1,24 @@
-import { useEffect, useState } from 'react';
 import { useApi } from '../hooks/useApi';
-import { restaurantAPI } from '../services/apiEndpoints';
+import { restaurantAPI, orderAPI, tableAPI } from '../services/apiEndpoints';
 import { BarChart3, Users, TrendingUp, Calendar, Loader } from 'lucide-react';
+import { formatCurrency, formatDate } from '../utils/formatters';
 
 export default function Dashboard() {
   const { data: profile, loading } = useApi(restaurantAPI.getProfile);
-  const [stats, setStats] = useState({
-    todayOrders: 24,
-    todayRevenue: 12500,
-    avgOrderValue: 520,
-    activeUsers: 8,
-  });
+  const { data: ordersData = {} } = useApi(() => orderAPI.getOrders({ limit: 20 }));
+  const { data: staffData = {} } = useApi(() => restaurantAPI.getStaff(100, 0));
+  const { data: tablesData = {} } = useApi(() => tableAPI.getTables({}));
+
+  const orders = ordersData?.items || [];
+  const staff = staffData?.staff || [];
+  const tables = tablesData?.tables || [];
+
+  const todayDate = new Date().toDateString();
+  const todayOrders = orders.filter((order) => new Date(order.createdAt).toDateString() === todayDate);
+  const todayRevenue = todayOrders.reduce((sum, order) => sum + (order.totalAmount || 0), 0);
+  const avgOrderValue = todayOrders.length > 0 ? todayRevenue / todayOrders.length : 0;
+  const activeUsers = staff.filter((member) => member.status === 'active').length;
+  const availableTables = tables.filter((table) => table.status === 'available').length;
 
   if (loading) {
     return (
@@ -35,7 +43,7 @@ export default function Dashboard() {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-gray-600 text-sm font-medium">Today's Orders</p>
-              <p className="text-3xl font-bold text-gray-900 mt-2">{stats.todayOrders}</p>
+              <p className="text-3xl font-bold text-gray-900 mt-2">{todayOrders.length}</p>
             </div>
             <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
               <BarChart3 className="w-6 h-6 text-blue-600" />
@@ -48,7 +56,7 @@ export default function Dashboard() {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-gray-600 text-sm font-medium">Today's Revenue</p>
-              <p className="text-3xl font-bold text-gray-900 mt-2">₹{stats.todayRevenue.toLocaleString()}</p>
+              <p className="text-3xl font-bold text-gray-900 mt-2">{formatCurrency(todayRevenue)}</p>
             </div>
             <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
               <TrendingUp className="w-6 h-6 text-green-600" />
@@ -61,7 +69,7 @@ export default function Dashboard() {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-gray-600 text-sm font-medium">Avg Order Value</p>
-              <p className="text-3xl font-bold text-gray-900 mt-2">₹{stats.avgOrderValue}</p>
+              <p className="text-3xl font-bold text-gray-900 mt-2">{formatCurrency(avgOrderValue)}</p>
             </div>
             <div className="w-12 h-12 bg-yellow-100 rounded-lg flex items-center justify-center">
               <Calendar className="w-6 h-6 text-yellow-600" />
@@ -74,7 +82,8 @@ export default function Dashboard() {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-gray-600 text-sm font-medium">Active Users</p>
-              <p className="text-3xl font-bold text-gray-900 mt-2">{stats.activeUsers}</p>
+              <p className="text-3xl font-bold text-gray-900 mt-2">{activeUsers}</p>
+              <p className="text-xs text-gray-500 mt-1">{availableTables} tables available</p>
             </div>
             <div className="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center">
               <Users className="w-6 h-6 text-purple-600" />
@@ -87,18 +96,19 @@ export default function Dashboard() {
       <div className="card">
         <h2 className="text-lg font-bold text-gray-900 mb-4">Recent Orders</h2>
         <div className="space-y-3">
-          {[1, 2, 3, 4, 5].map((i) => (
-            <div key={i} className="flex items-center justify-between py-3 border-b border-gray-100 last:border-0">
+          {orders.slice(0, 5).map((order) => (
+            <div key={order.id} className="flex items-center justify-between py-3 border-b border-gray-100 last:border-0">
               <div>
-                <p className="font-semibold text-gray-900">Order #{1234 + i}</p>
-                <p className="text-sm text-gray-600">Table {i + 5}</p>
+                <p className="font-semibold text-gray-900">Order #{order.id?.slice(-8)}</p>
+                <p className="text-sm text-gray-600">Table {order.tableNumber || 'N/A'}</p>
               </div>
               <div className="text-right">
-                <p className="font-semibold text-gray-900">₹{(500 + i * 50).toLocaleString()}</p>
-                <p className="text-sm text-green-600">Completed</p>
+                <p className="font-semibold text-gray-900">{formatCurrency(order.totalAmount || 0)}</p>
+                <p className="text-sm text-gray-600">{formatDate(order.createdAt)}</p>
               </div>
             </div>
           ))}
+          {orders.length === 0 && <p className="text-gray-600">No recent orders yet</p>}
         </div>
       </div>
     </div>

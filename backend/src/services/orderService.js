@@ -11,6 +11,7 @@ export class OrderService {
       tableId: order.table_id,
       status: order.status,
       totalAmount: order.total_amount,
+      total: Number(order.total_amount || 0),
       paymentMethod: order.payment_method,
       notes: order.notes,
       createdAt: order.created_at,
@@ -19,7 +20,19 @@ export class OrderService {
         id: item.id,
         menuItemId: item.menu_item_id,
         quantity: item.quantity,
-        unitPrice: item.unit_price,
+        unitPrice: Number(item.unit_price ?? item.price ?? 0),
+        price: Number(item.unit_price ?? item.price ?? 0),
+        name: item.menu_items?.name || item.name || `Item ${item.menu_item_id?.slice(0, 6) || ''}`,
+        preparationTime: item.menu_items?.preparation_time || 15,
+      })) || [],
+      items: order.order_items?.map(item => ({
+        id: item.id,
+        menuItemId: item.menu_item_id,
+        quantity: item.quantity,
+        price: Number(item.unit_price ?? item.price ?? 0),
+        unitPrice: Number(item.unit_price ?? item.price ?? 0),
+        name: item.menu_items?.name || item.name || `Item ${item.menu_item_id?.slice(0, 6) || ''}`,
+        preparationTime: item.menu_items?.preparation_time || 15,
       })) || [],
     };
   }
@@ -89,9 +102,9 @@ export class OrderService {
     try {
       const itemsToInsert = items.map(item => ({
         order_id: orderId,
-        menu_item_id: item.menuItemId,
+        menu_item_id: item.menuItemId || item.itemId,
         quantity: item.quantity,
-        unit_price: item.unitPrice,
+        unit_price: item.unitPrice ?? item.price ?? 0,
       }));
 
       const { data: orderItems, error } = await supabase
@@ -119,7 +132,11 @@ export class OrderService {
             id,
             menu_item_id,
             quantity,
-            unit_price
+            unit_price,
+            menu_items (
+              name,
+              preparation_time
+            )
           ),
           tables!table_id (
             table_number
@@ -154,7 +171,11 @@ export class OrderService {
             id,
             menu_item_id,
             quantity,
-            unit_price
+            unit_price,
+            menu_items (
+              name,
+              preparation_time
+            )
           ),
           tables!table_id (
             table_number
@@ -379,7 +400,11 @@ export class OrderService {
             id,
             menu_item_id,
             quantity,
-            unit_price
+            unit_price,
+            menu_items (
+              name,
+              preparation_time
+            )
           ),
           tables!table_id (
             table_number
@@ -392,7 +417,7 @@ export class OrderService {
       }
 
       if (filters.tableNumber) {
-        query = query.eq('table_number', filters.tableNumber);
+        query = query.eq('tables.table_number', filters.tableNumber);
       }
 
       if (filters.startDate && filters.endDate) {
@@ -438,7 +463,11 @@ export class OrderService {
             id,
             menu_item_id,
             quantity,
-            unit_price
+            unit_price,
+            menu_items (
+              name,
+              preparation_time
+            )
           ),
           tables!table_id (
             table_number

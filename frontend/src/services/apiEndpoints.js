@@ -53,6 +53,8 @@ export const tableAPI = {
   createMultipleTables: (data) => api.post('/v1/tables/batch', data),
   updateTable: (tableId, data) => api.put(`/v1/tables/${tableId}`, data),
   deleteTable: (tableId) => api.delete(`/v1/tables/${tableId}`),
+  reserveTable: (tableId, data) => api.post(`/v1/tables/${tableId}/reserve`, data),
+  releaseTable: (tableId) => api.post(`/v1/tables/${tableId}/release`),
   generateQRs: (tableIds) => api.post('/v1/tables/qr/generate', { tableIds }),
 };
 
@@ -64,10 +66,17 @@ export const analyticsAPI = {
 };
 
 export const customerAPI = {
-  getPublicMenu: (tableNumber) => api.get('/v1/customer/menu/items', { params: { table: tableNumber } }),
+  getPublicMenu: ({ tableNumber, tableId }) => api.get('/v1/customer/menu/items', {
+    params: {
+      ...(tableNumber ? { table: tableNumber } : {}),
+      ...(tableId ? { tableId } : {}),
+    },
+  }),
   getMenuByQR: (qrCodeData) => api.get(`/v1/customer/menu/${qrCodeData}/items`),
   createOrder: (data) => api.post('/v1/customer/orders', data),
   placeOrder: (data) => api.post('/v1/customer/orders', data),
-  getOrder: (orderId) => api.get(`/v1/customer/orders/${orderId}`),
+  getOrder: (orderId, tableNumber) => api.get(`/v1/customer/orders/${orderId}`, {
+    params: tableNumber ? { table: tableNumber } : {},
+  }),
   getOrderByTable: (tableNumber) => api.get(`/v1/customer/orders/table/${tableNumber}`),
 };

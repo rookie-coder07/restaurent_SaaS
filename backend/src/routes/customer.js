@@ -18,38 +18,45 @@ const tableSchema = Joi.object({
 // Pass ?table=X to get the menu for that table's restaurant
 router.get('/menu/items', async (req, res) => {
   try {
-    const { table } = req.query;
-    console.log(`📋 Customer menu request - Table: ${table}`);
+    const { table, tableId } = req.query;
+    console.log(`📋 Customer menu request - Table: ${table}, Table ID: ${tableId}`);
 
-    if (!table) {
-      console.warn('⚠️  Missing table parameter');
+    if (!table && !tableId) {
+      console.warn('⚠️  Missing table identifier');
       return res.status(400).json({
         statusCode: 400,
         success: false,
-        message: 'Table number is required',
+        message: 'Table identifier is required',
       });
     }
 
-    // Get restaurant ID from table lookup
-    console.log(`🔍 Looking up table ${table}...`);
-    const { data: tableData, error: tableError } = await supabase
+    let query = supabase
       .from('tables')
-      .select('restaurant_id')
-      .eq('table_number', parseInt(table))
-      .limit(1)
-      .single();
+      .select('id, restaurant_id, table_number');
+
+    if (tableId) {
+      console.log(`🔍 Looking up table by id ${tableId}...`);
+      query = query.eq('id', tableId);
+    } else {
+      console.log(`🔍 Looking up table by number ${table}...`);
+      query = query.eq('table_number', parseInt(table, 10));
+    }
+
+    const { data: tableData, error: tableError } = await query.single();
 
     if (tableError || !tableData) {
       console.error('❌ Table lookup error:', tableError?.message || 'Table not found');
       return res.status(404).json({
         statusCode: 404,
         success: false,
-        message: `Table ${table} not found in system`,
+        message: tableId
+          ? 'Table not found in system'
+          : `Table ${table} not found in system`,
       });
     }
 
     const restaurantId = tableData.restaurant_id;
-    console.log(`✅ Found restaurant: ${restaurantId} for table ${table}`);
+    console.log(`✅ Found restaurant: ${restaurantId} for table ${tableData.table_number}`);
 
     // Get all menu items for this restaurant
     console.log(`📦 Fetching menu items for restaurant ${restaurantId}...`);
@@ -108,12 +115,31 @@ router.get('/menu/:qrCodeData/items', validateParams(tableSchema), async (req, r
 // This handles table resolution from tableNumber to tableId
 router.post('/orders', optionalAuth, async (req, res, next) => {
   try {
+    if (req.body.tableId) {
+      const { data: table, error: tableError } = await supabase
+        .from('tables')
+        .select('id, restaurant_id')
+        .eq('id', req.body.tableId)
+        .single();
+
+      if (tableError || !table) {
+        return res.status(404).json({
+          statusCode: 404,
+          success: false,
+          message: 'Table not found',
+        });
+      }
+
+      req.restaurantId = table.restaurant_id;
+      console.log(`✅ Using table ID ${req.body.tableId} for restaurant ${table.restaurant_id}`);
+    }
+
     // If tableNumber is provided but not tableId, resolve it
     if (req.body.tableNumber && !req.body.tableId) {
       const { data: table, error: tableError } = await supabase
         .from('tables')
         .select('id, restaurant_id')
-        .eq('table_number', parseInt(req.body.tableNumber))
+        .eq('table_number', parseInt(req.body.tableNumber, 10))
         .single();
 
       if (tableError || !table) {
@@ -141,5 +167,86 @@ router.post('/orders', optionalAuth, async (req, res, next) => {
     });
   }
 }, orderController.createOrder);
+
+router.get('/orders/:orderId', async (req, res, next) => {
+  try {
+    const { data: order, error } = await supabase
+      .from('orders')
+      .select(`
+        id,
+        restaurant_id,
+        tables!table_id (
+          table_number
+        )
+      `)
+      .eq('id', req.params.orderId)
+      .single();
+
+    if (error || !order) {
+      return res.status(404).json({
+        statusCode: 404,
+        success: false,
+        message: 'Order not found',
+      });
+    }
+
+    if (req.query.table && parseInt(req.query.table, 10) !== order.tables?.table_number) {
+      return res.status(403).json({
+        statusCode: 403,
+        success: false,
+        message: 'Order does not belong to this table',
+      });
+    }
+
+    req.restaurantId = order.restaurant_id;
+    next();
+  } catch (error) {
+    return res.status(500).json({
+      statusCode: 500,
+      success: false,
+      message: 'Failed to fetch order',
+    });
+  }
+}, orderController.getOrderById);
+
+router.get('/orders/table/:tableNumber', async (req, res) => {
+  try {
+    const { data: table, error: tableError } = await supabase
+      .from('tables')
+      .select('id, restaurant_id')
+      .eq('table_number', parseInt(req.params.tableNumber, 10))
+      .single();
+
+    if (tableError || !table) {
+      return res.status(404).json({
+        statusCode: 404,
+        success: false,
+        message: 'Table not found',
+      });
+    }
+
+    const { data: orders, error } = await supabase
+      .from('orders')
+      .select('id, restaurant_id, status, total_amount, created_at')
+      .eq('restaurant_id', table.restaurant_id)
+      .eq('table_id', table.id)
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+
+    return res.status(200).json({
+      statusCode: 200,
+      success: true,
+      data: orders || [],
+      message: 'Orders fetched successfully',
+    });
+  } catch (error) {
+    return res.status(500).json({
+      statusCode: 500,
+      success: false,
+      message: 'Failed to fetch table orders',
+    });
+  }
+});
 
 export default router;

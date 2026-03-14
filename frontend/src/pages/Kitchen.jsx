@@ -110,7 +110,7 @@ export default function Kitchen() {
           {pendingOrders.length > 0 ? (
             pendingOrders.map((order) => (
               <OrderCard
-                key={order._id}
+                key={order.id}
                 order={order}
                 onStatusUpdate={handleStatusUpdate}
                 onSelect={setSelectedOrder}
@@ -135,7 +135,7 @@ export default function Kitchen() {
           {preparingOrders.length > 0 ? (
             preparingOrders.map((order) => (
               <OrderCard
-                key={order._id}
+                key={order.id}
                 order={order}
                 onStatusUpdate={handleStatusUpdate}
                 onSelect={setSelectedOrder}
@@ -160,7 +160,7 @@ export default function Kitchen() {
           {readyOrders.length > 0 ? (
             readyOrders.map((order) => (
               <OrderCard
-                key={order._id}
+                key={order.id}
                 order={order}
                 onStatusUpdate={handleStatusUpdate}
                 onSelect={setSelectedOrder}
@@ -224,10 +224,10 @@ export default function Kitchen() {
                 <p className="text-sm text-gray-900">{formatDate(selectedOrder.createdAt)}</p>
               </div>
 
-              {selectedOrder.specialRequests && (
+              {selectedOrder.notes && (
                 <div>
                   <p className="text-xs text-gray-500 uppercase tracking-wide">Special Requests</p>
-                  <p className="text-sm text-gray-900 bg-yellow-50 p-2 rounded">{selectedOrder.specialRequests}</p>
+                  <p className="text-sm text-gray-900 bg-yellow-50 p-2 rounded">{selectedOrder.notes}</p>
                 </div>
               )}
             </div>
@@ -278,7 +278,7 @@ function OrderCard({ order, onStatusUpdate, onSelect, updating, getStatusColor, 
           <button
             onClick={(e) => {
               e.stopPropagation();
-              onStatusUpdate(order._id, nextStatus);
+              onStatusUpdate(order.id, nextStatus);
             }}
             disabled={updating === order.id}
             className={`px-3 py-1 rounded font-semibold text-xs bg-white ${getStatusColor(order.status).replace('bg-', 'text-')} hover:opacity-80 disabled:opacity-50`}
