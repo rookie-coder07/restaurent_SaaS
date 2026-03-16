@@ -5,6 +5,9 @@ import { customerAPI } from '../services/apiEndpoints';
 import { ShoppingCart, Plus, Minus, Loader, ArrowLeft, Check, AlertCircle } from 'lucide-react';
 import { formatCurrency } from '../utils/formatters';
 
+const PRODUCTION_API_BASE_URL = 'https://restaurent-backend-448t.onrender.com/api';
+const DEVELOPMENT_API_BASE_URL = 'http://localhost:3000/api';
+
 export default function CustomerMenu() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -136,7 +139,7 @@ export default function CustomerMenu() {
     const apiBaseUrl =
       import.meta.env.VITE_API_BASE_URL ||
       import.meta.env.NEXT_PUBLIC_API_URL ||
-      'http://localhost:3000/api';
+      (import.meta.env.PROD ? PRODUCTION_API_BASE_URL : DEVELOPMENT_API_BASE_URL);
     const apiUrl = `${apiBaseUrl}/v1/customer/menu/items?table=${tableNumber || ''}${tableId ? `&tableId=${tableId}` : ''}`;
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-6">

@@ -1,9 +1,12 @@
 import axios from 'axios';
 
+const PRODUCTION_API_BASE_URL = 'https://restaurent-backend-448t.onrender.com/api';
+const DEVELOPMENT_API_BASE_URL = 'http://localhost:3000/api';
+
 const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL ||
   import.meta.env.NEXT_PUBLIC_API_URL ||
-  'http://localhost:3000/api';
+  (import.meta.env.PROD ? PRODUCTION_API_BASE_URL : DEVELOPMENT_API_BASE_URL);
 
 const isDevelopmentHost =
   window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
