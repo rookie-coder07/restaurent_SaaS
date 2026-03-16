@@ -133,7 +133,11 @@ export default function CustomerMenu() {
   }
 
   if (apiError) {
-    const apiUrl = `${import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000/api'}/v1/customer/menu/items?table=${tableNumber || ''}${tableId ? `&tableId=${tableId}` : ''}`;
+    const apiBaseUrl =
+      import.meta.env.VITE_API_BASE_URL ||
+      import.meta.env.NEXT_PUBLIC_API_URL ||
+      'http://localhost:3000/api';
+    const apiUrl = `${apiBaseUrl}/v1/customer/menu/items?table=${tableNumber || ''}${tableId ? `&tableId=${tableId}` : ''}`;
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-6">
         <div className="text-center max-w-md">

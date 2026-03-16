@@ -141,18 +141,23 @@ export class MenuService {
   
   static async createMenuItem(restaurantId, itemData, imageData = null) {
     try {
+      const payload = {
+        restaurant_id: restaurantId,
+        category_id: itemData.categoryId || null,
+        name: itemData.name,
+        description: itemData.description,
+        price: itemData.price,
+        preparation_time: itemData.preparationTime,
+        tags: itemData.tags ? itemData.tags.join(',') : '',
+      };
+
+      if (imageData?.url) {
+        payload.image_url = imageData.url;
+      }
+
       const { data: menuItem, error } = await supabase
         .from('menu_items')
-        .insert([{
-          restaurant_id: restaurantId,
-          category_id: itemData.categoryId || null,
-          name: itemData.name,
-          description: itemData.description,
-          price: itemData.price,
-          image_url: imageData?.url || null,
-          preparation_time: itemData.preparationTime,
-          tags: itemData.tags ? itemData.tags.join(',') : '',
-        }])
+        .insert([payload])
         .select()
         .single();
 

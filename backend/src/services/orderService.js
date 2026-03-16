@@ -66,6 +66,31 @@ export class OrderService {
         throw new Error('Restaurant ID is required or table ID must be provided');
       }
 
+      if (!Array.isArray(orderData.items) || orderData.items.length === 0) {
+        throw new Error('At least one order item is required');
+      }
+
+      const menuItemIds = orderData.items
+        .map((item) => item.menuItemId || item.itemId)
+        .filter(Boolean);
+
+      if (menuItemIds.length !== orderData.items.length) {
+        throw new Error('Each order item must include a menu item ID');
+      }
+
+      const { data: menuItems, error: menuItemsError } = await supabase
+        .from('menu_items')
+        .select('id')
+        .eq('restaurant_id', finalRestaurantId)
+        .in('id', menuItemIds)
+        .eq('status', 'active');
+
+      if (menuItemsError) throw menuItemsError;
+
+      if ((menuItems || []).length !== menuItemIds.length) {
+        throw new Error('One or more menu items are invalid or unavailable');
+      }
+
       const { data: order, error } = await supabase
         .from('orders')
         .insert([{
@@ -84,8 +109,18 @@ export class OrderService {
       logger.info(`✅ Order created: ${order.id}`);
 
       // If items are provided, add them to the order
-      if (orderData.items && orderData.items.length > 0) {
-        await this.addOrderItems(order.id, orderData.items);
+      if (orderData.items.length > 0) {
+        try {
+          await this.addOrderItems(order.id, orderData.items);
+        } catch (orderItemsError) {
+          await supabase
+            .from('orders')
+            .delete()
+            .eq('id', order.id)
+            .eq('restaurant_id', finalRestaurantId);
+
+          throw orderItemsError;
+        }
       }
 
       // Fetch and return the complete order with items
