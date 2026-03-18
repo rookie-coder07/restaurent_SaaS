@@ -25,6 +25,7 @@ app.use(cookieParser());
 const productionOrigins = config.corsOrigins.length
   ? config.corsOrigins
   : ['https://restaurent-saas.vercel.app'];
+const vercelPreviewOriginPattern = /^https:\/\/restaurent-saas(?:-[a-z0-9-]+)*\.vercel\.app$/i;
 
 const allowedOrigins = config.nodeEnv === 'production'
   ? productionOrigins
@@ -40,10 +41,13 @@ const allowedOrigins = config.nodeEnv === 'production'
 // CORS configuration - Configured for development and production
 const corsOptions = {
   origin: function(origin, callback) {
+    const isAllowedPreviewOrigin = typeof origin === 'string' && vercelPreviewOriginPattern.test(origin);
+
     // Allow requests with no origin (like mobile apps or curl requests)
-    if (!origin || allowedOrigins.includes(origin)) {
+    if (!origin || allowedOrigins.includes(origin) || isAllowedPreviewOrigin) {
       callback(null, true);
     } else {
+      logger.warn(`CORS blocked for origin: ${origin}`);
       callback(new Error('CORS not allowed'));
     }
   },
