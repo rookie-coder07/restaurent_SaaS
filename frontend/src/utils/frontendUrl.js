@@ -43,6 +43,10 @@ export const getFrontendBaseUrl = () => {
     typeof window !== 'undefined' && window.location?.origin ? window.location.origin : '';
 
   if (import.meta.env.PROD) {
+    if (runtimeUrl && !isPreviewOrLocalUrl(runtimeUrl)) {
+      return runtimeUrl;
+    }
+
     if (configuredUrl && !isPreviewOrLocalUrl(configuredUrl)) {
       return configuredUrl;
     }
