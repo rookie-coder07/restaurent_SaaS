@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { X, Download, Printer } from 'lucide-react';
 import QRCode from 'qrcode';
+import { getFrontendBaseUrl } from '../utils/frontendUrl';
 
 export default function QRCodeModal({ table, restaurantName, onClose }) {
   const canvasRef = useRef(null);
@@ -15,7 +16,7 @@ export default function QRCodeModal({ table, restaurantName, onClose }) {
       setError('');
 
       try {
-        const baseUrl = import.meta.env.VITE_FRONTEND_URL || window.location.origin;
+        const baseUrl = getFrontendBaseUrl();
         const qrValue = `${baseUrl}/menu?table=${table.tableNumber}&tableId=${table.id}`;
 
         await QRCode.toCanvas(canvasRef.current, qrValue, {
@@ -122,7 +123,7 @@ export default function QRCodeModal({ table, restaurantName, onClose }) {
     }, 250);
   };
 
-  const qrLink = `${window.location.origin}/menu?table=${table.tableNumber}&tableId=${table.id}`;
+  const qrLink = `${getFrontendBaseUrl()}/menu?table=${table.tableNumber}&tableId=${table.id}`;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">

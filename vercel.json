@@ -5,7 +5,7 @@
   "env": {
     "VITE_API_BASE_URL": "https://restaurent-backend-448t.onrender.com/api",
     "NEXT_PUBLIC_API_URL": "https://restaurent-backend-448t.onrender.com/api",
-    "VITE_FRONTEND_URL": "@vercel_url",
+    "VITE_FRONTEND_URL": "https://restaurent-saas.vercel.app",
     "VITE_CLOUDINARY_CLOUD_NAME": "dof234wuj",
     "VITE_APP_NAME": "Restaurant Management SaaS",
     "VITE_SUPABASE_URL": "https://pzjjuuqwpbfbfosgblzv.supabase.co",

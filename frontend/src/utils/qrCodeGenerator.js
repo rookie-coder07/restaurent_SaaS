@@ -1,4 +1,5 @@
 import QRCode from 'qrcode';
+import { getFrontendBaseUrl } from './frontendUrl';
 
 /**
  * Generate a QR code for a single table
@@ -8,9 +9,7 @@ import QRCode from 'qrcode';
  */
 export const generateTableQRCode = async (table) => {
   try {
-    // Get frontend URL from environment variable (set in production)
-    // Falls back to current domain in development
-    const baseUrl = import.meta.env.VITE_FRONTEND_URL || window.location.origin;
+    const baseUrl = getFrontendBaseUrl();
     const qrValue = `${baseUrl}/menu?table=${table.tableNumber}&tableId=${table.id}`;
     console.log('📱 Generating QR for table', table.tableNumber, 'URL:', qrValue);
     console.log('📍 QR pointing to:', baseUrl);
