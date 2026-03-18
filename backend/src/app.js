@@ -22,23 +22,24 @@ app.use(express.urlencoded({ limit: '10mb', extended: true }));
 // Cookie parser
 app.use(cookieParser());
 
-// CORS configuration - Configured for development and production
-const corsOptions = {
-  origin: function(origin, callback) {
-    const allowedOrigins = [
-      // Development
+const productionOrigins = config.corsOrigins.length
+  ? config.corsOrigins
+  : ['https://restaurent-saas.vercel.app'];
+
+const allowedOrigins = config.nodeEnv === 'production'
+  ? productionOrigins
+  : [
+      ...productionOrigins,
       'http://localhost:5173',
       'http://localhost:5174',
       'http://127.0.0.1:5173',
       'http://127.0.0.1:5174',
       'http://localhost:3000',
-      // Production
-      'https://restaurentsaas.vercel.app',  // Frontend on Vercel (correct domain)
-      'https://resturant-saas.onrender.com',  // Backend on Render
-      // Environment variables (for flexibility)
-      ...config.corsOrigins
     ];
-    
+
+// CORS configuration - Configured for development and production
+const corsOptions = {
+  origin: function(origin, callback) {
     // Allow requests with no origin (like mobile apps or curl requests)
     if (!origin || allowedOrigins.includes(origin)) {
       callback(null, true);
@@ -47,12 +48,13 @@ const corsOptions = {
     }
   },
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
   optionsSuccessStatus: 200
 };
 
 app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
 
 app.get('/health', (req, res) => {
   res.status(200).send('Server running');

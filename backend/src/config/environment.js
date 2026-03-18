@@ -18,7 +18,7 @@ const parseNumber = (value, fallback) => {
 
 const parseCorsOrigins = (value) => {
   if (!value) {
-    return ['http://localhost:5173'];
+    return ['https://restaurent-saas.vercel.app'];
   }
 
   return value
