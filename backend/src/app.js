@@ -22,33 +22,50 @@ app.use(express.urlencoded({ limit: '10mb', extended: true }));
 // Cookie parser
 app.use(cookieParser());
 
+const localhostOrigins = [
+  'http://localhost:3000',
+  'http://localhost:5173',
+  'http://localhost:5174',
+  'http://127.0.0.1:5173',
+  'http://127.0.0.1:5174',
+];
+
 const productionOrigins = config.corsOrigins.length
   ? config.corsOrigins
   : ['https://restaurent-saas.vercel.app'];
-const vercelPreviewOriginPattern = /^https:\/\/restaurent-saas(?:-[a-z0-9-]+)*\.vercel\.app$/i;
 
 const allowedOrigins = config.nodeEnv === 'production'
   ? productionOrigins
-  : [
-      ...productionOrigins,
-      'http://localhost:5173',
-      'http://localhost:5174',
-      'http://127.0.0.1:5173',
-      'http://127.0.0.1:5174',
-      'http://localhost:3000',
-    ];
+  : [...productionOrigins, ...localhostOrigins];
+
+const isAllowedOrigin = (origin) => {
+  if (!origin) {
+    return true;
+  }
+
+  if (allowedOrigins.includes(origin) || localhostOrigins.includes(origin)) {
+    return true;
+  }
+
+  try {
+    const parsedOrigin = new URL(origin);
+    const isVercelDeployment = parsedOrigin.protocol === 'https:' && parsedOrigin.hostname.endsWith('.vercel.app');
+
+    return isVercelDeployment;
+  } catch {
+    return false;
+  }
+};
 
 // CORS configuration - Configured for development and production
 const corsOptions = {
   origin: function(origin, callback) {
-    const isAllowedPreviewOrigin = typeof origin === 'string' && vercelPreviewOriginPattern.test(origin);
-
     // Allow requests with no origin (like mobile apps or curl requests)
-    if (!origin || allowedOrigins.includes(origin) || isAllowedPreviewOrigin) {
+    if (isAllowedOrigin(origin)) {
       callback(null, true);
     } else {
       logger.warn(`CORS blocked for origin: ${origin}`);
-      callback(new Error('CORS not allowed'));
+      callback(new Error('Not allowed by CORS'));
     }
   },
   credentials: true,
