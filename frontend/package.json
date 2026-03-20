@@ -6,7 +6,7 @@
   "description": "Production-ready Restaurant Management SaaS Frontend",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "echo 'no build at root'",
     "preview": "vite preview",
     "start": "node server.js",
     "lint": "eslint src/",
