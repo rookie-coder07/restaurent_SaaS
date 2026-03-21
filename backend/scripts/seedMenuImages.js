@@ -8,6 +8,7 @@ const __dirname = path.dirname(__filename);
 dotenv.config({ path: path.resolve(__dirname, '../.env') });
 
 const TARGET_EMAIL = 'test@example.com';
+const isDryRun = process.argv.includes('--dry-run') || process.env.DRY_RUN === 'true';
 
 const IMAGE_LIBRARY = {
   indian_curry: 'https://images.unsplash.com/photo-1585937421612-70a008356fbe?auto=format&fit=crop&w=1200&q=80',
@@ -140,6 +141,7 @@ const main = async () => {
 
   console.log('=== Menu Image Seeder ===');
   console.log(`Target account: ${TARGET_EMAIL}`);
+  console.log(`Mode: ${isDryRun ? 'DRY RUN' : 'LIVE UPDATE'}`);
 
   initCloudinary();
 
@@ -162,6 +164,12 @@ const main = async () => {
       console.log(`\n-> ${item.name}`);
       console.log(`   Keyword: ${keyword}`);
       console.log(`   Source image: ${imageUrl}`);
+
+      if (isDryRun) {
+        console.log('   Dry run only: skipping Cloudinary upload and database update');
+        updatedCount += 1;
+        continue;
+      }
 
       const uploadResult = await uploadToCloudinary(imageUrl, 'seeded-menu-images');
       await updateMenuItemImage(supabase, item.id, uploadResult.url);
