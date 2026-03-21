@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useApi } from '../hooks/useApi';
 import { menuAPI } from '../services/apiEndpoints';
 import { Plus, Edit2, Trash2, Loader, Upload, X, AlertCircle } from 'lucide-react';
@@ -6,6 +6,18 @@ import { formatCurrency } from '../utils/formatters';
 import { getMenuItemImageUrl } from '../utils/menuItemImage';
 
 export default function MenuManagement() {
+  const createEmptyFormData = () => ({
+    name: '',
+    description: '',
+    price: '',
+    categoryId: '',
+    preparationTime: '20',
+    tags: '',
+    image: null,
+    imagePreview: '',
+    imageName: '',
+  });
+
   const { data: itemsData = {}, loading, execute: refetch } = useApi(() =>
     menuAPI.getItems({ limit: 100 })
   );
@@ -23,16 +35,7 @@ export default function MenuManagement() {
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
   const [newCategoryName, setNewCategoryName] = useState('');
-  
-  const [formData, setFormData] = useState({
-    name: '',
-    description: '',
-    price: '',
-    categoryId: '',
-    preparationTime: '20',
-    tags: '',
-    image: null,
-  });
+  const [formData, setFormData] = useState(createEmptyFormData());
 
   const items = itemsData?.items || [];
   const categories = categoriesData?.categories || [];
@@ -40,15 +43,7 @@ export default function MenuManagement() {
   const handleAddItem = () => {
     setError(null);
     setEditingItem(null);
-    setFormData({
-      name: '',
-      description: '',
-      price: '',
-      categoryId: '',
-      preparationTime: '20',
-      tags: '',
-      image: null,
-    });
+    setFormData(createEmptyFormData());
     setShowForm(true);
   };
 
@@ -63,8 +58,50 @@ export default function MenuManagement() {
       preparationTime: item.preparationTime || '20',
       tags: (item.tags || []).join(', '),
       image: null,
+      imagePreview: item.imageUrl || item.image_url || item.cloudinaryImageUrl || '',
+      imageName: '',
     });
     setShowForm(true);
+  };
+
+  const handleImageChange = (e) => {
+    const file = e.target.files?.[0];
+
+    if (!file) {
+      return;
+    }
+
+    if (!file.type.startsWith('image/')) {
+      setError('Please select a valid image file');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setError(null);
+      setFormData((current) => ({
+        ...current,
+        image: typeof reader.result === 'string' ? reader.result : null,
+        imagePreview: typeof reader.result === 'string' ? reader.result : current.imagePreview,
+        imageName: file.name,
+      }));
+    };
+    reader.onerror = () => {
+      setError('Unable to read the selected image');
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
+  const handleRemoveSelectedImage = () => {
+    setFormData((current) => ({
+      ...current,
+      image: null,
+      imagePreview: editingItem
+        ? editingItem.imageUrl || editingItem.image_url || editingItem.cloudinaryImageUrl || ''
+        : '',
+      imageName: '',
+    }));
   };
 
   const handleSubmit = async (e) => {
@@ -82,6 +119,10 @@ export default function MenuManagement() {
         tags: formData.tags.split(',').map(tag => tag.trim()).filter(tag => tag),
       };
 
+      if (formData.image) {
+        submitData.imageBase64 = formData.image;
+      }
+
       if (editingItem) {
         await menuAPI.updateItem(editingItem.id, submitData);
         setSuccess('Item updated successfully');
@@ -91,6 +132,7 @@ export default function MenuManagement() {
       }
 
       setShowForm(false);
+      setFormData(createEmptyFormData());
       await refetch(); // Wait for data to reload
       setTimeout(() => setSuccess(null), 3000);
     } catch (err) {
@@ -388,15 +430,53 @@ export default function MenuManagement() {
                 className="input"
               />
 
-              <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center cursor-pointer hover:border-blue-500 transition">
-                <Upload className="w-8 h-8 mx-auto mb-2 text-gray-400" />
-                <p className="text-sm text-gray-600">Click to upload image (optional)</p>
+              <div className="space-y-3">
+                <label
+                  htmlFor="menu-item-image"
+                  className="block border-2 border-dashed border-gray-300 rounded-lg p-6 text-center cursor-pointer hover:border-blue-500 transition"
+                >
+                  <Upload className="w-8 h-8 mx-auto mb-2 text-gray-400" />
+                  <p className="text-sm font-medium text-gray-700">Click to upload image</p>
+                  <p className="text-xs text-gray-500 mt-1">PNG, JPG, WebP supported</p>
+                  <input
+                    id="menu-item-image"
+                    type="file"
+                    accept="image/*"
+                    onChange={handleImageChange}
+                    className="hidden"
+                  />
+                </label>
+
+                {(formData.imagePreview || formData.imageName) && (
+                  <div className="flex items-center gap-4 rounded-lg border border-gray-200 bg-gray-50 p-3">
+                    <img
+                      src={formData.imagePreview || getMenuItemImageUrl(editingItem || { name: formData.name })}
+                      alt={formData.name || 'Menu item preview'}
+                      className="h-16 w-16 rounded-lg object-cover"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-gray-900 truncate">
+                        {formData.imageName || 'Current menu image'}
+                      </p>
+                      <p className="text-xs text-gray-500">
+                        {formData.imageName ? 'New image selected and ready to upload' : 'Current image will be kept'}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleRemoveSelectedImage}
+                      className="rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-white"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                )}
               </div>
 
               <div className="flex gap-4 mt-6">
                 <button
                   type="button"
-                  onClick={() => { setShowForm(false); setError(null); }}
+                  onClick={() => { setShowForm(false); setError(null); setFormData(createEmptyFormData()); }}
                   className="flex-1 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 font-medium"
                 >
                   Cancel
