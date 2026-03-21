@@ -1,5 +1,5 @@
 import QRCode from 'qrcode';
-import { getFrontendBaseUrl } from './frontendUrl';
+import { buildQrMenuUrl, getFrontendBaseUrl } from './frontendUrl';
 
 /**
  * Generate a QR code for a single table
@@ -10,7 +10,10 @@ import { getFrontendBaseUrl } from './frontendUrl';
 export const generateTableQRCode = async (table) => {
   try {
     const baseUrl = getFrontendBaseUrl();
-    const qrValue = `${baseUrl}/menu?table=${table.tableNumber}&tableId=${table.id}`;
+    const qrValue = buildQrMenuUrl({
+      tableNumber: table.tableNumber,
+      tableId: table.id,
+    });
     console.log('📱 Generating QR for table', table.tableNumber, 'URL:', qrValue);
     console.log('📍 QR pointing to:', baseUrl);
     console.log('📍 Using VITE_FRONTEND_URL:', import.meta.env.VITE_FRONTEND_URL || 'Not set');

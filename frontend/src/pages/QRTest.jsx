@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { QrCode, Code2, ExternalLink, Copy } from 'lucide-react';
 import { useApi } from '../hooks/useApi';
 import { tableAPI } from '../services/apiEndpoints';
-import { getFrontendBaseUrl } from '../utils/frontendUrl';
+import { buildQrMenuUrl } from '../utils/frontendUrl';
 
 export default function QRTest() {
   const [selectedTable, setSelectedTable] = useState(null);
@@ -13,8 +13,10 @@ export default function QRTest() {
   const tables = tablesData?.tables || [];
 
   const generateQRUrl = (table) => {
-    const baseUrl = getFrontendBaseUrl();
-    const url = `${baseUrl}/menu?table=${table.tableNumber}&tableId=${table.id}`;
+    const url = buildQrMenuUrl({
+      tableNumber: table.tableNumber,
+      tableId: table.id,
+    });
     setQrUrl(url);
     setSelectedTable(table);
   };

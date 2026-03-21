@@ -11,8 +11,15 @@ const DEVELOPMENT_API_BASE_URL = 'http://localhost:3000/api';
 export default function CustomerMenu() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const tableNumber = searchParams.get('table');
-  const tableId = searchParams.get('tableId');
+  const rawTableNumber = searchParams.get('table');
+  const rawTableId = searchParams.get('tableId');
+  const tableNumber = rawTableNumber?.trim() || '';
+  const tableId = rawTableId?.trim() || '';
+  const isValidUuid =
+    !tableId || /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(tableId);
+  const parsedTableNumber = tableNumber ? Number(tableNumber) : null;
+  const isValidTableNumber = !tableNumber || (Number.isInteger(parsedTableNumber) && parsedTableNumber > 0);
+  const hasValidQrParams = Boolean(tableNumber || tableId) && isValidUuid && isValidTableNumber;
 
   const [cart, setCart] = useState([]);
   const [showCart, setShowCart] = useState(false);
@@ -25,8 +32,12 @@ export default function CustomerMenu() {
   console.log('🆔 Table id from QR:', tableId);
 
   const { data: menuItems = [], loading, error: apiError } = useApi(
-    () => customerAPI.getPublicMenu({ tableNumber, tableId }),
-    [tableNumber, tableId]
+    () => (
+      hasValidQrParams
+        ? customerAPI.getPublicMenu({ tableNumber, tableId })
+        : Promise.resolve({ data: { data: [] } })
+    ),
+    [tableNumber, tableId, hasValidQrParams]
   );
 
   // Log API errors
@@ -41,6 +52,18 @@ export default function CustomerMenu() {
           <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
           <h1 className="text-2xl font-bold text-gray-900 mb-2">Invalid QR Code</h1>
           <p className="text-gray-600">Please scan a valid table QR code</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!hasValidQrParams) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-6">
+        <div className="text-center">
+          <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
+          <h1 className="text-2xl font-bold text-gray-900 mb-2">Invalid QR Code</h1>
+          <p className="text-gray-600">This QR code is missing a valid table reference.</p>
         </div>
       </div>
     );
@@ -87,7 +110,7 @@ export default function CustomerMenu() {
     try {
       const orderData = {
         ...(tableId ? { tableId } : {}),
-        ...(tableNumber ? { tableNumber: parseInt(tableNumber, 10) } : {}),
+        ...(tableNumber ? { tableNumber: parsedTableNumber } : {}),
         items: cart.map(item => ({
           menuItemId: item.id,
           quantity: item.quantity,
