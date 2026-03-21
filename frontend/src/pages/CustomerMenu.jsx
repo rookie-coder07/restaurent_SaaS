@@ -12,6 +12,7 @@ import {
 import { useApi } from '../hooks/useApi';
 import { customerAPI } from '../services/apiEndpoints';
 import { formatCurrency } from '../utils/formatters';
+import { getMenuItemImageUrl } from '../utils/menuItemImage';
 import CartDrawer from '../components/customer/CartDrawer';
 import FloatingCartButton from '../components/customer/FloatingCartButton';
 import { useCustomerCartStore } from '../context/customerCartStore';
@@ -334,19 +335,18 @@ export default function CustomerMenu() {
             {menuItems.map((item) => {
               const buttonAdded = recentlyAddedItemId === item.id;
               const buttonBlocked = blockedItemIds[item.id];
+              const itemImageUrl = getMenuItemImageUrl(item);
 
               return (
                 <div
                   key={item.id}
                   className="group overflow-hidden rounded-3xl border border-gray-200 bg-white shadow-sm transition hover:-translate-y-1 hover:shadow-lg"
                 >
-                  {item.cloudinaryImageUrl && (
-                    <img
-                      src={item.cloudinaryImageUrl}
-                      alt={item.name}
-                      className="h-44 w-full object-cover transition duration-500 group-hover:scale-[1.03]"
-                    />
-                  )}
+                  <img
+                    src={itemImageUrl}
+                    alt={item.name}
+                    className="h-44 w-full object-cover transition duration-500 group-hover:scale-[1.03]"
+                  />
 
                   <div className="p-5">
                     <div className="flex items-start justify-between gap-4">

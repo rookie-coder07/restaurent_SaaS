@@ -132,6 +132,24 @@ const updateMenuItemImage = async (supabaseClient, itemId, imageUrl) => {
   }
 };
 
+const assertImageColumnExists = async (supabaseClient, restaurantId) => {
+  const { error } = await supabaseClient
+    .from('menu_items')
+    .select('image_url')
+    .eq('restaurant_id', restaurantId)
+    .limit(1);
+
+  if (error?.code === '42703') {
+    throw new Error(
+      'Missing menu_items.image_url column. Run backend/src/config/migrations/2026-03-22-add-menu-item-image-url.sql in Supabase first.'
+    );
+  }
+
+  if (error && error.code !== 'PGRST116') {
+    throw error;
+  }
+};
+
 const main = async () => {
   const [{ default: supabase }, cloudinaryModule] = await Promise.all([
     import('../src/config/supabase.js'),
@@ -147,6 +165,8 @@ const main = async () => {
 
   const restaurant = await getTargetRestaurant(supabase);
   console.log(`Restaurant found: ${restaurant.name} (${restaurant.id})`);
+
+  await assertImageColumnExists(supabase, restaurant.id);
 
   const menuItems = await getMenuItems(supabase, restaurant.id);
   console.log(`Total menu items found: ${menuItems.length}`);

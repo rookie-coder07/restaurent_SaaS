@@ -3,6 +3,7 @@ import { useApi } from '../hooks/useApi';
 import { menuAPI } from '../services/apiEndpoints';
 import { Plus, Edit2, Trash2, Loader, Upload, X, AlertCircle } from 'lucide-react';
 import { formatCurrency } from '../utils/formatters';
+import { getMenuItemImageUrl } from '../utils/menuItemImage';
 
 export default function MenuManagement() {
   const { data: itemsData = {}, loading, execute: refetch } = useApi(() =>
@@ -223,13 +224,11 @@ export default function MenuManagement() {
             items.map((item) => (
               <div key={item.id} className="card flex items-center justify-between hover:shadow-lg transition">
                 <div className="flex items-center gap-4 flex-1">
-                  {item.cloudinaryImageUrl && (
-                    <img
-                      src={item.cloudinaryImageUrl}
-                      alt={item.name}
-                      className="w-16 h-16 object-cover rounded-lg"
-                    />
-                  )}
+                  <img
+                    src={getMenuItemImageUrl(item)}
+                    alt={item.name}
+                    className="w-16 h-16 object-cover rounded-lg"
+                  />
                   <div className="flex-1">
                     <h3 className="font-semibold text-gray-900">{item.name}</h3>
                     <p className="text-sm text-gray-600">{item.description}</p>
