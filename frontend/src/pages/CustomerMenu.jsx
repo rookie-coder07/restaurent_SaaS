@@ -1,12 +1,25 @@
+import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import { useState } from 'react';
+import {
+  ShoppingCart,
+  Plus,
+  Loader,
+  Check,
+  AlertCircle,
+  ArrowRight,
+  Sparkles,
+} from 'lucide-react';
 import { useApi } from '../hooks/useApi';
 import { customerAPI } from '../services/apiEndpoints';
-import { ShoppingCart, Plus, Minus, Loader, ArrowLeft, Check, AlertCircle } from 'lucide-react';
 import { formatCurrency } from '../utils/formatters';
+import CartDrawer from '../components/customer/CartDrawer';
+import FloatingCartButton from '../components/customer/FloatingCartButton';
+import { useCustomerCartStore } from '../context/customerCartStore';
 
 const PRODUCTION_API_BASE_URL = 'https://restaurent-backend-448t.onrender.com/api';
 const DEVELOPMENT_API_BASE_URL = 'http://localhost:3000/api';
+
+const ADDED_STATE_TIMEOUT_MS = 1400;
 
 export default function CustomerMenu() {
   const [searchParams] = useSearchParams();
@@ -20,16 +33,21 @@ export default function CustomerMenu() {
   const parsedTableNumber = tableNumber ? Number(tableNumber) : null;
   const isValidTableNumber = !tableNumber || (Number.isInteger(parsedTableNumber) && parsedTableNumber > 0);
   const hasValidQrParams = Boolean(tableNumber || tableId) && isValidUuid && isValidTableNumber;
+  const cartKey = tableId || `table-${tableNumber}`;
 
-  const [cart, setCart] = useState([]);
   const [showCart, setShowCart] = useState(false);
   const [isPlacingOrder, setIsPlacingOrder] = useState(false);
-  const [orderStatus, setOrderStatus] = useState(null); // 'success', 'error'
+  const [orderStatus, setOrderStatus] = useState(null);
   const [orderMessage, setOrderMessage] = useState('');
+  const [recentlyAddedItemId, setRecentlyAddedItemId] = useState(null);
+  const [cartToast, setCartToast] = useState('');
+  const [blockedItemIds, setBlockedItemIds] = useState({});
 
-  console.log('🔍 CustomerMenu loaded - Query params:', Object.fromEntries(searchParams));
-  console.log('📊 Table number from QR:', tableNumber);
-  console.log('🆔 Table id from QR:', tableId);
+  const cart = useCustomerCartStore((state) => state.carts[cartKey] || []);
+  const addItem = useCustomerCartStore((state) => state.addItem);
+  const updateQuantity = useCustomerCartStore((state) => state.updateQuantity);
+  const clearCart = useCustomerCartStore((state) => state.clearCart);
+  const removeCart = useCustomerCartStore((state) => state.removeCart);
 
   const { data: menuItems = [], loading, error: apiError } = useApi(
     () => (
@@ -40,18 +58,54 @@ export default function CustomerMenu() {
     [tableNumber, tableId, hasValidQrParams]
   );
 
-  // Log API errors
-  if (apiError) {
-    console.error('❌ API Error fetching menu:', apiError);
-  }
+  const cartItemCount = useMemo(
+    () => cart.reduce((sum, item) => sum + item.quantity, 0),
+    [cart]
+  );
+  const cartTotal = useMemo(
+    () => cart.reduce((sum, item) => sum + item.price * item.quantity, 0),
+    [cart]
+  );
+
+  useEffect(() => {
+    if (!cartToast) {
+      return undefined;
+    }
+
+    const timer = window.setTimeout(() => setCartToast(''), ADDED_STATE_TIMEOUT_MS);
+    return () => window.clearTimeout(timer);
+  }, [cartToast]);
+
+  useEffect(() => {
+    if (!recentlyAddedItemId) {
+      return undefined;
+    }
+
+    const timer = window.setTimeout(() => setRecentlyAddedItemId(null), ADDED_STATE_TIMEOUT_MS);
+    return () => window.clearTimeout(timer);
+  }, [recentlyAddedItemId]);
+
+  useEffect(() => {
+    if (cartItemCount === 0) {
+      setShowCart(false);
+    }
+  }, [cartItemCount]);
+
+  useEffect(() => {
+    if (!apiError) {
+      return;
+    }
+
+    console.error('API Error fetching menu:', apiError);
+  }, [apiError]);
 
   if (!tableNumber && !tableId) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-6">
+      <div className="flex min-h-screen items-center justify-center bg-gray-50 p-6">
         <div className="text-center">
-          <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
-          <h1 className="text-2xl font-bold text-gray-900 mb-2">Invalid QR Code</h1>
-          <p className="text-gray-600">Please scan a valid table QR code</p>
+          <AlertCircle className="mx-auto mb-4 h-12 w-12 text-red-500" />
+          <h1 className="mb-2 text-2xl font-bold text-gray-900">Invalid QR Code</h1>
+          <p className="text-gray-600">Please scan a valid table QR code.</p>
         </div>
       </div>
     );
@@ -59,48 +113,52 @@ export default function CustomerMenu() {
 
   if (!hasValidQrParams) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-6">
+      <div className="flex min-h-screen items-center justify-center bg-gray-50 p-6">
         <div className="text-center">
-          <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
-          <h1 className="text-2xl font-bold text-gray-900 mb-2">Invalid QR Code</h1>
+          <AlertCircle className="mx-auto mb-4 h-12 w-12 text-red-500" />
+          <h1 className="mb-2 text-2xl font-bold text-gray-900">Invalid QR Code</h1>
           <p className="text-gray-600">This QR code is missing a valid table reference.</p>
         </div>
       </div>
     );
   }
 
-  const addToCart = (item) => {
-    const existing = cart.find(c => c.id === item.id);
-    if (existing) {
-      setCart(cart.map(c =>
-        c.id === item.id ? { ...c, quantity: c.quantity + 1 } : c
-      ));
-    } else {
-      setCart([...cart, { ...item, quantity: 1 }]);
+  const handleAddToCart = (item) => {
+    if (!item.isAvailable || blockedItemIds[item.id]) {
+      return;
     }
+
+    addItem(cartKey, {
+      id: item.id,
+      name: item.name,
+      price: item.price,
+      description: item.description,
+    });
+
+    setRecentlyAddedItemId(item.id);
+    setCartToast(`${item.name} added to cart`);
+    setBlockedItemIds((current) => ({ ...current, [item.id]: true }));
+
+    window.setTimeout(() => {
+      setBlockedItemIds((current) => {
+        const next = { ...current };
+        delete next[item.id];
+        return next;
+      });
+    }, 450);
   };
 
-  const removeFromCart = (itemId) => {
-    setCart(cart.filter(c => c.id !== itemId));
+  const handleUpdateQuantity = (itemId, quantity) => {
+    updateQuantity(cartKey, itemId, quantity);
   };
 
-  const updateQuantity = (itemId, quantity) => {
-    if (quantity <= 0) {
-      removeFromCart(itemId);
-    } else {
-      setCart(cart.map(c =>
-        c.id === itemId ? { ...c, quantity } : c
-      ));
-    }
+  const handleClearCart = () => {
+    clearCart(cartKey);
+    setCartToast('Cart cleared');
   };
-
-  const cartTotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
 
   const handlePlaceOrder = async () => {
-    if (cart.length === 0) {
-      setOrderStatus('error');
-      setOrderMessage('Your cart is empty');
-      setTimeout(() => setOrderStatus(null), 3000);
+    if (cart.length === 0 || isPlacingOrder) {
       return;
     }
 
@@ -111,7 +169,7 @@ export default function CustomerMenu() {
       const orderData = {
         ...(tableId ? { tableId } : {}),
         ...(tableNumber ? { tableNumber: parsedTableNumber } : {}),
-        items: cart.map(item => ({
+        items: cart.map((item) => ({
           menuItemId: item.id,
           quantity: item.quantity,
           unitPrice: item.price,
@@ -121,23 +179,18 @@ export default function CustomerMenu() {
         notes: '',
       };
 
-      console.log('📤 Submitting order:', orderData);
-
       const response = await customerAPI.placeOrder(orderData);
       const createdOrder = response.data?.data;
 
-      console.log('✅ Order placed successfully:', response);
-
       setOrderStatus('success');
       setOrderMessage('Order placed successfully! The kitchen will start preparing your food.');
-      setCart([]);
+      removeCart(cartKey);
       setShowCart(false);
 
-      setTimeout(() => {
+      window.setTimeout(() => {
         navigate(`/order-status?order=${createdOrder?.id}&table=${tableNumber || ''}`);
-      }, 3000);
+      }, 2200);
     } catch (error) {
-      console.error('❌ Error placing order:', error);
       setOrderStatus('error');
       setOrderMessage(
         error.response?.data?.message || error.message || 'Failed to place order. Please try again.'
@@ -149,9 +202,9 @@ export default function CustomerMenu() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div className="flex min-h-screen items-center justify-center bg-gray-50">
         <div className="text-center">
-          <Loader className="w-8 h-8 animate-spin text-blue-600 mx-auto mb-4" />
+          <Loader className="mx-auto mb-4 h-8 w-8 animate-spin text-blue-600" />
           <p className="text-gray-600">Loading menu...</p>
         </div>
       </div>
@@ -164,25 +217,26 @@ export default function CustomerMenu() {
       import.meta.env.NEXT_PUBLIC_API_URL ||
       (import.meta.env.PROD ? PRODUCTION_API_BASE_URL : DEVELOPMENT_API_BASE_URL);
     const apiUrl = `${apiBaseUrl}/v1/customer/menu/items?table=${tableNumber || ''}${tableId ? `&tableId=${tableId}` : ''}`;
+
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-6">
-        <div className="text-center max-w-md">
-          <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
-          <h1 className="text-2xl font-bold text-gray-900 mb-2">Unable to Load Menu</h1>
-          <p className="text-gray-600 mb-4">{apiError}</p>
-          <div className="bg-gray-100 p-4 rounded text-left mb-4">
-            <p className="text-xs text-gray-600 font-mono break-all">{apiUrl}</p>
+      <div className="flex min-h-screen items-center justify-center bg-gray-50 p-6">
+        <div className="max-w-md text-center">
+          <AlertCircle className="mx-auto mb-4 h-12 w-12 text-red-500" />
+          <h1 className="mb-2 text-2xl font-bold text-gray-900">Unable to Load Menu</h1>
+          <p className="mb-4 text-gray-600">{apiError}</p>
+          <div className="mb-4 rounded-2xl bg-gray-100 p-4 text-left">
+            <p className="break-all font-mono text-xs text-gray-600">{apiUrl}</p>
           </div>
-          <div className="space-x-2">
+          <div className="flex flex-wrap justify-center gap-3">
             <button
               onClick={() => window.location.reload()}
-              className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+              className="rounded-xl bg-blue-600 px-6 py-2 text-white transition hover:bg-blue-700"
             >
               Retry
             </button>
             <button
               onClick={() => window.location.href = '/'}
-              className="px-6 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition"
+              className="rounded-xl bg-gray-700 px-6 py-2 text-white transition hover:bg-gray-800"
             >
               Go Back
             </button>
@@ -193,157 +247,164 @@ export default function CustomerMenu() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Status Messages */}
+    <div className="min-h-screen bg-[radial-gradient(circle_at_top,_#fef3c7,_#f8fafc_35%,_#f8fafc)] pb-32">
       {orderStatus === 'success' && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg shadow-lg p-8 text-center max-w-md w-full">
-            <Check className="w-12 h-12 text-green-600 mx-auto mb-4" />
-            <h2 className="text-2xl font-bold text-gray-900 mb-2">Order Confirmed!</h2>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-md rounded-3xl bg-white p-8 text-center shadow-2xl">
+            <Check className="mx-auto mb-4 h-12 w-12 text-green-600" />
+            <h2 className="mb-2 text-2xl font-bold text-gray-900">Order Confirmed!</h2>
             <p className="text-gray-600">{orderMessage}</p>
           </div>
         </div>
       )}
 
       {orderStatus === 'error' && (
-        <div className="fixed top-4 right-4 bg-red-50 border border-red-200 rounded-lg p-4 flex items-center gap-3 z-50 max-w-md">
-          <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0" />
-          <p className="text-red-700">{orderMessage}</p>
+        <div className="fixed right-4 top-4 z-50 flex max-w-md items-center gap-3 rounded-2xl border border-red-200 bg-red-50 p-4 text-red-700 shadow-lg">
+          <AlertCircle className="h-5 w-5 flex-shrink-0" />
+          <p>{orderMessage}</p>
         </div>
       )}
 
-      {/* Header */}
-      <header className="bg-white border-b border-gray-200 sticky top-0 z-10">
-        <div className="max-w-4xl mx-auto px-6 py-4 flex items-center justify-between">
+      {cartToast && (
+        <div className="fixed left-1/2 top-4 z-50 -translate-x-1/2 rounded-full bg-emerald-500 px-4 py-2 text-sm font-semibold text-white shadow-lg">
+          {cartToast}
+        </div>
+      )}
+
+      <CartDrawer
+        isOpen={showCart}
+        items={cart}
+        total={cartTotal}
+        isPlacingOrder={isPlacingOrder}
+        onClose={() => setShowCart(false)}
+        onClearCart={handleClearCart}
+        onUpdateQuantity={handleUpdateQuantity}
+        onPlaceOrder={handlePlaceOrder}
+      />
+
+      {cartItemCount > 0 && !showCart && (
+        <FloatingCartButton itemCount={cartItemCount} onClick={() => setShowCart(true)} />
+      )}
+
+      <header className="sticky top-0 z-30 border-b border-gray-200/70 bg-white/90 backdrop-blur">
+        <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-4 sm:px-6">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Menu</h1>
+            <p className="text-xs font-semibold uppercase tracking-[0.3em] text-amber-500">Scan to Order</p>
+            <h1 className="mt-1 text-2xl font-bold text-gray-900">Menu</h1>
             <p className="text-sm text-gray-600">Table {tableNumber || 'Guest'}</p>
           </div>
+
           <button
-            onClick={() => setShowCart(!showCart)}
-            className="relative p-2 hover:bg-gray-100 rounded-lg transition"
+            onClick={() => setShowCart(true)}
+            className="relative rounded-full border border-gray-200 bg-white p-3 text-gray-700 transition hover:border-gray-300 hover:bg-gray-50"
           >
-            <ShoppingCart className="w-6 h-6 text-gray-700" />
-            {cart.length > 0 && (
-              <span className="absolute top-1 right-1 w-5 h-5 bg-red-500 text-white text-xs rounded-full flex items-center justify-center font-bold">
-                {cart.length}
+            <ShoppingCart className="h-6 w-6" />
+            {cartItemCount > 0 && (
+              <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white">
+                {cartItemCount}
               </span>
             )}
           </button>
         </div>
       </header>
 
-      <div className="max-w-4xl mx-auto px-6 py-8">
-        {showCart ? (
-          <div>
-            <button
-              onClick={() => setShowCart(false)}
-              className="flex items-center gap-2 text-blue-600 hover:text-blue-700 font-semibold mb-6"
-            >
-              <ArrowLeft className="w-4 h-4" />
-              Back to Menu
-            </button>
+      <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6">
+        <div className="mb-8 rounded-3xl border border-amber-100 bg-white/80 p-5 shadow-sm">
+          <div className="flex items-start gap-3">
+            <div className="rounded-2xl bg-amber-100 p-3 text-amber-700">
+              <Sparkles className="h-5 w-5" />
+            </div>
+            <div>
+              <h2 className="text-lg font-semibold text-gray-900">Ready when you are</h2>
+              <p className="mt-1 text-sm leading-6 text-gray-600">
+                Add dishes to your cart as you browse. Your order stays saved on this table until you place it.
+              </p>
+            </div>
+          </div>
+        </div>
 
-            {cart.length === 0 ? (
-              <div className="text-center py-12">
-                <ShoppingCart className="w-12 h-12 text-gray-300 mx-auto mb-4" />
-                <p className="text-gray-600">Your cart is empty</p>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {cart.map(item => (
-                  <div key={item.id} className="bg-white rounded-lg p-4 flex items-center justify-between">
-                    <div className="flex-1">
-                      <h3 className="font-semibold text-gray-900">{item.name}</h3>
-                      <p className="text-gray-600">{formatCurrency(item.price)} each</p>
-                    </div>
-                    <div className="flex items-center gap-4">
-                      <div className="flex items-center gap-2 bg-gray-100 rounded-lg">
-                        <button
-                          onClick={() => updateQuantity(item.id, item.quantity - 1)}
-                          className="p-1 hover:bg-gray-200"
-                        >
-                          <Minus className="w-4 h-4" />
-                        </button>
-                        <span className="px-3 font-semibold">{item.quantity}</span>
-                        <button
-                          onClick={() => updateQuantity(item.id, item.quantity + 1)}
-                          className="p-1 hover:bg-gray-200"
-                        >
-                          <Plus className="w-4 h-4" />
-                        </button>
-                      </div>
-                      <p className="font-semibold text-gray-900 w-20 text-right">
-                        {formatCurrency(item.price * item.quantity)}
-                      </p>
-                    </div>
-                  </div>
-                ))}
-
-                <div className="bg-white rounded-lg p-4 border-t-2 border-gray-200">
-                  <div className="flex justify-between items-center mb-4 text-lg font-bold">
-                    <span>Total:</span>
-                    <span>{formatCurrency(cartTotal)}</span>
-                  </div>
-                  <button
-                    onClick={handlePlaceOrder}
-                    disabled={isPlacingOrder || cart.length === 0}
-                    className="w-full bg-blue-600 text-white py-3 rounded-lg font-semibold hover:bg-blue-700 transition disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                  >
-                    {isPlacingOrder ? (
-                      <>
-                        <Loader className="w-5 h-5 animate-spin" />
-                        Placing Order...
-                      </>
-                    ) : (
-                      <>
-                        <ShoppingCart className="w-5 h-5" />
-                        Place Order
-                      </>
-                    )}
-                  </button>
-                </div>
-              </div>
-            )}
+        {menuItems?.length === 0 ? (
+          <div className="rounded-3xl border border-dashed border-gray-300 bg-white px-6 py-16 text-center shadow-sm">
+            <ShoppingCart className="mx-auto mb-4 h-12 w-12 text-gray-300" />
+            <h2 className="text-xl font-semibold text-gray-900">No menu items available yet</h2>
+            <p className="mt-2 text-gray-500">Please check back in a bit or ask the restaurant staff for help.</p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {menuItems?.map(item => (
-              <div key={item.id} className="bg-white rounded-lg shadow-soft hover:shadow-md-soft transition overflow-hidden">
-                {item.cloudinaryImageUrl && (
-                  <img
-                    src={item.cloudinaryImageUrl}
-                    alt={item.name}
-                    className="w-full h-40 object-cover"
-                  />
-                )}
-                <div className="p-4">
-                  <h3 className="font-bold text-gray-900 mb-1">{item.name}</h3>
-                  <p className="text-gray-600 text-sm mb-3 line-clamp-2">{item.description}</p>
-                  <div className="flex justify-between items-center">
-                    <span className="text-lg font-bold text-gray-900">
-                      {formatCurrency(item.price)}
-                    </span>
-                    <button
-                      onClick={() => addToCart(item)}
-                      disabled={!item.isAvailable}
-                      className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-                    >
-                      <Plus className="w-4 h-4" />
-                      Add
-                    </button>
+          <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
+            {menuItems.map((item) => {
+              const buttonAdded = recentlyAddedItemId === item.id;
+              const buttonBlocked = blockedItemIds[item.id];
+
+              return (
+                <div
+                  key={item.id}
+                  className="group overflow-hidden rounded-3xl border border-gray-200 bg-white shadow-sm transition hover:-translate-y-1 hover:shadow-lg"
+                >
+                  {item.cloudinaryImageUrl && (
+                    <img
+                      src={item.cloudinaryImageUrl}
+                      alt={item.name}
+                      className="h-44 w-full object-cover transition duration-500 group-hover:scale-[1.03]"
+                    />
+                  )}
+
+                  <div className="p-5">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <h3 className="text-lg font-bold text-gray-900">{item.name}</h3>
+                        <p className="mt-2 text-sm leading-6 text-gray-600">{item.description}</p>
+                      </div>
+                      <span className="rounded-full bg-gray-100 px-3 py-1 text-sm font-semibold text-gray-900">
+                        {formatCurrency(item.price)}
+                      </span>
+                    </div>
+
+                    <div className="mt-5 flex items-center justify-between gap-3">
+                      <span className={`text-sm font-medium ${item.isAvailable ? 'text-emerald-600' : 'text-red-500'}`}>
+                        {item.isAvailable ? 'Available now' : 'Currently unavailable'}
+                      </span>
+
+                      <button
+                        onClick={() => handleAddToCart(item)}
+                        disabled={!item.isAvailable || buttonBlocked}
+                        className={`inline-flex min-w-[8.5rem] items-center justify-center gap-2 rounded-full px-4 py-2.5 text-sm font-semibold transition ${
+                          buttonAdded
+                            ? 'scale-105 bg-emerald-500 text-white'
+                            : 'bg-gray-900 text-white hover:bg-black'
+                        } disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-500`}
+                      >
+                        {buttonAdded ? <Check className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+                        {buttonAdded ? 'Added' : 'Add to Cart'}
+                      </button>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
-            {menuItems?.length === 0 && (
-              <div className="col-span-full text-center py-12">
-                <p className="text-gray-600">No menu items are available for this table yet.</p>
-              </div>
-            )}
+              );
+            })}
           </div>
         )}
       </div>
+
+      {cartItemCount > 0 && !showCart && (
+        <div className="fixed inset-x-0 bottom-0 z-30 border-t border-gray-200 bg-white/95 px-4 py-3 shadow-[0_-8px_30px_rgba(15,23,42,0.08)] backdrop-blur md:px-6">
+          <div className="mx-auto flex max-w-5xl items-center justify-between gap-4">
+            <div>
+              <p className="text-sm font-semibold text-gray-900">
+                {cartItemCount} {cartItemCount === 1 ? 'item' : 'items'} in cart
+              </p>
+              <p className="text-sm text-gray-500">{formatCurrency(cartTotal)}</p>
+            </div>
+
+            <button
+              onClick={() => setShowCart(true)}
+              className="inline-flex items-center gap-2 rounded-full bg-emerald-500 px-5 py-3 text-sm font-semibold text-white transition hover:bg-emerald-600"
+            >
+              Proceed to Order
+              <ArrowRight className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
