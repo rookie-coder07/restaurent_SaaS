@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { ArrowLeft, Eye, EyeOff, Loader, Sparkles } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
-import { validateEmail, validatePassword, validatePhone } from '../utils/validators';
+import { validateEmail, validatePhone } from '../utils/validators';
 import Card from '../components/common/Card';
 import Input from '../components/common/Input';
 import Button from '../components/common/Button';
@@ -33,9 +33,6 @@ export default function Register() {
     else if (!validatePhone(formData.phone)) newErrors.phone = 'Phone must be 10 digits';
     if (!formData.city.trim()) newErrors.city = 'City is required';
     if (!formData.password) newErrors.password = 'Password is required';
-    else if (!validatePassword(formData.password)) {
-      newErrors.password = 'Use uppercase, lowercase, numbers and 8+ characters';
-    }
     if (formData.password !== formData.confirmPassword) newErrors.confirmPassword = 'Passwords do not match';
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;

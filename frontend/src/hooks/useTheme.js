@@ -30,7 +30,6 @@ export default function useTheme() {
   useEffect(() => {
     applyTheme(theme);
     localStorage.setItem(STORAGE_KEY, theme);
-    console.log('Current theme:', theme);
   }, [theme]);
 
   useEffect(() => {

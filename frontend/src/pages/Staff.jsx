@@ -58,19 +58,56 @@ export default function StaffManagement() {
     setShowForm(false);
   };
 
+  const validateStaffForm = () => {
+    if (!formData.name.trim() || formData.name.trim().length < 2) {
+      return 'Name must be at least 2 characters.';
+    }
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email.trim())) {
+      return 'Please enter a valid email address.';
+    }
+
+    if (!/^\d{10}$/.test(formData.phone.trim())) {
+      return 'Phone number must be exactly 10 digits.';
+    }
+
+    if (!formData.password) {
+      return 'Password is required.';
+    }
+
+    return null;
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError(null);
+
+    const validationMessage = validateStaffForm();
+    if (validationMessage) {
+      setError(validationMessage);
+      return;
+    }
+
     setSubmitting(true);
 
     try {
-      await restaurantAPI.createStaff({ ...formData });
+      await restaurantAPI.createStaff({
+        ...formData,
+        name: formData.name.trim(),
+        email: formData.email.trim().toLowerCase(),
+        phone: formData.phone.trim(),
+      });
       setSuccess('Staff member added successfully');
       resetForm();
       await refetch();
       window.setTimeout(() => setSuccess(null), 3000);
     } catch (err) {
-      setError(err.response?.data?.message || 'Failed to add staff');
+      const details = err.response?.data?.details;
+      const detailedMessage =
+        Array.isArray(details) && details.length > 0
+          ? details.map((detail) => detail.message).join(' ')
+          : null;
+      setError(detailedMessage || err.response?.data?.message || 'Failed to add staff');
     } finally {
       setSubmitting(false);
     }
@@ -100,7 +137,7 @@ export default function StaffManagement() {
   return (
     <div className="space-y-6">
       {success ? <Toast type="success" message={success} /> : null}
-      {error ? <Toast type="error" message={error} /> : null}
+      {error && !showForm ? <Toast type="error" message={error} /> : null}
 
       <Card className="overflow-hidden bg-[radial-gradient(circle_at_top_right,_rgba(79,70,229,0.14),_transparent_35%),var(--color-surface)]">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
@@ -186,9 +223,37 @@ export default function StaffManagement() {
 
       <Modal title="Add Staff Member" isOpen={showForm} onClose={() => { resetForm(); setError(null); }} maxWidth="max-w-lg">
         <form onSubmit={handleSubmit} className="space-y-4">
-          <Input label="Name" value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} required />
-          <Input label="Email" type="email" value={formData.email} onChange={(e) => setFormData({ ...formData, email: e.target.value })} required />
-          <Input label="Phone" type="tel" value={formData.phone} onChange={(e) => setFormData({ ...formData, phone: e.target.value })} />
+          {error ? (
+            <div className="rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm font-medium text-red-300">
+              {error}
+            </div>
+          ) : null}
+
+          <Input
+            label="Name"
+            autoComplete="name"
+            value={formData.name}
+            onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+            required
+          />
+          <Input
+            label="Email"
+            type="email"
+            autoComplete="username"
+            value={formData.email}
+            onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+            required
+          />
+          <Input
+            label="Phone"
+            type="tel"
+            autoComplete="tel"
+            inputMode="numeric"
+            maxLength={10}
+            value={formData.phone}
+            onChange={(e) => setFormData({ ...formData, phone: e.target.value.replace(/\D/g, '').slice(0, 10) })}
+            required
+          />
 
           <label className="space-y-2">
             <span className="text-sm font-medium text-[var(--color-text)]">Role</span>
@@ -202,6 +267,7 @@ export default function StaffManagement() {
           <Input
             label="Temporary Password"
             type="password"
+            autoComplete="new-password"
             value={formData.password}
             onChange={(e) => setFormData({ ...formData, password: e.target.value })}
             required

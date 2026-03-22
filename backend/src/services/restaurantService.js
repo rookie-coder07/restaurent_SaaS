@@ -36,7 +36,7 @@ export class RestaurantService {
       restaurantId: user.restaurant_id,
       name: user.name,
       email: user.email,
-      phone: user.phone || '',
+      phone: user.phone || user.phone_number || '',
       role: user.role,
       status: user.status || 'active',
       createdAt: user.created_at,
@@ -333,21 +333,31 @@ export class RestaurantService {
       }
 
       const passwordHash = await AuthService.hashPassword(staffData.password);
+      const staffPayload = {
+        restaurant_id: restaurantId,
+        name: staffData.name,
+        email: staffData.email.toLowerCase(),
+        phone: staffData.phone,
+        role: staffData.role,
+        password_hash: passwordHash,
+        status: 'active',
+      };
+
       const { data: user, error } = await supabase
         .from('users')
-        .insert([{
-          restaurant_id: restaurantId,
-          name: staffData.name,
-          email: staffData.email.toLowerCase(),
-          phone: staffData.phone,
-          role: staffData.role,
-          password_hash: passwordHash,
-          status: 'active',
-        }])
+        .insert([staffPayload])
         .select()
         .single();
 
-      if (error) throw error;
+      if (error) {
+        if (error.code === 'PGRST204' && String(error.message || '').includes("'phone'")) {
+          throw new Error(
+            "Database schema is missing users.phone. Run: ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(20);"
+          );
+        }
+
+        throw error;
+      }
 
       return this.transformStaffUser(user);
     } catch (error) {
