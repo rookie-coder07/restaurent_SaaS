@@ -18,6 +18,7 @@ import Tables from './pages/Tables';
 import Staff from './pages/Staff';
 import QRTest from './pages/QRTest';
 import NotFound from './pages/NotFound';
+import Settings from './pages/Settings';
 
 function App() {
   const { isAuthenticated, hydrate } = useAuthStore();
@@ -47,6 +48,7 @@ function App() {
             <Route path="/tables" element={<Tables />} />
             <Route path="/staff" element={<Staff />} />
             <Route path="/qr-test" element={<QRTest />} />
+            <Route path="/settings" element={<Settings />} />
           </Route>
 
           {/* 404 */}

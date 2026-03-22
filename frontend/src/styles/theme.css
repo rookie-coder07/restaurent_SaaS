@@ -1,174 +1,55 @@
-/* Theme colors and CSS variables */
-
 :root {
-  --color-primary: rgb(100, 116, 139);
-  --color-primary-dark: rgb(30, 41, 59);
-  --color-accent: rgb(239, 68, 68);
-  --color-accent-dark: rgb(185, 28, 28);
-  --color-success: rgb(34, 197, 94);
-  --color-warning: rgb(251, 191, 36);
-  --color-error: rgb(239, 68, 68);
-  --color-info: rgb(59, 130, 246);
-
-  --spacing-xs: 0.25rem;
-  --spacing-sm: 0.5rem;
-  --spacing-md: 1rem;
-  --spacing-lg: 1.5rem;
-  --spacing-xl: 2rem;
-  --spacing-2xl: 3rem;
-
-  --border-radius-sm: 0.375rem;
-  --border-radius-md: 0.5rem;
-  --border-radius-lg: 0.75rem;
-  --border-radius-xl: 1rem;
+  --color-primary: #4f46e5;
+  --color-primary-soft: rgba(79, 70, 229, 0.12);
+  --color-bg: #ffffff;
+  --color-surface: #ffffff;
+  --color-surface-muted: #f8fafc;
+  --color-text: #111827;
+  --color-text-muted: #475569;
+  --color-text-subtle: #94a3b8;
+  --color-border: #e5e7eb;
+  --shadow-card: 0 20px 45px rgba(15, 23, 42, 0.06);
+  --shadow-floating: 0 28px 65px rgba(15, 23, 42, 0.18);
 }
 
-/* Light mode */
-[data-theme='light'] {
-  --bg-primary: rgb(255, 255, 255);
-  --bg-secondary: rgb(247, 249, 250);
-  --bg-tertiary: rgb(241, 245, 249);
-  --text-primary: rgb(15, 23, 42);
-  --text-secondary: rgb(71, 85, 105);
-  --text-tertiary: rgb(148, 163, 184);
-  --border-color: rgb(226, 232, 240);
+[data-theme='default'] {
+  --color-primary: #4f46e5;
+  --color-primary-soft: rgba(79, 70, 229, 0.12);
+  --color-bg: #ffffff;
+  --color-surface: #ffffff;
+  --color-surface-muted: #f8fafc;
+  --color-text: #111827;
+  --color-text-muted: #475569;
+  --color-text-subtle: #94a3b8;
+  --color-border: #e5e7eb;
+  --shadow-card: 0 20px 45px rgba(15, 23, 42, 0.06);
+  --shadow-floating: 0 28px 65px rgba(15, 23, 42, 0.18);
 }
 
-/* Dark mode */
+[data-theme='school'] {
+  --color-primary: #2563eb;
+  --color-primary-soft: rgba(37, 99, 235, 0.12);
+  --color-bg: #f1f5f9;
+  --color-surface: #ffffff;
+  --color-surface-muted: #e2e8f0;
+  --color-text: #0f172a;
+  --color-text-muted: #334155;
+  --color-text-subtle: #64748b;
+  --color-border: #cbd5e1;
+  --shadow-card: 0 20px 45px rgba(37, 99, 235, 0.08);
+  --shadow-floating: 0 28px 65px rgba(15, 23, 42, 0.18);
+}
+
 [data-theme='dark'] {
-  --bg-primary: rgb(15, 23, 42);
-  --bg-secondary: rgb(30, 41, 59);
-  --bg-tertiary: rgb(51, 65, 85);
-  --text-primary: rgb(241, 245, 249);
-  --text-secondary: rgb(203, 213, 225);
-  --text-tertiary: rgb(148, 163, 184);
-  --border-color: rgb(51, 65, 85);
-}
-
-/* Form elements theme */
-input,
-textarea,
-select {
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
-}
-
-input:focus,
-textarea:focus,
-select:focus {
-  outline: none;
-  border-color: var(--color-primary);
-  box-shadow: 0 0 0 3px rgba(100, 116, 139, 0.1);
-}
-
-/* Button theme */
-.btn {
-  padding: 0.5rem 1rem;
-  border-radius: 0.5rem;
-  font-weight: 500;
-  transition: all 0.2s ease;
-  outline: none;
-}
-
-.btn:focus {
-  outline: none;
-  box-shadow: 0 0 0 2px white, 0 0 0 4px #3B82F6;
-}
-
-.btn-primary {
-  background-color: #64748b;
-  color: white;
-}
-
-.btn-primary:hover {
-  background-color: #475569;
-}
-
-.btn-secondary {
-  background-color: #e5e7eb;
-  color: #1f2937;
-}
-
-.btn-secondary:hover {
-  background-color: #d1d5db;
-}
-
-.btn-danger {
-  background-color: #ef4444;
-  color: white;
-}
-
-.btn-danger:hover {
-  background-color: #dc2626;
-}
-
-/* Card theme */
-.card {
-  background-color: white;
-  border-radius: 0.5rem;
-  border: 1px solid #f3f4f6;
-  padding: 1.5rem;
-  transition: box-shadow 0.2s ease;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-}
-
-.card:hover {
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-}
-
-/* Input field styling */
-.input {
-  width: 100%;
-  padding: 0.5rem 1rem;
-  border: 1px solid #d1d5db;
-  border-radius: 0.5rem;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
-}
-
-.input:focus {
-  outline: none;
-  border-color: #3B82F6;
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
-}
-
-.input:disabled {
-  background-color: #f3f4f6;
-  cursor: not-allowed;
-}
-
-/* Shadow utilities */
-.shadow-soft {
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1), 0 1px 2px rgba(0, 0, 0, 0.06);
-}
-
-.shadow-md-soft {
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1), 0 2px 4px rgba(0, 0, 0, 0.06);
-}
-
-/* Line clamp utilities */
-.line-clamp-2 {
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.line-clamp-3 {
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-/* Transitions */
-.transition-all {
-  transition: all 0.3s ease;
-}
-
-/* Utility classes for backward compatibility */
-.shadow-soft {
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1), 0 1px 2px rgba(0, 0, 0, 0.06);
-}
-
-.shadow-md-soft {
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1), 0 2px 4px rgba(0, 0, 0, 0.06);
+  --color-primary: #4f46e5;
+  --color-primary-soft: rgba(99, 102, 241, 0.2);
+  --color-bg: #0f172a;
+  --color-surface: #111c34;
+  --color-surface-muted: #17233f;
+  --color-text: #e5e7eb;
+  --color-text-muted: #cbd5e1;
+  --color-text-subtle: #94a3b8;
+  --color-border: #24324f;
+  --shadow-card: 0 24px 50px rgba(2, 6, 23, 0.38);
+  --shadow-floating: 0 28px 65px rgba(2, 6, 23, 0.45);
 }
