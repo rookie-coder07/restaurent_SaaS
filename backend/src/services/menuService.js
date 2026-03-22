@@ -7,6 +7,7 @@ export class MenuService {
 
     return {
       id: category.id,
+      _id: category.id,
       restaurantId: category.restaurant_id,
       name: category.name,
       description: category.description || '',
@@ -22,11 +23,14 @@ export class MenuService {
 
     return {
       id: item.id,
+      _id: item.id,
       restaurantId: item.restaurant_id,
       categoryId: item.category_id,
+      category_id: item.category_id,
       name: item.name,
       description: item.description || '',
       price: Number(item.price || 0),
+      imageUrl: item.image_url || '',
       cloudinaryImageUrl: item.image_url || '',
       preparationTime: item.preparation_time || 15,
       tags: item.tags ? item.tags.split(',').map((tag) => tag.trim()).filter(Boolean) : [],
@@ -143,7 +147,7 @@ export class MenuService {
     try {
       const payload = {
         restaurant_id: restaurantId,
-        category_id: itemData.categoryId || null,
+        category_id: itemData.categoryId,
         name: itemData.name,
         description: itemData.description,
         price: itemData.price,
@@ -215,6 +219,7 @@ export class MenuService {
   static async updateMenuItem(restaurantId, itemId, updateData, imageData = null) {
     try {
       const payload = {
+        category_id: updateData.categoryId,
         name: updateData.name,
         description: updateData.description,
         price: updateData.price,

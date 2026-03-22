@@ -10,6 +10,7 @@ import Modal from '../components/common/Modal';
 import Toast from '../components/common/Toast';
 import EmptyState from '../components/common/EmptyState';
 import StatCard from '../components/common/StatCard';
+import SortDropdown from '../components/common/SortDropdown';
 
 const STATUS_STYLES = {
   pending: 'bg-amber-100 text-amber-700',
@@ -25,6 +26,7 @@ export default function Orders() {
   const { data: tablesData = {} } = useApi(() => tableAPI.getTables({}));
 
   const [filterStatus, setFilterStatus] = useState('all');
+  const [sort, setSort] = useState('recent');
   const [dateRange, setDateRange] = useState({ start: '', end: '' });
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState(null);
@@ -39,14 +41,35 @@ export default function Orders() {
   const tables = tablesData?.tables || [];
 
   const filteredOrders = useMemo(() => {
-    return orders.filter((order) => {
+    const sortedData = orders.filter((order) => {
       const statusMatch = filterStatus === 'all' || order.status === filterStatus;
       const createdAt = new Date(order.createdAt);
       const startMatch = !dateRange.start || createdAt >= new Date(dateRange.start);
       const endMatch = !dateRange.end || createdAt <= new Date(`${dateRange.end}T23:59:59`);
       return statusMatch && startMatch && endMatch;
     });
-  }, [orders, filterStatus, dateRange]);
+
+    switch (sort) {
+      case 'priceLowHigh':
+        sortedData.sort((a, b) => (a.totalAmount || a.total || 0) - (b.totalAmount || b.total || 0));
+        break;
+      case 'priceHighLow':
+        sortedData.sort((a, b) => (b.totalAmount || b.total || 0) - (a.totalAmount || a.total || 0));
+        break;
+      case 'nameAsc':
+        sortedData.sort((a, b) => String(a.tableNumber || '').localeCompare(String(b.tableNumber || '')));
+        break;
+      case 'nameDesc':
+        sortedData.sort((a, b) => String(b.tableNumber || '').localeCompare(String(a.tableNumber || '')));
+        break;
+      case 'recent':
+      default:
+        sortedData.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+        break;
+    }
+
+    return sortedData;
+  }, [orders, filterStatus, dateRange, sort]);
 
   const totalRevenue = filteredOrders.reduce((sum, order) => sum + (order.totalAmount || order.total || 0), 0);
 
@@ -97,6 +120,7 @@ export default function Orders() {
         return;
       }
 
+      const specialRequests = (e.target.specialRequests?.value || '').trim();
       const orderData = {
         tableId: selectedTable,
         items: selectedItems.map((item) => ({
@@ -104,9 +128,12 @@ export default function Orders() {
           quantity: item.quantity,
           unitPrice: item.price,
         })),
-        notes: (e.target.specialRequests?.value || '').trim(),
         totalAmount: selectedItems.reduce((sum, item) => sum + item.price * item.quantity, 0),
       };
+
+      if (specialRequests) {
+        orderData.notes = specialRequests;
+      }
 
       await orderAPI.createOrder(orderData);
       setSuccess('Order created successfully');
@@ -178,7 +205,7 @@ export default function Orders() {
       </div>
 
       <Card>
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
           <label className="space-y-2">
             <span className="text-sm font-medium text-[var(--color-text)]">Status</span>
             <select
@@ -207,6 +234,17 @@ export default function Orders() {
             type="date"
             value={dateRange.end}
             onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })}
+          />
+          <SortDropdown
+            value={sort}
+            onChange={setSort}
+            options={[
+              { label: 'Table (Low -> High)', value: 'nameAsc' },
+              { label: 'Table (High -> Low)', value: 'nameDesc' },
+              { label: 'Amount (Low -> High)', value: 'priceLowHigh' },
+              { label: 'Amount (High -> Low)', value: 'priceHighLow' },
+              { label: 'Recently Added', value: 'recent' },
+            ]}
           />
         </div>
       </Card>

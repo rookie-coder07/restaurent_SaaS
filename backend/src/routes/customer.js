@@ -58,14 +58,27 @@ router.get('/menu/items', async (req, res) => {
     const restaurantId = tableData.restaurant_id;
     console.log(`✅ Found restaurant: ${restaurantId} for table ${tableData.table_number}`);
 
-    // Get all menu items for this restaurant
-    console.log(`📦 Fetching menu items for restaurant ${restaurantId}...`);
-    const result = await MenuService.getMenuItems(restaurantId, {
-      limit: 100,
-      skip: 0,
-    });
+    console.log(`📦 Fetching categories and menu items for restaurant ${restaurantId}...`);
+    const [{ data: restaurantData }, categories, items] = await Promise.all([
+      supabase
+        .from('restaurants')
+        .select('name')
+        .eq('id', restaurantId)
+        .single(),
+      MenuService.getCategories(restaurantId),
+      MenuService.getMenuItems(restaurantId, {
+        limit: 100,
+        skip: 0,
+      }),
+    ]);
 
-    console.log(`✅ Retrieved ${result?.length || 0} menu items`);
+    const result = {
+      restaurantName: restaurantData?.name || 'Restaurant Menu',
+      categories,
+      items,
+    };
+
+    console.log(`✅ Retrieved ${(categories || []).length} categories and ${(items || []).length} menu items`);
     res.status(200).json({
       statusCode: 200,
       success: true,
@@ -90,16 +103,18 @@ router.get('/menu/:qrCodeData/items', validateParams(tableSchema), async (req, r
     // Extract restaurantId from QR code
     const restaurantId = qrCodeData.split('-')[0];
 
-    // Get menu items
-    const result = await MenuService.getMenuItems(restaurantId, {
+    const [categories, items] = await Promise.all([
+      MenuService.getCategories(restaurantId),
+      MenuService.getMenuItems(restaurantId, {
       limit: 100,
       skip: 0,
-    });
+      }),
+    ]);
 
     res.status(200).json({
       statusCode: 200,
       success: true,
-      data: result,
+      data: { categories, items },
       message: 'Menu fetched successfully',
     });
   } catch (error) {

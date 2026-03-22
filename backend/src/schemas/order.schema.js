@@ -13,7 +13,7 @@ export const createOrderSchema = Joi.object({
     .items(orderItemSchema)
     .min(1)
     .required(),
-  notes: Joi.string().trim().max(500).optional(),
+  notes: Joi.string().trim().max(500).optional().allow(''),
 });
 
 export const updateOrderStatusSchema = Joi.object({

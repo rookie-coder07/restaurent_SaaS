@@ -1,12 +1,18 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
+import { AlertCircle, Edit2, Loader, Plus, Trash2, Upload } from 'lucide-react';
 import { useApi } from '../hooks/useApi';
 import { menuAPI } from '../services/apiEndpoints';
-import { Plus, Edit2, Trash2, Loader, Upload, X, AlertCircle } from 'lucide-react';
 import { formatCurrency } from '../utils/formatters';
 import { getMenuItemImageUrl } from '../utils/menuItemImage';
+import Card from '../components/common/Card';
+import Button from '../components/common/Button';
+import Input from '../components/common/Input';
+import Modal from '../components/common/Modal';
+import EmptyState from '../components/common/EmptyState';
+import StatCard from '../components/common/StatCard';
 
-export default function MenuManagement() {
-  const createEmptyFormData = () => ({
+function createEmptyFormData() {
+  return {
     name: '',
     description: '',
     price: '',
@@ -16,63 +22,116 @@ export default function MenuManagement() {
     image: null,
     imagePreview: '',
     imageName: '',
-  });
+  };
+}
 
-  const { data: itemsData = {}, loading, execute: refetch } = useApi(() =>
-    menuAPI.getItems({ limit: 100 })
-  );
-
-  const { data: categoriesData = {}, execute: loadCategories } = useApi(() =>
-    menuAPI.getCategories()
-  );
+export default function MenuManagement() {
+  const { data: itemsData = {}, loading, execute: refetchItems } = useApi(() => menuAPI.getItems({ limit: 100 }));
+  const { data: categoriesData = {}, execute: refetchCategories } = useApi(() => menuAPI.getCategories());
 
   const [activeTab, setActiveTab] = useState('items');
-  const [showForm, setShowForm] = useState(false);
-  const [showCategoryForm, setShowCategoryForm] = useState(false);
+  const [selectedCategoryFilter, setSelectedCategoryFilter] = useState('all');
+  const [showItemModal, setShowItemModal] = useState(false);
+  const [showCategoryModal, setShowCategoryModal] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
-  const [editingCategory, setEditingCategory] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
   const [newCategoryName, setNewCategoryName] = useState('');
   const [formData, setFormData] = useState(createEmptyFormData());
 
-  const items = itemsData?.items || [];
-  const categories = categoriesData?.categories || [];
+  const items = useMemo(
+    () =>
+      (itemsData?.items || []).map((item) => ({
+        ...item,
+        id: item.id || item._id || '',
+        categoryId: item.categoryId || item.category_id || item.category?.id || item.category?._id || '',
+      })),
+    [itemsData]
+  );
 
-  const handleAddItem = () => {
+  const categories = useMemo(
+    () =>
+      (categoriesData?.categories || []).map((category) => ({
+        ...category,
+        id: category.id || category._id || '',
+      })),
+    [categoriesData]
+  );
+
+  const categoryItemsMap = useMemo(() => {
+    const map = new Map();
+
+    items.forEach((item) => {
+      const key = String(item.categoryId || '');
+      if (!key) {
+        return;
+      }
+
+      const currentItems = map.get(key) || [];
+      currentItems.push(item);
+      map.set(key, currentItems);
+    });
+
+    return map;
+  }, [items]);
+
+  const filteredItems = useMemo(() => {
+    if (selectedCategoryFilter === 'all') {
+      return items;
+    }
+
+    return items.filter((item) => String(item.categoryId || '') === String(selectedCategoryFilter));
+  }, [items, selectedCategoryFilter]);
+
+  const availableItems = items.filter((item) => item.isAvailable).length;
+  const unavailableItems = items.length - availableItems;
+
+  const resetMessages = () => {
     setError(null);
-    setEditingItem(null);
-    setFormData(createEmptyFormData());
-    setShowForm(true);
+    setSuccess(null);
   };
 
-  const handleEditItem = (item) => {
+  const closeItemModal = () => {
+    setShowItemModal(false);
+    setEditingItem(null);
+    setFormData(createEmptyFormData());
     setError(null);
+  };
+
+  const openNewItemModal = () => {
+    resetMessages();
+    setEditingItem(null);
+    setFormData(createEmptyFormData());
+    setShowItemModal(true);
+  };
+
+  const openEditItemModal = (item) => {
+    resetMessages();
     setEditingItem(item);
     setFormData({
-      name: item.name,
+      name: item.name || '',
       description: item.description || '',
       price: item.price || '',
       categoryId: item.categoryId || '',
       preparationTime: item.preparationTime || '20',
-      tags: (item.tags || []).join(', '),
+      tags: Array.isArray(item.tags) ? item.tags.join(', ') : '',
       image: null,
       imagePreview: item.imageUrl || item.image_url || item.cloudinaryImageUrl || '',
       imageName: '',
     });
-    setShowForm(true);
+    setShowItemModal(true);
   };
 
-  const handleImageChange = (e) => {
-    const file = e.target.files?.[0];
+  const handleImageChange = (event) => {
+    const file = event.target.files?.[0];
 
     if (!file) {
       return;
     }
 
     if (!file.type.startsWith('image/')) {
-      setError('Please select a valid image file');
+      setError('Please select a valid image file.');
       return;
     }
 
@@ -86,11 +145,9 @@ export default function MenuManagement() {
         imageName: file.name,
       }));
     };
-    reader.onerror = () => {
-      setError('Unable to read the selected image');
-    };
+    reader.onerror = () => setError('Unable to read the selected image.');
     reader.readAsDataURL(file);
-    e.target.value = '';
+    event.target.value = '';
   };
 
   const handleRemoveSelectedImage = () => {
@@ -104,458 +161,505 @@ export default function MenuManagement() {
     }));
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setError(null);
+  const handleSubmitItem = async (event) => {
+    event.preventDefault();
     setSubmitting(true);
+    setError(null);
 
     try {
-      const submitData = {
-        name: formData.name,
-        description: formData.description,
+      if (!formData.categoryId) {
+        setError('Please select a category before saving the item.');
+        setSubmitting(false);
+        return;
+      }
+
+      const payload = {
+        name: formData.name.trim(),
+        description: formData.description.trim(),
         price: Number(formData.price),
         categoryId: formData.categoryId || '',
         preparationTime: Number(formData.preparationTime),
-        tags: formData.tags.split(',').map(tag => tag.trim()).filter(tag => tag),
+        tags: formData.tags.split(',').map((tag) => tag.trim()).filter(Boolean),
       };
 
       if (formData.image) {
-        submitData.imageBase64 = formData.image;
+        payload.imageBase64 = formData.image;
       }
 
       if (editingItem) {
-        await menuAPI.updateItem(editingItem.id, submitData);
-        setSuccess('Item updated successfully');
+        await menuAPI.updateItem(editingItem.id, payload);
+        setSuccess('Item updated successfully.');
       } else {
-        await menuAPI.createItem(submitData);
-        setSuccess('Item created successfully');
+        await menuAPI.createItem(payload);
+        setSuccess('Item created successfully.');
       }
 
-      setShowForm(false);
-      setFormData(createEmptyFormData());
-      await refetch(); // Wait for data to reload
-      setTimeout(() => setSuccess(null), 3000);
+      closeItemModal();
+      await refetchItems();
     } catch (err) {
-      setError(err.response?.data?.message || 'Failed to save item');
+      setError(err.response?.data?.message || 'Failed to save item.');
     } finally {
       setSubmitting(false);
     }
   };
 
   const handleDeleteItem = async (itemId) => {
-    if (confirm('Are you sure you want to delete this item?')) {
-      try {
-        await menuAPI.deleteItem(itemId);
-        setSuccess('Item deleted successfully');
-        await refetch(); // Wait for data to reload
-        setTimeout(() => setSuccess(null), 3000);
-      } catch (err) {
-        setError(err.response?.data?.message || 'Failed to delete item');
-      }
+    if (!confirm('Are you sure you want to delete this item?')) {
+      return;
+    }
+
+    try {
+      await menuAPI.deleteItem(itemId);
+      setSuccess('Item deleted successfully.');
+      await refetchItems();
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to delete item.');
     }
   };
 
-  const handleAddCategory = async (e) => {
-    e.preventDefault();
-    setError(null);
+  const handleCreateCategory = async (event) => {
+    event.preventDefault();
     setSubmitting(true);
+    setError(null);
 
     try {
-      await menuAPI.createCategory({ name: newCategoryName });
-      setSuccess('Category created successfully');
+      await menuAPI.createCategory({ name: newCategoryName.trim() });
       setNewCategoryName('');
-      setShowCategoryForm(false);
-      await loadCategories(); // Wait for data to reload
-      setTimeout(() => setSuccess(null), 3000);
+      setShowCategoryModal(false);
+      setSuccess('Category created successfully.');
+      await refetchCategories();
     } catch (err) {
-      setError(err.response?.data?.message || 'Failed to create category');
+      setError(err.response?.data?.message || 'Failed to create category.');
     } finally {
       setSubmitting(false);
     }
   };
 
   const handleDeleteCategory = async (categoryId) => {
-    if (confirm('Are you sure? This will affect items in this category.')) {
-      try {
-        await menuAPI.deleteCategory(categoryId);
-        setSuccess('Category deleted successfully');
-        await loadCategories(); // Wait for data to reload
-        setTimeout(() => setSuccess(null), 3000);
-      } catch (err) {
-        setError(err.response?.data?.message || 'Failed to delete category');
-      }
+    if (!confirm('Are you sure? This will affect items in this category.')) {
+      return;
+    }
+
+    try {
+      await menuAPI.deleteCategory(categoryId);
+      setSuccess('Category deleted successfully.');
+      await refetchCategories();
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to delete category.');
     }
   };
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-full">
-        <Loader className="w-8 h-8 animate-spin text-blue-600" />
+      <div className="flex h-full items-center justify-center">
+        <Loader className="h-8 w-8 animate-spin text-[var(--color-primary)]" />
       </div>
     );
   }
 
   return (
-    <div className="space-y-5 sm:space-y-6">
-      {/* Alerts */}
-      {success && (
-        <div className="p-4 bg-green-50 border border-green-200 rounded-lg flex items-center gap-3">
-          <div className="w-2 h-2 bg-green-600 rounded-full"></div>
-          <p className="text-sm text-green-700">{success}</p>
+    <div className="space-y-6">
+      {success ? (
+        <div className="flex items-center gap-3 rounded-2xl border border-emerald-500/20 bg-emerald-500/10 p-4 text-emerald-300">
+          <div className="h-2.5 w-2.5 rounded-full bg-emerald-400" />
+          <p className="text-sm font-medium">{success}</p>
         </div>
-      )}
-      
-      {error && (
-        <div className="p-4 bg-red-50 border border-red-200 rounded-lg flex items-center gap-3">
-          <AlertCircle className="w-5 h-5 text-red-600" />
-          <p className="text-sm text-red-700">{error}</p>
-        </div>
-      )}
+      ) : null}
 
-      {/* Header */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <h1 className="text-2xl font-bold text-gray-900 sm:text-3xl">Menu Management</h1>
-        {activeTab === 'items' && (
-          <button
-            onClick={handleAddItem}
-            className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-white transition hover:bg-blue-700 sm:w-auto"
-          >
-            <Plus className="w-5 h-5" />
-            Add Item
-          </button>
-        )}
-        {activeTab === 'categories' && (
-          <button
-            onClick={() => setShowCategoryForm(true)}
-            className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-white transition hover:bg-blue-700 sm:w-auto"
-          >
-            <Plus className="w-5 h-5" />
-            Add Category
-          </button>
-        )}
+      {error ? (
+        <div className="flex items-center gap-3 rounded-2xl border border-red-500/20 bg-red-500/10 p-4 text-red-300">
+          <AlertCircle className="h-5 w-5 flex-shrink-0" />
+          <p className="text-sm font-medium">{error}</p>
+        </div>
+      ) : null}
+
+      <Card className="overflow-hidden">
+        <div className="absolute inset-y-0 right-0 w-40 bg-gradient-to-l from-cyan-400/10 to-transparent" />
+        <div className="relative flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+          <div className="min-w-0">
+            <p className="text-xs font-semibold uppercase tracking-[0.28em] text-[var(--text-secondary)]">Menu Studio</p>
+            <h1 className="mt-2 text-2xl font-bold text-[var(--text-primary)] sm:text-3xl">Menu Management</h1>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-[var(--text-secondary)]">
+              Keep dishes, pricing, categories, and images consistent across the customer ordering experience.
+            </p>
+          </div>
+
+          <div className="flex w-full flex-col gap-3 sm:flex-row lg:w-auto">
+            {activeTab === 'items' ? (
+              <Button className="w-full sm:w-auto" onClick={openNewItemModal}>
+                <Plus className="h-4 w-4" />
+                Add Item
+              </Button>
+            ) : (
+              <Button className="w-full sm:w-auto" onClick={() => setShowCategoryModal(true)}>
+                <Plus className="h-4 w-4" />
+                Add Category
+              </Button>
+            )}
+          </div>
+        </div>
+      </Card>
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <StatCard label="Total Items" value={items.length} subtitle="Across your full menu" iconTone="bg-[var(--color-primary-soft)] text-[var(--color-primary)]" />
+        <StatCard label="Available" value={availableItems} subtitle="Visible to customers" iconTone="bg-emerald-500/15 text-emerald-400" />
+        <StatCard label="Categories" value={categories.length} subtitle="Used to organize dishes" iconTone="bg-cyan-500/15 text-cyan-400" />
       </div>
 
-      {/* Tabs */}
-      <div className="flex overflow-x-auto border-b border-gray-200">
-        <button
-          onClick={() => setActiveTab('items')}
-          className={`shrink-0 px-4 py-3 font-semibold transition ${
-            activeTab === 'items'
-              ? 'text-blue-600 border-b-2 border-blue-600'
-              : 'text-gray-600 hover:text-gray-900'
-          }`}
-        >
-          Menu Items ({items.length})
-        </button>
-        <button
-          onClick={() => { setActiveTab('categories'); loadCategories(); }}
-          className={`shrink-0 px-4 py-3 font-semibold transition ${
-            activeTab === 'categories'
-              ? 'text-blue-600 border-b-2 border-blue-600'
-              : 'text-gray-600 hover:text-gray-900'
-          }`}
-        >
-          Categories ({categories.length})
-        </button>
-      </div>
-
-      {/* Items List */}
-      {activeTab === 'items' && (
-        <div className="grid grid-cols-1 gap-4">
-          {items.length > 0 ? (
-            items.map((item) => (
-              <div key={item.id} className="card overflow-hidden p-4 transition hover:shadow-lg sm:p-5">
-                <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                  <div className="flex min-w-0 flex-col gap-4 sm:flex-1 sm:flex-row sm:items-start">
-                    <div className="flex h-28 w-full items-center justify-center rounded-xl bg-gradient-to-br from-amber-50 via-white to-slate-50 p-3 sm:h-20 sm:w-20 sm:flex-shrink-0">
-                      <img
-                        src={getMenuItemImageUrl(item)}
-                        alt={item.name}
-                        className="h-full w-full rounded-lg object-contain"
-                      />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                        <div className="min-w-0">
-                          <h3 className="break-words text-base font-semibold text-gray-900 sm:text-lg">
-                            {item.name}
-                          </h3>
-                          <p className="mt-1 break-words text-sm leading-6 text-gray-600">
-                            {item.description}
-                          </p>
-                        </div>
-                        <div className="shrink-0 rounded-full bg-gray-100 px-3 py-1 text-left sm:text-right">
-                          <p className="text-base font-bold text-gray-900">{formatCurrency(item.price)}</p>
-                          <p className="text-xs text-gray-600">{item.preparationTime} mins</p>
-                        </div>
-                      </div>
-
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        {item.tags?.map((tag, i) => (
-                          <span key={i} className="rounded-full bg-blue-100 px-2.5 py-1 text-xs text-blue-700">
-                            {tag}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center justify-end gap-2 border-t border-gray-100 pt-3 sm:border-0 sm:pt-0">
-                    <button
-                      onClick={() => handleEditItem(item)}
-                      className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-blue-600 transition hover:bg-blue-100"
-                      title="Edit"
-                    >
-                      <Edit2 className="w-5 h-5" />
-                      <span className="text-sm font-medium sm:hidden">Edit</span>
-                    </button>
-                    <button
-                      onClick={() => handleDeleteItem(item.id)}
-                      className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-red-600 transition hover:bg-red-100"
-                      title="Delete"
-                    >
-                      <Trash2 className="w-5 h-5" />
-                      <span className="text-sm font-medium sm:hidden">Delete</span>
-                    </button>
-                  </div>
-                </div>
-              </div>
-            ))
-          ) : (
-            <div className="card text-center py-12">
-              <p className="text-gray-600 mb-4">No menu items yet</p>
-              <button
-                onClick={handleAddItem}
-                className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-              >
-                <Plus className="w-5 h-5" />
-                Create First Item
-              </button>
-            </div>
-          )}
+      <Card>
+        <div className="flex flex-wrap gap-2 border-b border-[var(--border-color)] pb-3">
+            <button
+              type="button"
+              onClick={() => setActiveTab('items')}
+              className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
+                activeTab === 'items'
+                  ? 'bg-[var(--color-primary-soft)] text-[var(--color-primary)]'
+                  : 'text-[var(--text-secondary)] hover:bg-[var(--bg-card-muted)] hover:text-[var(--text-primary)]'
+              }`}
+            >
+              Menu Items ({items.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTab('categories');
+                refetchCategories().catch(() => {});
+              }}
+              className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
+                activeTab === 'categories'
+                  ? 'bg-[var(--color-primary-soft)] text-[var(--color-primary)]'
+                  : 'text-[var(--text-secondary)] hover:bg-[var(--bg-card-muted)] hover:text-[var(--text-primary)]'
+              }`}
+            >
+              Categories ({categories.length})
+            </button>
         </div>
-      )}
 
-      {/* Categories */}
-      {activeTab === 'categories' && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {categories.length > 0 ? (
-            categories.map((cat) => (
-              <div key={cat.id} className="card p-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h3 className="font-semibold text-gray-900">{cat.name}</h3>
-                    <p className="text-sm text-gray-600">{cat.itemCount || 0} items</p>
+        <div className="pt-5">
+          {activeTab === 'items' ? (
+            items.length > 0 ? (
+              <div className="space-y-5">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--text-secondary)]">
+                      Filter Menu
+                    </p>
+                    <h2 className="mt-2 text-lg font-semibold text-[var(--text-primary)]">
+                      Browse items by category
+                    </h2>
+                    <p className="mt-1 text-sm text-[var(--text-secondary)]">
+                      Narrow the list to a category so you can review dishes faster.
+                    </p>
                   </div>
-                  <button
-                    onClick={() => handleDeleteCategory(cat.id)}
-                    className="p-2 hover:bg-red-100 rounded-lg text-red-600 transition"
-                  >
-                    <Trash2 className="w-5 h-5" />
-                  </button>
+
+                  <label className="block w-full sm:max-w-xs">
+                    <span className="mb-2 block text-sm font-medium text-[var(--text-primary)]">Category</span>
+                    <select
+                      value={selectedCategoryFilter}
+                      onChange={(event) => setSelectedCategoryFilter(event.target.value)}
+                      className="input"
+                    >
+                      <option value="all">All Categories ({items.length})</option>
+                      {categories.map((category) => {
+                        const count = (categoryItemsMap.get(String(category.id)) || []).length;
+                        return (
+                          <option key={category.id} value={category.id}>
+                            {category.name} ({count})
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </label>
                 </div>
-              </div>
-            ))
-          ) : (
-            <div className="col-span-full card text-center py-12">
-              <p className="text-gray-600 mb-4">No categories yet</p>
-              <button
-                onClick={() => setShowCategoryForm(true)}
-                className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-              >
-                <Plus className="w-5 h-5" />
-                Create Category
-              </button>
-            </div>
-          )}
-        </div>
-      )}
 
-      {/* Form Modal - Item */}
-      {showForm && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-          <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-lg bg-white shadow-lg">
-            <div className="sticky top-0 flex items-center justify-between border-b border-gray-200 bg-white p-4 sm:p-6">
-              <h2 className="text-xl font-bold text-gray-900">
-                {editingItem ? 'Edit Item' : 'Add New Item'}
-              </h2>
-              <button
-                onClick={() => { setShowForm(false); setError(null); }}
-                className="text-gray-500 hover:text-gray-700"
-              >
-                <X className="w-6 h-6" />
-              </button>
-            </div>
+                {filteredItems.length > 0 ? (
+                  <div className="grid grid-cols-1 gap-4">
+                    {filteredItems.map((item) => (
+                      <Card key={item.id} className="overflow-hidden p-4 sm:p-5">
+                        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                          <div className="flex min-w-0 flex-col gap-4 sm:flex-1 sm:flex-row sm:items-start">
+                            <div className="flex h-28 w-full items-center justify-center rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card-muted)] p-3 sm:h-24 sm:w-24 sm:flex-shrink-0">
+                              <img
+                                src={getMenuItemImageUrl(item)}
+                                alt={item.name}
+                                className="h-full w-full rounded-xl object-contain"
+                              />
+                            </div>
 
-            <form onSubmit={handleSubmit} className="space-y-4 p-4 sm:p-6">
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <input
-                  type="text"
-                  placeholder="Item Name"
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  className="input"
-                  required
-                />
-                <input
-                  type="number"
-                  placeholder="Price (₹)"
-                  step="0.01"
-                  value={formData.price}
-                  onChange={(e) => setFormData({ ...formData, price: e.target.value })}
-                  className="input"
-                  required
-                />
-              </div>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                <div className="min-w-0">
+                                  <h3 className="break-words text-base font-semibold text-[var(--text-primary)] sm:text-lg">
+                                    {item.name}
+                                  </h3>
+                                  <p className="mt-1 break-words text-sm leading-6 text-[var(--text-secondary)]">
+                                    {item.description || 'No description added yet.'}
+                                  </p>
+                                  <p className="mt-2 text-xs font-medium uppercase tracking-[0.18em] text-[var(--text-secondary)]">
+                                    {categories.find((category) => String(category.id) === String(item.categoryId))?.name || 'Uncategorized'}
+                                  </p>
+                                </div>
 
-              <textarea
-                placeholder="Description"
-                value={formData.description}
-                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                className="input h-20"
-              />
+                                <div className="shrink-0 rounded-full border border-[var(--border-color)] bg-[var(--bg-card-muted)] px-3 py-1.5">
+                                  <p className="text-base font-bold text-[var(--text-primary)]">{formatCurrency(item.price)}</p>
+                                  <p className="text-xs text-[var(--text-secondary)]">{item.preparationTime} mins</p>
+                                </div>
+                              </div>
 
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <input
-                  type="number"
-                  placeholder="Preparation Time (mins)"
-                  value={formData.preparationTime}
-                  onChange={(e) => setFormData({ ...formData, preparationTime: e.target.value })}
-                  className="input"
-                  min="1"
-                />
-                <select
-                  value={formData.categoryId}
-                  onChange={(e) => setFormData({ ...formData, categoryId: e.target.value })}
-                  className="input"
-                >
-                  <option value="">Select Category (Optional)</option>
-                  {categories.map(cat => (
-                    <option key={cat.id} value={cat.id}>{cat.name}</option>
-                  ))}
-                </select>
-              </div>
+                              <div className="mt-3 flex flex-wrap gap-2">
+                                {(item.tags || []).length > 0 ? (
+                                  item.tags.map((tag, index) => (
+                                    <span
+                                      key={`${item.id}-${tag}-${index}`}
+                                      className="rounded-full border border-[var(--color-primary-soft)] bg-[var(--color-primary-soft)] px-2.5 py-1 text-xs text-[var(--color-primary)]"
+                                    >
+                                      {tag}
+                                    </span>
+                                  ))
+                                ) : (
+                                  <span className="rounded-full border border-[var(--border-color)] bg-[var(--bg-card-muted)] px-2.5 py-1 text-xs text-[var(--text-secondary)]">
+                                    No tags
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
 
-              <input
-                type="text"
-                placeholder="Tags (comma-separated)"
-                value={formData.tags}
-                onChange={(e) => setFormData({ ...formData, tags: e.target.value })}
-                className="input"
-              />
-
-              <div className="space-y-3">
-                <label
-                  htmlFor="menu-item-image"
-                  className="block border-2 border-dashed border-gray-300 rounded-lg p-6 text-center cursor-pointer hover:border-blue-500 transition"
-                >
-                  <Upload className="w-8 h-8 mx-auto mb-2 text-gray-400" />
-                  <p className="text-sm font-medium text-gray-700">Click to upload image</p>
-                  <p className="text-xs text-gray-500 mt-1">PNG, JPG, WebP supported</p>
-                  <input
-                    id="menu-item-image"
-                    type="file"
-                    accept="image/*"
-                    onChange={handleImageChange}
-                    className="hidden"
+                          <div className="flex items-center justify-end gap-2 border-t border-[var(--border-color)] pt-3 sm:border-0 sm:pt-0">
+                            <Button variant="secondary" className="px-3 py-2" onClick={() => openEditItemModal(item)}>
+                              <Edit2 className="h-4 w-4" />
+                              <span className="sm:hidden">Edit</span>
+                            </Button>
+                            <Button variant="danger" className="px-3 py-2" onClick={() => handleDeleteItem(item.id)}>
+                              <Trash2 className="h-4 w-4" />
+                              <span className="sm:hidden">Delete</span>
+                            </Button>
+                          </div>
+                        </div>
+                      </Card>
+                    ))}
+                  </div>
+                ) : (
+                  <EmptyState
+                    icon={Plus}
+                    title="No items in this category"
+                    description="Try another category or add a new dish to this section."
+                    action={
+                      <Button onClick={openNewItemModal}>
+                        <Plus className="h-4 w-4" />
+                        Add Item
+                      </Button>
+                    }
                   />
-                </label>
-
-                {(formData.imagePreview || formData.imageName) && (
-                  <div className="flex flex-col gap-3 rounded-lg border border-gray-200 bg-gray-50 p-3 sm:flex-row sm:items-center sm:gap-4">
-                    <div className="flex h-24 w-full items-center justify-center rounded-lg bg-white p-3 sm:h-16 sm:w-16">
-                      <img
-                        src={formData.imagePreview || getMenuItemImageUrl(editingItem || { name: formData.name })}
-                        alt={formData.name || 'Menu item preview'}
-                        className="h-full w-full rounded-lg object-contain"
-                      />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium text-gray-900 truncate">
-                        {formData.imageName || 'Current menu image'}
-                      </p>
-                      <p className="text-xs text-gray-500">
-                        {formData.imageName ? 'New image selected and ready to upload' : 'Current image will be kept'}
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={handleRemoveSelectedImage}
-                      className="rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-white"
-                    >
-                      Remove
-                    </button>
-                  </div>
                 )}
               </div>
-
-              <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row">
-                <button
-                  type="button"
-                  onClick={() => { setShowForm(false); setError(null); setFormData(createEmptyFormData()); }}
-                  className="flex-1 rounded-lg border border-gray-300 px-4 py-2 font-medium hover:bg-gray-50"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={submitting}
-                  className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 font-medium text-white hover:bg-blue-700 disabled:bg-gray-400"
-                >
-                  {submitting ? <Loader className="w-4 h-4 animate-spin" /> : null}
-                  {editingItem ? 'Update' : 'Create'} Item
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Category Form Modal */}
-      {showCategoryForm && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-          <div className="w-full max-w-md rounded-lg bg-white shadow-lg">
-            <div className="flex items-center justify-between border-b border-gray-200 p-4 sm:p-6">
-              <h2 className="text-xl font-bold text-gray-900">Add Category</h2>
-              <button
-                onClick={() => { setShowCategoryForm(false); setError(null); }}
-                className="text-gray-500 hover:text-gray-700"
-              >
-                <X className="w-6 h-6" />
-              </button>
-            </div>
-
-            <form onSubmit={handleAddCategory} className="space-y-4 p-4 sm:p-6">
-              <input
-                type="text"
-                placeholder="Category Name"
-                value={newCategoryName}
-                onChange={(e) => setNewCategoryName(e.target.value)}
-                className="input w-full"
-                required
+            ) : (
+              <EmptyState
+                icon={Plus}
+                title="No menu items yet"
+                description="Create your first item to start building the customer-facing menu."
+                action={
+                  <Button onClick={openNewItemModal}>
+                    <Plus className="h-4 w-4" />
+                    Create First Item
+                  </Button>
+                }
               />
-
-              <div className="flex flex-col-reverse gap-3 sm:flex-row">
-                <button
-                  type="button"
-                  onClick={() => { setShowCategoryForm(false); setError(null); }}
-                  className="flex-1 rounded-lg border border-gray-300 px-4 py-2 hover:bg-gray-50"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={submitting}
-                  className="flex-1 rounded-lg bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 disabled:bg-gray-400"
-                >
-                  {submitting ? 'Creating...' : 'Create'}
-                </button>
-              </div>
-            </form>
-          </div>
+            )
+          ) : categories.length > 0 ? (
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              {categories.map((category) => (
+                <Card key={category.id} className="p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <h3 className="break-words font-semibold text-[var(--text-primary)]">{category.name}</h3>
+                      <p className="text-sm text-[var(--text-secondary)]">
+                        {(categoryItemsMap.get(String(category.id)) || []).length} items
+                      </p>
+                    </div>
+                    <Button variant="danger" className="px-3 py-2" onClick={() => handleDeleteCategory(category.id)}>
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  {(categoryItemsMap.get(String(category.id)) || []).length > 0 ? (
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      {categoryItemsMap.get(String(category.id)).slice(0, 4).map((item) => (
+                        <span
+                          key={item.id}
+                          className="rounded-full border border-[var(--border-color)] bg-[var(--color-panel-muted)] px-3 py-1 text-xs text-[var(--text-primary)]"
+                        >
+                          {item.name}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
+                </Card>
+              ))}
+            </div>
+          ) : (
+            <EmptyState
+              icon={Plus}
+              title="No categories yet"
+              description="Create categories to keep your dishes organized."
+              action={
+                <Button onClick={() => setShowCategoryModal(true)}>
+                  <Plus className="h-4 w-4" />
+                  Create Category
+                </Button>
+              }
+            />
+          )}
         </div>
-      )}
+      </Card>
+
+      <Modal
+        title={editingItem ? 'Edit Menu Item' : 'Add Menu Item'}
+        isOpen={showItemModal}
+        onClose={closeItemModal}
+        maxWidth="max-w-3xl"
+      >
+        <form onSubmit={handleSubmitItem} className="space-y-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <Input
+              label="Item Name"
+              value={formData.name}
+              onChange={(event) => setFormData((current) => ({ ...current, name: event.target.value }))}
+              required
+            />
+            <Input
+              label="Price"
+              type="number"
+              step="0.01"
+              value={formData.price}
+              onChange={(event) => setFormData((current) => ({ ...current, price: event.target.value }))}
+              required
+            />
+          </div>
+
+          <label className="block space-y-2">
+            <span className="text-sm font-medium text-[var(--text-primary)]">Description</span>
+            <textarea
+              value={formData.description}
+              onChange={(event) => setFormData((current) => ({ ...current, description: event.target.value }))}
+              className="input min-h-[96px] resize-y"
+              placeholder="Describe the dish"
+            />
+          </label>
+
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <Input
+              label="Preparation Time (mins)"
+              type="number"
+              min="1"
+              value={formData.preparationTime}
+              onChange={(event) => setFormData((current) => ({ ...current, preparationTime: event.target.value }))}
+            />
+
+            <label className="block space-y-2">
+              <span className="text-sm font-medium text-[var(--text-primary)]">Category</span>
+              <select
+                value={formData.categoryId}
+                onChange={(event) => setFormData((current) => ({ ...current, categoryId: event.target.value }))}
+                className="input"
+                required
+              >
+                <option value="">Select Category</option>
+                {categories.map((category) => (
+                  <option key={category.id} value={category.id}>
+                    {category.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          <Input
+            label="Tags"
+            value={formData.tags}
+            onChange={(event) => setFormData((current) => ({ ...current, tags: event.target.value }))}
+            placeholder="Spicy, Bestseller, Vegan"
+          />
+
+          <div className="space-y-3">
+            <label
+              htmlFor="menu-item-image"
+              className="flex cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-[var(--border-color)] bg-[var(--bg-card-muted)] p-6 text-center transition hover:border-[var(--color-primary)] hover:bg-[var(--color-primary-soft)]"
+            >
+              <Upload className="mb-3 h-8 w-8 text-[var(--color-primary)]" />
+              <p className="text-sm font-medium text-[var(--text-primary)]">Click to upload image</p>
+              <p className="mt-1 text-xs text-[var(--text-secondary)]">PNG, JPG, WebP supported</p>
+              <input
+                id="menu-item-image"
+                type="file"
+                accept="image/*"
+                onChange={handleImageChange}
+                className="hidden"
+              />
+            </label>
+
+            {(formData.imagePreview || formData.imageName) ? (
+              <div className="flex flex-col gap-3 rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card-muted)] p-3 sm:flex-row sm:items-center sm:gap-4">
+                <div className="flex h-24 w-full items-center justify-center rounded-xl border border-[var(--border-color)] bg-[var(--bg-card)] p-3 sm:h-20 sm:w-20">
+                  <img
+                    src={formData.imagePreview || getMenuItemImageUrl(editingItem || { name: formData.name })}
+                    alt={formData.name || 'Menu item preview'}
+                    className="h-full w-full rounded-lg object-contain"
+                  />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium text-[var(--text-primary)]">
+                    {formData.imageName || 'Current menu image'}
+                  </p>
+                  <p className="text-xs text-[var(--text-secondary)]">
+                    {formData.imageName ? 'New image selected and ready to upload' : 'Current image will be kept'}
+                  </p>
+                </div>
+                <Button type="button" variant="secondary" onClick={handleRemoveSelectedImage}>
+                  Remove
+                </Button>
+              </div>
+            ) : null}
+          </div>
+
+          <div className="flex flex-col-reverse gap-3 sm:flex-row">
+            <Button type="button" variant="secondary" className="flex-1" onClick={closeItemModal}>
+              Cancel
+            </Button>
+            <Button type="submit" className="flex-1" disabled={submitting}>
+              {submitting ? <Loader className="h-4 w-4 animate-spin" /> : null}
+              {editingItem ? 'Update Item' : 'Create Item'}
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      <Modal
+        title="Add Category"
+        isOpen={showCategoryModal}
+        onClose={() => {
+          setShowCategoryModal(false);
+          setError(null);
+        }}
+        maxWidth="max-w-md"
+      >
+        <form onSubmit={handleCreateCategory} className="space-y-4">
+          <Input
+            label="Category Name"
+            value={newCategoryName}
+            onChange={(event) => setNewCategoryName(event.target.value)}
+            required
+          />
+
+          <div className="flex flex-col-reverse gap-3 sm:flex-row">
+            <Button type="button" variant="secondary" className="flex-1" onClick={() => setShowCategoryModal(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" className="flex-1" disabled={submitting}>
+              {submitting ? 'Creating...' : 'Create'}
+            </Button>
+          </div>
+        </form>
+      </Modal>
     </div>
   );
 }
-

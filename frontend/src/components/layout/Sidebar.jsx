@@ -44,36 +44,36 @@ export default function Sidebar({ isOpen, onClose }) {
       ) : null}
 
       <aside
-        className={`fixed inset-y-0 left-0 z-50 w-72 border-r border-gray-200 bg-white transition-transform duration-300 ${
+        className={`fixed inset-y-0 left-0 z-50 w-72 border-r border-[var(--border-color)] bg-[linear-gradient(180deg,rgba(255,255,255,0.08),rgba(255,255,255,0.03))] shadow-[var(--shadow-floating)] backdrop-blur-xl transition-transform duration-300 ${
           isOpen ? 'translate-x-0' : '-translate-x-full'
         } lg:translate-x-0`}
       >
         <div className="flex h-full flex-col">
-          <div className="flex items-center justify-between border-b border-gray-200 px-5 py-5">
+          <div className="flex items-center justify-between border-b border-[var(--border-color)] px-5 py-5">
             <Link to="/" className="flex items-center gap-3" onClick={onClose}>
-              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#2563eb] text-white">
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-[var(--color-primary)] to-[var(--color-accent)] text-white shadow-lg">
                 <UtensilsCrossed className="h-5 w-5" />
               </div>
               <div>
-                <p className="text-base font-semibold text-[#0f172a]">Restaurant SaaS</p>
-                <p className="text-xs text-[#64748b]">Operations Dashboard</p>
+                <p className="text-base font-semibold text-[var(--text-primary)]">Restaurant SaaS</p>
+                <p className="text-xs text-[var(--text-secondary)]">Operations Dashboard</p>
               </div>
             </Link>
 
             <button
               type="button"
               onClick={onClose}
-              className="rounded-xl p-2 text-[#64748b] transition hover:bg-gray-50 lg:hidden"
+              className="rounded-xl p-2 text-[var(--text-secondary)] transition hover:bg-[var(--color-primary-soft)] hover:text-[var(--text-primary)] lg:hidden"
             >
               <X className="h-5 w-5" />
             </button>
           </div>
 
           <div className="px-4 py-5">
-            <div className="rounded-2xl border border-gray-100 bg-[#f8fafc] p-4">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-[#64748b]">Workspace</p>
-              <p className="mt-2 text-sm font-semibold text-[#0f172a]">{user?.restaurantName || 'Main branch'}</p>
-              <p className="mt-1 text-xs text-[#64748b]">Role: {user?.role || 'owner'}</p>
+            <div className="rounded-2xl border border-[var(--border-color)] bg-[linear-gradient(135deg,var(--color-primary-soft),rgba(255,255,255,0.03))] p-4">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-[var(--text-secondary)]">Workspace</p>
+              <p className="mt-2 text-sm font-semibold text-[var(--text-primary)]">{user?.restaurantName || 'Main branch'}</p>
+              <p className="mt-1 text-xs text-[var(--text-secondary)]">Role: {user?.role || 'owner'}</p>
             </div>
           </div>
 
@@ -89,8 +89,8 @@ export default function Sidebar({ isOpen, onClose }) {
                   onClick={onClose}
                   className={`flex items-center gap-3 rounded-2xl px-4 py-3 text-sm font-medium transition ${
                     isActive
-                      ? 'bg-blue-50 text-[#2563eb]'
-                      : 'text-[#64748b] hover:bg-gray-50 hover:text-[#0f172a]'
+                      ? 'bg-[linear-gradient(135deg,var(--color-primary-soft),rgba(6,182,212,0.12))] text-[var(--color-primary)] shadow-sm'
+                      : 'text-[var(--text-secondary)] hover:bg-[var(--bg-card-muted)] hover:text-[var(--text-primary)]'
                   }`}
                 >
                   <Icon className="h-5 w-5 flex-shrink-0" />

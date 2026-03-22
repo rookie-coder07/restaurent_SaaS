@@ -1,16 +1,16 @@
 import { useEffect, useState } from 'react';
 
 const STORAGE_KEY = 'theme';
-const THEMES = ['school', 'light'];
+const THEMES = ['midnight', 'light'];
 const THEME_EVENT = 'restaurant-saas-theme-change';
 
 const getStoredTheme = () => {
   if (typeof window === 'undefined') {
-    return 'school';
+    return 'midnight';
   }
 
-  const savedTheme = localStorage.getItem(STORAGE_KEY);
-  return THEMES.includes(savedTheme) ? savedTheme : 'school';
+  const savedTheme = localStorage.getItem(STORAGE_KEY) || 'midnight';
+  return THEMES.includes(savedTheme) ? savedTheme : 'midnight';
 };
 
 const applyTheme = (theme) => {
@@ -18,8 +18,10 @@ const applyTheme = (theme) => {
     return;
   }
 
-  document.documentElement.classList.remove('school', 'light');
-  document.documentElement.classList.add(theme);
+  document.documentElement.classList.remove('light');
+  if (theme === 'light') {
+    document.documentElement.classList.add('light');
+  }
 };
 
 export default function useTheme() {
@@ -28,6 +30,7 @@ export default function useTheme() {
   useEffect(() => {
     applyTheme(theme);
     localStorage.setItem(STORAGE_KEY, theme);
+    console.log('Current theme:', theme);
   }, [theme]);
 
   useEffect(() => {
@@ -45,7 +48,7 @@ export default function useTheme() {
   }, []);
 
   const setTheme = (nextTheme) => {
-    const safeTheme = THEMES.includes(nextTheme) ? nextTheme : 'school';
+    const safeTheme = THEMES.includes(nextTheme) ? nextTheme : 'midnight';
     localStorage.setItem(STORAGE_KEY, safeTheme);
     applyTheme(safeTheme);
     setThemeState(safeTheme);
@@ -56,7 +59,7 @@ export default function useTheme() {
     theme,
     setTheme,
     themes: [
-      { id: 'school', label: 'School Theme' },
+      { id: 'midnight', label: 'Midnight' },
       { id: 'light', label: 'Light Theme' },
     ],
   };

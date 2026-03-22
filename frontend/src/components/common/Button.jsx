@@ -14,9 +14,9 @@ export default function Button({
     primary:
       'bg-[var(--color-primary)] text-white shadow-sm hover:scale-[1.02] hover:brightness-95 active:translate-y-px',
     secondary:
-      'border border-white/10 bg-white/10 text-[var(--color-text)] backdrop-blur-md hover:scale-[1.02] hover:bg-white/15',
+      'border border-[var(--border-color)] bg-[var(--bg-card)] text-[var(--text-primary)] backdrop-blur-md hover:scale-[1.02] hover:brightness-105',
     ghost:
-      'text-[var(--color-text-muted)] hover:scale-[1.02] hover:bg-white/10 hover:text-[var(--color-text)]',
+      'text-[var(--text-secondary)] hover:scale-[1.02] hover:bg-[var(--bg-card-muted)] hover:text-[var(--text-primary)]',
     danger:
       'bg-[#dc2626] text-white shadow-sm hover:scale-[1.02] hover:brightness-95',
   }[variant];

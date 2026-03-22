@@ -56,7 +56,7 @@ export default function MainLayout({ children }) {
   );
 
   return (
-    <div className="min-h-screen bg-[#f8fafc] text-[#0f172a]">
+    <div className="min-h-screen bg-[var(--bg-main)] text-[var(--text-primary)]">
       <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
 
       <div className="min-h-screen lg:pl-72">

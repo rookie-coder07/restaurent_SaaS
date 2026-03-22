@@ -19,22 +19,22 @@ const STATUS_META = {
     label: 'Pending',
     sectionTitle: 'Pending Orders',
     emptyMessage: 'No pending orders right now.',
-    chipClass: 'border-amber-200 bg-amber-50 text-amber-700',
-    accentClass: 'bg-amber-500',
+    chipClass: 'border-amber-500/20 bg-amber-500/10 text-amber-300',
+    accentClass: 'bg-amber-400',
   },
   preparing: {
     label: 'Preparing',
     sectionTitle: 'Preparing Now',
     emptyMessage: 'Nothing is currently being prepared.',
-    chipClass: 'border-sky-200 bg-sky-50 text-sky-700',
-    accentClass: 'bg-sky-500',
+    chipClass: 'border-sky-500/20 bg-sky-500/10 text-sky-300',
+    accentClass: 'bg-sky-400',
   },
   ready: {
     label: 'Ready',
     sectionTitle: 'Ready for Pickup',
     emptyMessage: 'No ready orders at the moment.',
-    chipClass: 'border-emerald-200 bg-emerald-50 text-emerald-700',
-    accentClass: 'bg-emerald-500',
+    chipClass: 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300',
+    accentClass: 'bg-emerald-400',
   },
 };
 
@@ -131,20 +131,20 @@ export default function Kitchen() {
 
   return (
     <div className="space-y-6">
-      <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+      <div className="glass-panel rounded-3xl p-5 sm:p-6">
         <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
           <div className="min-w-0">
-            <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-500">Kitchen Control</p>
-            <h1 className="mt-2 break-words text-2xl font-bold text-slate-900 sm:text-3xl">
+            <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[var(--text-secondary)]">Kitchen Control</p>
+            <h1 className="mt-2 break-words text-2xl font-bold text-[var(--text-primary)] sm:text-3xl">
               Real-time kitchen dashboard
             </h1>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-[var(--text-secondary)]">
               Track active orders, update status from pending to served, and keep the line moving with safe 5-second
               polling.
             </p>
           </div>
 
-          <div className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-600 md:w-auto">
+          <div className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card-muted)] px-4 py-3 text-sm font-medium text-[var(--text-secondary)] md:w-auto">
             <RefreshCw className="h-4 w-4" />
             Refreshes every 5 seconds
           </div>
@@ -152,14 +152,14 @@ export default function Kitchen() {
       </div>
 
       {success && (
-        <div className="flex items-center gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-emerald-700">
+        <div className="flex items-center gap-3 rounded-2xl border border-emerald-500/20 bg-emerald-500/10 p-4 text-emerald-300">
           <CheckCircle className="h-5 w-5 flex-shrink-0" />
           <p className="text-sm font-medium">{success}</p>
         </div>
       )}
 
       {(actionError || error) && (
-        <div className="flex items-center gap-3 rounded-2xl border border-red-200 bg-red-50 p-4 text-red-700">
+        <div className="flex items-center gap-3 rounded-2xl border border-red-500/20 bg-red-500/10 p-4 text-red-300">
           <AlertCircle className="h-5 w-5 flex-shrink-0" />
           <p className="text-sm font-medium">{actionError || error}</p>
         </div>
@@ -167,25 +167,25 @@ export default function Kitchen() {
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         {summaryCards.map((card) => (
-          <div key={card.key} className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-            <p className="text-sm font-medium text-slate-500">{card.title}</p>
+          <div key={card.key} className="glass-panel rounded-3xl p-5">
+            <p className="text-sm font-medium text-[var(--text-secondary)]">{card.title}</p>
             <p className={`mt-3 text-3xl font-bold ${card.valueClass}`}>{card.count}</p>
           </div>
         ))}
       </div>
 
       {loading && orders.length === 0 ? (
-        <div className="flex min-h-[280px] items-center justify-center rounded-3xl border border-slate-200 bg-white">
+        <div className="glass-panel flex min-h-[280px] items-center justify-center rounded-3xl">
           <div className="text-center">
-            <Loader className="mx-auto h-8 w-8 animate-spin text-sky-600" />
-            <p className="mt-4 text-sm text-slate-600">Loading active kitchen orders...</p>
+            <Loader className="mx-auto h-8 w-8 animate-spin text-[var(--color-primary)]" />
+            <p className="mt-4 text-sm text-[var(--text-secondary)]">Loading active kitchen orders...</p>
           </div>
         </div>
       ) : orders.length === 0 ? (
-        <div className="rounded-3xl border border-dashed border-slate-300 bg-white px-6 py-16 text-center shadow-sm">
-          <CheckCircle className="mx-auto h-14 w-14 text-emerald-500" />
-          <h2 className="mt-4 text-2xl font-semibold text-slate-900">All caught up</h2>
-          <p className="mt-2 text-slate-600">
+        <div className="glass-panel rounded-3xl border-dashed px-6 py-16 text-center">
+          <CheckCircle className="mx-auto h-14 w-14 text-emerald-400" />
+          <h2 className="mt-4 text-2xl font-semibold text-[var(--text-primary)]">All caught up</h2>
+          <p className="mt-2 text-[var(--text-secondary)]">
             There are no pending, preparing, or ready orders right now.
           </p>
         </div>
@@ -199,8 +199,8 @@ export default function Kitchen() {
               <section key={statusKey} className="space-y-4">
                 <div className="flex items-center justify-between gap-3">
                   <div className="min-w-0">
-                    <h2 className="text-lg font-bold text-slate-900 sm:text-xl">{meta.sectionTitle}</h2>
-                    <p className="text-sm text-slate-500">{statusOrders.length} active orders</p>
+                    <h2 className="text-lg font-bold text-[var(--text-primary)] sm:text-xl">{meta.sectionTitle}</h2>
+                    <p className="text-sm text-[var(--text-secondary)]">{statusOrders.length} active orders</p>
                   </div>
                   <span className={`rounded-full border px-3 py-1 text-sm font-semibold ${meta.chipClass}`}>
                     {meta.label}
@@ -208,7 +208,7 @@ export default function Kitchen() {
                 </div>
 
                 {statusOrders.length === 0 ? (
-                  <div className="rounded-3xl border border-dashed border-slate-300 bg-white px-6 py-10 text-center text-sm text-slate-500 shadow-sm">
+                  <div className="glass-panel rounded-3xl border-dashed px-6 py-10 text-center text-sm text-[var(--text-secondary)]">
                     {meta.emptyMessage}
                   </div>
                 ) : (
@@ -248,15 +248,15 @@ function OrderCard({ order, onOpen, onStatusUpdate, updating }) {
   const elapsedTime = getElapsedMinutes(order.createdAt);
 
   return (
-    <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
+    <div className="glass-panel overflow-hidden rounded-3xl transition hover:-translate-y-0.5">
       <div className={`h-1.5 w-full ${meta.accentClass}`} />
 
       <div className="space-y-4 p-4 sm:p-5">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0">
-            <p className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-400">Table</p>
-            <h3 className="mt-2 text-2xl font-bold text-slate-900">#{order.tableNumber || 'Walk-in'}</h3>
-            <p className="mt-1 text-sm text-slate-500">{formatDate(order.createdAt)}</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.25em] text-[var(--text-tertiary)]">Table</p>
+            <h3 className="mt-2 text-2xl font-bold text-[var(--text-primary)]">#{order.tableNumber || 'Walk-in'}</h3>
+            <p className="mt-1 text-sm text-[var(--text-secondary)]">{formatDate(order.createdAt)}</p>
           </div>
 
           <span className={`inline-flex w-fit items-center gap-2 rounded-full border px-3 py-1 text-sm font-semibold ${meta.chipClass}`}>
@@ -265,26 +265,26 @@ function OrderCard({ order, onOpen, onStatusUpdate, updating }) {
           </span>
         </div>
 
-        <div className="rounded-2xl bg-slate-50 p-4">
+        <div className="rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card-muted)] p-4">
           <div className="mb-3 flex items-center justify-between gap-3">
-            <p className="text-sm font-semibold text-slate-700">Items</p>
-            <p className="text-xs font-medium text-slate-500">{order.items?.length || 0} lines</p>
+            <p className="text-sm font-semibold text-[var(--text-primary)]">Items</p>
+            <p className="text-xs font-medium text-[var(--text-secondary)]">{order.items?.length || 0} lines</p>
           </div>
 
           <div className="space-y-2">
             {order.items?.map((item, index) => (
               <div key={`${order.id}-${index}`} className="flex items-start justify-between gap-3 text-sm">
-                <p className="min-w-0 flex-1 break-words text-slate-700">
-                  <span className="font-semibold text-slate-900">{item.quantity}x</span> {item.name}
+                <p className="min-w-0 flex-1 break-words text-[var(--text-secondary)]">
+                  <span className="font-semibold text-[var(--text-primary)]">{item.quantity}x</span> {item.name}
                 </p>
-                <span className="shrink-0 text-slate-500">{item.preparationTime || 20} min</span>
+                <span className="shrink-0 text-[var(--text-secondary)]">{item.preparationTime || 20} min</span>
               </div>
             ))}
           </div>
         </div>
 
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="text-sm text-slate-500">
+          <div className="text-sm text-[var(--text-secondary)]">
             <p>{elapsedTime} min elapsed</p>
             <p>Total: {formatCurrency(order.totalAmount || 0)}</p>
           </div>
@@ -293,7 +293,7 @@ function OrderCard({ order, onOpen, onStatusUpdate, updating }) {
             <button
               type="button"
               onClick={onOpen}
-              className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+              className="rounded-full border border-[var(--border-color)] bg-[var(--bg-card-muted)] px-4 py-2 text-sm font-semibold text-[var(--text-primary)] transition hover:bg-[var(--color-primary-soft)]"
             >
               View details
             </button>
@@ -303,7 +303,7 @@ function OrderCard({ order, onOpen, onStatusUpdate, updating }) {
                 type="button"
                 onClick={() => onStatusUpdate(order.id, nextStatus)}
                 disabled={updating === order.id}
-                className="inline-flex items-center justify-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-black disabled:cursor-not-allowed disabled:bg-slate-300"
+                className="inline-flex items-center justify-center gap-2 rounded-full bg-gradient-to-r from-[var(--color-primary)] to-[var(--color-accent)] px-4 py-2 text-sm font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {updating === order.id ? <Loader className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
                 {updating === order.id ? 'Updating...' : `Move to ${STATUS_META[nextStatus]?.label || nextStatus}`}
@@ -324,16 +324,16 @@ function OrderDetailModal({ order, updating, onClose, onStatusUpdate }) {
     <div className="fixed inset-0 z-50 flex items-end bg-black/50 p-3 sm:items-center sm:justify-center sm:p-4">
       <button type="button" aria-label="Close order details" onClick={onClose} className="absolute inset-0" />
 
-      <div className="relative max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-3xl bg-white shadow-2xl">
-        <div className="sticky top-0 flex items-center justify-between border-b border-slate-200 bg-white px-4 py-4 sm:px-6">
+      <div className="glass-panel relative max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-3xl shadow-2xl">
+        <div className="sticky top-0 flex items-center justify-between border-b border-[var(--border-color)] bg-[linear-gradient(135deg,var(--bg-card),var(--bg-card-muted))] px-4 py-4 sm:px-6">
           <div className="min-w-0">
-            <p className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-400">Order detail</p>
-            <h2 className="mt-1 text-xl font-bold text-slate-900">Table #{order.tableNumber || 'Walk-in'}</h2>
+            <p className="text-xs font-semibold uppercase tracking-[0.25em] text-[var(--text-tertiary)]">Order detail</p>
+            <h2 className="mt-1 text-xl font-bold text-[var(--text-primary)]">Table #{order.tableNumber || 'Walk-in'}</h2>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="rounded-full p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-700"
+            className="rounded-full p-2 text-[var(--text-secondary)] transition hover:bg-[var(--bg-card-muted)] hover:text-[var(--text-primary)]"
           >
             <X className="h-5 w-5" />
           </button>
@@ -345,41 +345,41 @@ function OrderDetailModal({ order, updating, onClose, onStatusUpdate }) {
               {getStatusIcon(order.status)}
               {meta.label}
             </span>
-            <p className="text-sm text-slate-500">{formatDate(order.createdAt)}</p>
+            <p className="text-sm text-[var(--text-secondary)]">{formatDate(order.createdAt)}</p>
           </div>
 
-          <div className="rounded-2xl bg-slate-50 p-4">
-            <p className="text-sm font-semibold text-slate-700">Items in this order</p>
+          <div className="rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card-muted)] p-4">
+            <p className="text-sm font-semibold text-[var(--text-primary)]">Items in this order</p>
             <div className="mt-3 space-y-3">
               {order.items?.map((item, idx) => (
-                <div key={`${order.id}-detail-${idx}`} className="flex items-start justify-between gap-3 border-b border-slate-200 pb-3 last:border-0 last:pb-0">
+                <div key={`${order.id}-detail-${idx}`} className="flex items-start justify-between gap-3 border-b border-[var(--border-color)] pb-3 last:border-0 last:pb-0">
                   <div className="min-w-0">
-                    <p className="break-words font-medium text-slate-900">
+                    <p className="break-words font-medium text-[var(--text-primary)]">
                       {item.quantity}x {item.name}
                     </p>
-                    {item.notes ? <p className="mt-1 text-sm text-slate-500">{item.notes}</p> : null}
+                    {item.notes ? <p className="mt-1 text-sm text-[var(--text-secondary)]">{item.notes}</p> : null}
                   </div>
-                  <span className="shrink-0 text-sm text-slate-500">{item.preparationTime || 20} min</span>
+                  <span className="shrink-0 text-sm text-[var(--text-secondary)]">{item.preparationTime || 20} min</span>
                 </div>
               ))}
             </div>
           </div>
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <div className="rounded-2xl border border-slate-200 p-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-400">Elapsed</p>
-              <p className="mt-2 text-lg font-semibold text-slate-900">{getElapsedMinutes(order.createdAt)} minutes</p>
+            <div className="rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card-muted)] p-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.25em] text-[var(--text-tertiary)]">Elapsed</p>
+              <p className="mt-2 text-lg font-semibold text-[var(--text-primary)]">{getElapsedMinutes(order.createdAt)} minutes</p>
             </div>
-            <div className="rounded-2xl border border-slate-200 p-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-400">Total amount</p>
-              <p className="mt-2 text-lg font-semibold text-slate-900">{formatCurrency(order.totalAmount || 0)}</p>
+            <div className="rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card-muted)] p-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.25em] text-[var(--text-tertiary)]">Total amount</p>
+              <p className="mt-2 text-lg font-semibold text-[var(--text-primary)]">{formatCurrency(order.totalAmount || 0)}</p>
             </div>
           </div>
 
           {order.notes ? (
-            <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.25em] text-amber-700">Special requests</p>
-              <p className="mt-2 text-sm leading-6 text-amber-900">{order.notes}</p>
+            <div className="rounded-2xl border border-amber-500/20 bg-amber-500/10 p-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.25em] text-amber-300">Special requests</p>
+              <p className="mt-2 text-sm leading-6 text-amber-100">{order.notes}</p>
             </div>
           ) : null}
 
@@ -388,7 +388,7 @@ function OrderDetailModal({ order, updating, onClose, onStatusUpdate }) {
               type="button"
               onClick={() => onStatusUpdate(order.id, nextStatus)}
               disabled={updating === order.id}
-              className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white transition hover:bg-black disabled:cursor-not-allowed disabled:bg-slate-300"
+              className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-[var(--color-primary)] to-[var(--color-accent)] px-4 py-3 text-sm font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {updating === order.id ? <Loader className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
               {updating === order.id ? 'Updating...' : `Move to ${STATUS_META[nextStatus]?.label || nextStatus}`}

@@ -1,7 +1,7 @@
 import Joi from 'joi';
 
 export const createMenuItemSchema = Joi.object({
-  categoryId: Joi.string().uuid().optional().allow(''),
+  categoryId: Joi.string().uuid().required(),
   name: Joi.string().trim().min(2).max(100).required(),
   description: Joi.string().trim().max(500).optional(),
   price: Joi.number().positive().precision(2).required(),
@@ -13,7 +13,7 @@ export const createMenuItemSchema = Joi.object({
 }).unknown(true);
 
 export const updateMenuItemSchema = Joi.object({
-  categoryId: Joi.string().uuid().optional().allow(''),
+  categoryId: Joi.string().uuid().required(),
   name: Joi.string().trim().min(2).max(100).optional(),
   description: Joi.string().trim().max(500).optional(),
   price: Joi.number().positive().precision(2).optional(),

@@ -1,14 +1,16 @@
-import { useEffect, useMemo, useState } from 'react';
-import { useSearchParams, useNavigate } from 'react-router-dom';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
-  ShoppingCart,
-  Plus,
-  Loader,
-  Check,
   AlertCircle,
   ArrowRight,
-  Sparkles,
+  Check,
+  ChevronRight,
   Expand,
+  Loader,
+  Plus,
+  ShoppingCart,
+  Sparkles,
+  Star,
   X,
 } from 'lucide-react';
 import { useApi } from '../hooks/useApi';
@@ -21,7 +23,6 @@ import { useCustomerCartStore } from '../context/customerCartStore';
 
 const PRODUCTION_API_BASE_URL = 'https://restaurent-backend-448t.onrender.com/api';
 const DEVELOPMENT_API_BASE_URL = 'http://localhost:3000/api';
-
 const ADDED_STATE_TIMEOUT_MS = 1400;
 
 export default function CustomerMenu() {
@@ -46,6 +47,8 @@ export default function CustomerMenu() {
   const [cartToast, setCartToast] = useState('');
   const [blockedItemIds, setBlockedItemIds] = useState({});
   const [previewItem, setPreviewItem] = useState(null);
+  const [activeCategory, setActiveCategory] = useState('all');
+  const sectionRefs = useRef({});
 
   const cart = useCustomerCartStore((state) => state.carts[cartKey] || []);
   const addItem = useCustomerCartStore((state) => state.addItem);
@@ -53,23 +56,56 @@ export default function CustomerMenu() {
   const clearCart = useCustomerCartStore((state) => state.clearCart);
   const removeCart = useCustomerCartStore((state) => state.removeCart);
 
-  const { data: menuItems = [], loading, error: apiError } = useApi(
-    () => (
+  const { data: menuData = { restaurantName: 'Restaurant Menu', categories: [], items: [] }, loading, error: apiError } = useApi(
+    () =>
       hasValidQrParams
         ? customerAPI.getPublicMenu({ tableNumber, tableId })
-        : Promise.resolve({ data: { data: [] } })
-    ),
+        : Promise.resolve({ data: { data: { restaurantName: 'Restaurant Menu', categories: [], items: [] } } }),
     [tableNumber, tableId, hasValidQrParams]
   );
 
-  const cartItemCount = useMemo(
-    () => cart.reduce((sum, item) => sum + item.quantity, 0),
-    [cart]
-  );
-  const cartTotal = useMemo(
-    () => cart.reduce((sum, item) => sum + item.price * item.quantity, 0),
-    [cart]
-  );
+  const restaurantName = menuData?.restaurantName || 'Restaurant Menu';
+  const categories = Array.isArray(menuData?.categories)
+    ? menuData.categories.map((category) => ({
+        ...category,
+        id: category.id || category._id || category.categoryId || '',
+      }))
+    : [];
+  const menuItems = Array.isArray(menuData?.items)
+    ? menuData.items.map((item) => ({
+        ...item,
+        id: item.id || item._id || '',
+        categoryId: item.categoryId || item.category_id || item.category?.id || item.category?._id || '',
+      }))
+    : Array.isArray(menuData)
+      ? menuData.map((item) => ({
+          ...item,
+          id: item.id || item._id || '',
+          categoryId: item.categoryId || item.category_id || item.category?.id || item.category?._id || '',
+        }))
+      : [];
+
+  const groupedCategories = useMemo(() => {
+    const grouped = categories.map((category) => ({
+      id: category.id,
+      name: category.name,
+      items: menuItems.filter((item) => String(item.categoryId || '') === String(category.id || '')),
+    }));
+
+    const uncategorizedItems = menuItems.filter((item) => !item.categoryId);
+    if (uncategorizedItems.length > 0) {
+      grouped.push({
+        id: 'uncategorized',
+        name: 'Chef Specials',
+        items: uncategorizedItems,
+      });
+    }
+
+    return grouped;
+  }, [categories, menuItems]);
+
+  const cartItemCount = useMemo(() => cart.reduce((sum, item) => sum + item.quantity, 0), [cart]);
+  const cartTotal = useMemo(() => cart.reduce((sum, item) => sum + item.price * item.quantity, 0), [cart]);
 
   useEffect(() => {
     if (!cartToast) {
@@ -96,20 +132,59 @@ export default function CustomerMenu() {
   }, [cartItemCount]);
 
   useEffect(() => {
-    if (!apiError) {
+    if (!groupedCategories.length) {
+      return undefined;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visibleEntry = entries
+          .filter((entry) => entry.isIntersecting)
+          .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
+
+        if (visibleEntry?.target?.id) {
+          setActiveCategory(visibleEntry.target.id.replace('category-', ''));
+        }
+      },
+      {
+        rootMargin: '-25% 0px -55% 0px',
+        threshold: [0.15, 0.3, 0.6],
+      }
+    );
+
+    groupedCategories.forEach((category) => {
+      const element = sectionRefs.current[category.id];
+      if (element) {
+        observer.observe(element);
+      }
+    });
+
+    return () => observer.disconnect();
+  }, [groupedCategories]);
+
+  const scrollToCategory = (categoryId) => {
+    if (categoryId === 'all') {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      setActiveCategory('all');
       return;
     }
 
-    console.error('API Error fetching menu:', apiError);
-  }, [apiError]);
+    const target = sectionRefs.current[categoryId];
+    if (!target) {
+      return;
+    }
+
+    target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    setActiveCategory(categoryId);
+  };
 
   if (!tableNumber && !tableId) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-gray-50 p-6">
+      <div className="flex min-h-screen items-center justify-center bg-[var(--bg-main)] p-6 text-[var(--text-primary)]">
         <div className="text-center">
-          <AlertCircle className="mx-auto mb-4 h-12 w-12 text-red-500" />
-          <h1 className="mb-2 text-2xl font-bold text-gray-900">Invalid QR Code</h1>
-          <p className="text-gray-600">Please scan a valid table QR code.</p>
+          <AlertCircle className="mx-auto mb-4 h-12 w-12 text-red-400" />
+          <h1 className="mb-2 text-2xl font-bold">Invalid QR Code</h1>
+          <p className="text-[var(--text-secondary)]">Please scan a valid table QR code.</p>
         </div>
       </div>
     );
@@ -117,11 +192,11 @@ export default function CustomerMenu() {
 
   if (!hasValidQrParams) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-gray-50 p-6">
+      <div className="flex min-h-screen items-center justify-center bg-[var(--bg-main)] p-6 text-[var(--text-primary)]">
         <div className="text-center">
-          <AlertCircle className="mx-auto mb-4 h-12 w-12 text-red-500" />
-          <h1 className="mb-2 text-2xl font-bold text-gray-900">Invalid QR Code</h1>
-          <p className="text-gray-600">This QR code is missing a valid table reference.</p>
+          <AlertCircle className="mx-auto mb-4 h-12 w-12 text-red-400" />
+          <h1 className="mb-2 text-2xl font-bold">Invalid QR Code</h1>
+          <p className="text-[var(--text-secondary)]">This QR code is missing a valid table reference.</p>
         </div>
       </div>
     );
@@ -180,7 +255,6 @@ export default function CustomerMenu() {
         })),
         totalAmount: cartTotal,
         paymentMethod: 'cash',
-        notes: '',
       };
 
       const response = await customerAPI.placeOrder(orderData);
@@ -206,10 +280,10 @@ export default function CustomerMenu() {
 
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-gray-50">
-        <div className="text-center">
-          <Loader className="mx-auto mb-4 h-8 w-8 animate-spin text-blue-600" />
-          <p className="text-gray-600">Loading menu...</p>
+      <div className="flex min-h-screen items-center justify-center bg-[var(--bg-main)]">
+        <div className="text-center text-[var(--text-primary)]">
+          <Loader className="mx-auto mb-4 h-8 w-8 animate-spin text-[var(--color-primary)]" />
+          <p className="text-[var(--text-secondary)]">Loading menu...</p>
         </div>
       </div>
     );
@@ -223,24 +297,24 @@ export default function CustomerMenu() {
     const apiUrl = `${apiBaseUrl}/v1/customer/menu/items?table=${tableNumber || ''}${tableId ? `&tableId=${tableId}` : ''}`;
 
     return (
-      <div className="flex min-h-screen items-center justify-center bg-gray-50 p-6">
-        <div className="max-w-md text-center">
-          <AlertCircle className="mx-auto mb-4 h-12 w-12 text-red-500" />
-          <h1 className="mb-2 text-2xl font-bold text-gray-900">Unable to Load Menu</h1>
-          <p className="mb-4 text-gray-600">{apiError}</p>
-          <div className="mb-4 rounded-2xl bg-gray-100 p-4 text-left">
-            <p className="break-all font-mono text-xs text-gray-600">{apiUrl}</p>
+      <div className="flex min-h-screen items-center justify-center bg-[var(--bg-main)] p-6">
+        <div className="glass-panel max-w-md rounded-3xl p-6 text-center">
+          <AlertCircle className="mx-auto mb-4 h-12 w-12 text-red-400" />
+          <h1 className="mb-2 text-2xl font-bold text-[var(--text-primary)]">Unable to Load Menu</h1>
+          <p className="mb-4 text-[var(--text-secondary)]">{apiError}</p>
+          <div className="mb-4 rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card-muted)] p-4 text-left">
+            <p className="break-all font-mono text-xs text-[var(--text-secondary)]">{apiUrl}</p>
           </div>
           <div className="flex flex-wrap justify-center gap-3">
             <button
               onClick={() => window.location.reload()}
-              className="rounded-xl bg-blue-600 px-6 py-2 text-white transition hover:bg-blue-700"
+              className="rounded-xl bg-[var(--color-primary)] px-6 py-2 text-white transition hover:brightness-110"
             >
               Retry
             </button>
             <button
               onClick={() => window.location.href = '/'}
-              className="rounded-xl bg-gray-700 px-6 py-2 text-white transition hover:bg-gray-800"
+              className="rounded-xl border border-[var(--border-color)] bg-[var(--bg-card)] px-6 py-2 text-[var(--text-primary)] transition hover:bg-[var(--bg-card-muted)]"
             >
               Go Back
             </button>
@@ -251,19 +325,19 @@ export default function CustomerMenu() {
   }
 
   return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_top,_#fef3c7,_#f8fafc_35%,_#f8fafc)] pb-32">
+    <div className="min-h-screen bg-[var(--bg-main)] pb-32 text-[var(--text-primary)]">
       {orderStatus === 'success' && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-md rounded-3xl bg-white p-8 text-center shadow-2xl">
-            <Check className="mx-auto mb-4 h-12 w-12 text-green-600" />
-            <h2 className="mb-2 text-2xl font-bold text-gray-900">Order Confirmed!</h2>
-            <p className="text-gray-600">{orderMessage}</p>
+          <div className="glass-panel w-full max-w-md rounded-3xl p-8 text-center">
+            <Check className="mx-auto mb-4 h-12 w-12 text-emerald-400" />
+            <h2 className="mb-2 text-2xl font-bold text-[var(--text-primary)]">Order Confirmed!</h2>
+            <p className="text-[var(--text-secondary)]">{orderMessage}</p>
           </div>
         </div>
       )}
 
       {orderStatus === 'error' && (
-        <div className="fixed right-4 top-4 z-50 flex max-w-md items-center gap-3 rounded-2xl border border-red-200 bg-red-50 p-4 text-red-700 shadow-lg">
+        <div className="fixed right-4 top-4 z-50 flex max-w-md items-center gap-3 rounded-2xl border border-red-500/20 bg-red-500/10 p-4 text-red-300 shadow-lg">
           <AlertCircle className="h-5 w-5 flex-shrink-0" />
           <p>{orderMessage}</p>
         </div>
@@ -277,12 +351,7 @@ export default function CustomerMenu() {
 
       {previewItem && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/90 p-4">
-          <button
-            type="button"
-            aria-label="Close image preview"
-            onClick={() => setPreviewItem(null)}
-            className="absolute inset-0"
-          />
+          <button type="button" aria-label="Close image preview" onClick={() => setPreviewItem(null)} className="absolute inset-0" />
 
           <div className="relative w-full max-w-5xl">
             <button
@@ -294,7 +363,7 @@ export default function CustomerMenu() {
             </button>
 
             <div className="overflow-hidden rounded-[2rem] bg-white shadow-2xl">
-              <div className="flex min-h-[65vh] items-center justify-center bg-gradient-to-br from-slate-100 via-white to-amber-50 p-4 sm:p-6">
+              <div className="flex min-h-[65vh] items-center justify-center bg-gradient-to-br from-slate-100 via-white to-orange-50 p-4 sm:p-6">
                 <img
                   src={previewItem.imageUrl}
                   alt={previewItem.name}
@@ -333,144 +402,215 @@ export default function CustomerMenu() {
         <FloatingCartButton itemCount={cartItemCount} onClick={() => setShowCart(true)} />
       )}
 
-      <header className="sticky top-0 z-30 border-b border-gray-200/70 bg-white/90 backdrop-blur">
-        <div className="mx-auto flex max-w-5xl items-start justify-between gap-3 px-4 py-4 sm:items-center sm:px-6">
-          <div className="min-w-0">
-            <p className="text-xs font-semibold uppercase tracking-[0.3em] text-amber-500">Scan to Order</p>
-            <h1 className="mt-1 text-xl font-bold text-gray-900 sm:text-2xl">Menu</h1>
-            <p className="break-words text-sm text-gray-600">Table {tableNumber || 'Guest'}</p>
-          </div>
+      <header className="sticky top-0 z-30 border-b border-white/10 bg-[rgba(11,19,32,0.86)] backdrop-blur-xl">
+        <div className="mx-auto max-w-6xl px-4 py-4 sm:px-6">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-xs font-semibold uppercase tracking-[0.32em] text-orange-300">Scan to Order</p>
+              <h1 className="mt-2 break-words text-xl font-bold text-white sm:text-2xl">{restaurantName}</h1>
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-[var(--text-secondary)]">
+                <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1">Table {tableNumber || 'Guest'}</span>
+                <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1">{menuItems.length} dishes</span>
+              </div>
+            </div>
 
-          <button
-            onClick={() => setShowCart(true)}
-            className="relative rounded-full border border-gray-200 bg-white p-3 text-gray-700 transition hover:border-gray-300 hover:bg-gray-50"
-          >
-            <ShoppingCart className="h-6 w-6" />
-            {cartItemCount > 0 && (
-              <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white">
-                {cartItemCount}
-              </span>
-            )}
-          </button>
+            <button
+              onClick={() => setShowCart(true)}
+              className="relative rounded-full border border-white/10 bg-white/10 p-3 text-white transition hover:scale-[1.02] hover:bg-white/15"
+            >
+              <ShoppingCart className="h-6 w-6" />
+              {cartItemCount > 0 && (
+                <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-orange-500 px-1 text-[10px] font-bold text-white">
+                  {cartItemCount}
+                </span>
+              )}
+            </button>
+          </div>
         </div>
       </header>
 
-      <div className="mx-auto max-w-5xl px-4 py-6 sm:px-6 sm:py-8">
-        <div className="mb-6 rounded-3xl border border-amber-100 bg-white/80 p-4 shadow-sm sm:mb-8 sm:p-5">
-          <div className="flex items-start gap-3">
-            <div className="rounded-2xl bg-amber-100 p-3 text-amber-700">
-              <Sparkles className="h-5 w-5" />
-            </div>
-            <div>
-              <h2 className="text-lg font-semibold text-gray-900">Ready when you are</h2>
-              <p className="mt-1 text-sm leading-6 text-gray-600">
-                Add dishes to your cart as you browse. Your order stays saved on this table until you place it.
+      <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8">
+        <section className="glass-panel overflow-hidden rounded-[2rem] p-5 sm:p-6">
+          <div className="absolute inset-y-0 right-0 w-40 bg-gradient-to-l from-orange-400/10 via-cyan-400/10 to-transparent" />
+          <div className="relative flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="min-w-0">
+              <div className="inline-flex items-center gap-2 rounded-full bg-orange-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.28em] text-orange-300">
+                <Sparkles className="h-3.5 w-3.5" />
+                Premium Ordering
+              </div>
+              <h2 className="mt-4 text-2xl font-bold text-white sm:text-3xl">Fresh picks for your table</h2>
+              <p className="mt-2 max-w-2xl text-sm leading-6 text-[var(--text-secondary)]">
+                Discover the menu by category, preview dishes in full view, and add favorites to your cart with one tap.
               </p>
             </div>
+
+            <div className="grid grid-cols-2 gap-3 sm:w-auto">
+              <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
+                <p className="text-xs uppercase tracking-[0.22em] text-[var(--text-secondary)]">Categories</p>
+                <p className="mt-2 text-xl font-bold text-white">{groupedCategories.length}</p>
+              </div>
+              <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
+                <p className="text-xs uppercase tracking-[0.22em] text-[var(--text-secondary)]">Cart Total</p>
+                <p className="mt-2 text-xl font-bold text-white">{formatCurrency(cartTotal)}</p>
+              </div>
+            </div>
           </div>
+        </section>
+
+        <div className="sticky top-[88px] z-20 -mx-4 mt-6 border-y border-white/10 bg-[rgba(11,19,32,0.92)] px-4 py-3 backdrop-blur-xl sm:-mx-6 sm:px-6">
+          <label className="block w-full sm:max-w-xs">
+            <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.24em] text-[var(--text-secondary)]">
+              Browse Category
+            </span>
+            <select
+              value={activeCategory}
+              onChange={(event) => scrollToCategory(event.target.value)}
+              className="w-full rounded-xl border border-white/10 bg-[var(--bg-card)] px-4 py-3 text-sm font-semibold text-[var(--text-primary)] outline-none transition focus:border-[var(--color-primary)] focus:ring-4 focus:ring-[var(--color-primary-soft)]"
+            >
+              <option value="all">All</option>
+              {groupedCategories.map((category) => (
+                <option key={category.id} value={category.id}>
+                  {category.name}
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
 
-        {menuItems?.length === 0 ? (
-          <div className="rounded-3xl border border-dashed border-gray-300 bg-white px-6 py-16 text-center shadow-sm">
-            <ShoppingCart className="mx-auto mb-4 h-12 w-12 text-gray-300" />
-            <h2 className="text-xl font-semibold text-gray-900">No menu items available yet</h2>
-            <p className="mt-2 text-gray-500">Please check back in a bit or ask the restaurant staff for help.</p>
+        {groupedCategories.length === 0 ? (
+          <div className="glass-panel mt-8 rounded-3xl border-dashed px-6 py-16 text-center">
+            <ShoppingCart className="mx-auto mb-4 h-12 w-12 text-[var(--text-secondary)]" />
+            <h2 className="text-xl font-semibold text-white">No dishes available</h2>
+            <p className="mt-2 text-[var(--text-secondary)]">Please check back in a bit or ask the restaurant staff for help.</p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 gap-4 sm:gap-5 md:grid-cols-2 xl:grid-cols-3">
-            {menuItems.map((item) => {
-              const buttonAdded = recentlyAddedItemId === item.id;
-              const buttonBlocked = blockedItemIds[item.id];
-              const itemImageUrl = getMenuItemImageUrl(item);
-
-              return (
-                <div
-                  key={item.id}
-                  className="group overflow-hidden rounded-[2rem] border border-gray-200 bg-white shadow-sm transition hover:-translate-y-1 hover:shadow-lg"
-                >
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setPreviewItem({
-                        imageUrl: itemImageUrl,
-                        name: item.name,
-                        description: item.description,
-                        price: item.price,
-                      })
-                    }
-                    className="relative block w-full overflow-hidden bg-slate-100 text-left"
-                  >
-                    <div className="aspect-[4/3] w-full sm:aspect-[5/4]">
-                      <img
-                        src={itemImageUrl}
-                        alt={item.name}
-                        className="h-full w-full object-cover transition duration-500 group-hover:scale-[1.04]"
-                      />
+          <div className="mt-8 space-y-10">
+            {groupedCategories.map((category) => (
+              <section
+                key={category.id}
+                id={`category-${category.id}`}
+                ref={(element) => {
+                  sectionRefs.current[category.id] = element;
+                }}
+                className="scroll-mt-40"
+              >
+                <div className="mb-4 mt-6 flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="inline-flex items-center gap-2 rounded-full bg-white/5 px-3 py-1 text-xs font-medium text-[var(--text-secondary)]">
+                      <Star className="h-3.5 w-3.5 text-orange-300" />
+                      Featured Category
                     </div>
-
-                    <div className="absolute inset-x-0 bottom-0 flex items-center justify-between bg-gradient-to-t from-slate-950/80 via-slate-950/20 to-transparent px-4 pb-4 pt-12 text-white">
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold sm:text-base">{item.name}</p>
-                        <p className="text-xs text-white/80">Tap to view full image</p>
-                      </div>
-                      <span className="inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-white/20 backdrop-blur">
-                        <Expand className="h-4 w-4" />
-                      </span>
-                    </div>
-                  </button>
-
-                  <div className="p-4 sm:p-5">
-                    <div className="flex min-w-0 flex-col gap-3">
-                      <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                        <div className="min-w-0 flex-1">
-                          <h3 className="break-words text-base font-bold text-gray-900 sm:text-lg">{item.name}</h3>
-                          <p className="mt-2 break-words text-sm leading-6 text-gray-600">{item.description}</p>
-                        </div>
-                        <span className="w-fit shrink-0 rounded-full bg-gray-100 px-3 py-1 text-sm font-semibold text-gray-900">
-                          {formatCurrency(item.price)}
-                        </span>
-                      </div>
-
-                      <div className="mt-2 flex flex-col gap-3 sm:mt-4 sm:flex-row sm:items-center sm:justify-between">
-                        <span className={`text-sm font-medium ${item.isAvailable ? 'text-emerald-600' : 'text-red-500'}`}>
-                          {item.isAvailable ? 'Available now' : 'Currently unavailable'}
-                        </span>
-
-                        <button
-                          onClick={() => handleAddToCart(item)}
-                          disabled={!item.isAvailable || buttonBlocked}
-                          className={`inline-flex w-full items-center justify-center gap-2 rounded-full px-4 py-2.5 text-sm font-semibold transition sm:w-auto sm:min-w-[8.5rem] ${
-                            buttonAdded
-                              ? 'scale-105 bg-emerald-500 text-white'
-                              : 'bg-gray-900 text-white hover:bg-black'
-                          } disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-500`}
-                        >
-                          {buttonAdded ? <Check className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
-                          {buttonAdded ? 'Added' : 'Add to Cart'}
-                        </button>
-                      </div>
-                    </div>
+                    <h2 className="mt-3 text-2xl font-bold text-white">{category.name}</h2>
+                    <p className="text-sm text-[var(--text-secondary)]">
+                      {category.items.length > 0 ? `${category.items.length} dishes available` : 'No items available'}
+                    </p>
                   </div>
+                  <ChevronRight className="hidden h-6 w-6 text-[var(--text-secondary)] sm:block" />
                 </div>
-              );
-            })}
+
+                {category.items.length === 0 ? (
+                  <div className="glass-panel rounded-3xl border-dashed px-6 py-10 text-center text-sm text-[var(--text-secondary)]">
+                    No dishes available
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+                    {category.items.map((item) => {
+                      const buttonAdded = recentlyAddedItemId === item.id;
+                      const buttonBlocked = blockedItemIds[item.id];
+                      const itemImageUrl = getMenuItemImageUrl(item);
+
+                      return (
+                        <article
+                          key={item.id}
+                          className="overflow-hidden rounded-xl border border-white/10 bg-[var(--bg-card)] shadow-md transition-all duration-300 hover:-translate-y-1 hover:shadow-[var(--shadow-floating)]"
+                        >
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setPreviewItem({
+                                imageUrl: itemImageUrl,
+                                name: item.name,
+                                description: item.description,
+                                price: item.price,
+                              })
+                            }
+                            className="relative block w-full overflow-hidden bg-[var(--bg-card-muted)] text-left"
+                          >
+                            <div className="aspect-[4/3] w-full">
+                              <img
+                                src={itemImageUrl}
+                                alt={item.name}
+                                className="h-full w-full object-cover transition duration-500 hover:scale-[1.04]"
+                              />
+                            </div>
+                            <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-slate-950/90 via-slate-950/20 to-transparent px-4 pb-4 pt-14">
+                              <div className="flex items-center justify-between gap-3">
+                                <div className="min-w-0">
+                                  <p className="truncate text-sm font-semibold text-white">{item.name}</p>
+                                  <p className="text-xs text-white/80">Tap to view</p>
+                                </div>
+                                <span className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-white backdrop-blur">
+                                  <Expand className="h-4 w-4" />
+                                </span>
+                              </div>
+                            </div>
+                          </button>
+
+                          <div className="p-4">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <h3 className="break-words text-lg font-bold text-white">{item.name}</h3>
+                                <p className="mt-2 line-clamp-2 text-sm leading-6 text-[var(--text-secondary)]">
+                                  {item.description || 'A delicious dish prepared fresh for your table.'}
+                                </p>
+                              </div>
+                              <span className="shrink-0 rounded-full bg-white/10 px-3 py-1 text-sm font-semibold text-white">
+                                {formatCurrency(item.price)}
+                              </span>
+                            </div>
+
+                            <div className="mt-4 flex items-center justify-between gap-3">
+                              <span className={`text-sm font-medium ${item.isAvailable ? 'text-emerald-300' : 'text-red-300'}`}>
+                                {item.isAvailable ? 'Available now' : 'Unavailable'}
+                              </span>
+                              <button
+                                onClick={() => handleAddToCart(item)}
+                                disabled={!item.isAvailable || buttonBlocked}
+                                className={`inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition ${
+                                  buttonAdded
+                                    ? 'bg-emerald-500 text-white'
+                                    : 'bg-[var(--color-primary)] text-white hover:brightness-110'
+                                } disabled:cursor-not-allowed disabled:opacity-50`}
+                              >
+                                {buttonAdded ? <Check className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+                                {buttonAdded ? 'Added' : 'Add'}
+                              </button>
+                            </div>
+                          </div>
+                        </article>
+                      );
+                    })}
+                  </div>
+                )}
+              </section>
+            ))}
           </div>
         )}
       </div>
 
       {cartItemCount > 0 && !showCart && (
-        <div className="fixed inset-x-0 bottom-0 z-30 border-t border-gray-200 bg-white/95 px-4 py-3 shadow-[0_-8px_30px_rgba(15,23,42,0.08)] backdrop-blur md:px-6">
-          <div className="mx-auto flex max-w-5xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+        <div className="fixed inset-x-0 bottom-0 z-30 border-t border-white/10 bg-[rgba(11,19,32,0.94)] px-4 py-3 backdrop-blur-xl md:px-6">
+          <div className="mx-auto flex max-w-6xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="min-w-0">
-              <p className="text-sm font-semibold text-gray-900">
+              <p className="text-sm font-semibold text-white">
                 {cartItemCount} {cartItemCount === 1 ? 'item' : 'items'} in cart
               </p>
-              <p className="text-sm text-gray-500">{formatCurrency(cartTotal)}</p>
+              <p className="text-sm text-[var(--text-secondary)]">{formatCurrency(cartTotal)}</p>
             </div>
 
             <button
               onClick={() => setShowCart(true)}
-              className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-emerald-500 px-5 py-3 text-sm font-semibold text-white transition hover:bg-emerald-600 sm:w-auto"
+              className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-emerald-500 px-5 py-3 text-sm font-semibold text-white transition hover:brightness-110 sm:w-auto"
             >
               Proceed to Order
               <ArrowRight className="h-4 w-4" />

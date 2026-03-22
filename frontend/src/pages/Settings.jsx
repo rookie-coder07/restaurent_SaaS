@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Check, Palette, School, Settings2, Store, UserCircle2 } from 'lucide-react';
+import { Check, MoonStar, Palette, Settings2, Store, SunMedium, UserCircle2 } from 'lucide-react';
 import useTheme from '../hooks/useTheme';
 import Card from '../components/common/Card';
 import Button from '../components/common/Button';
@@ -8,7 +8,7 @@ import { restaurantAPI } from '../services/apiEndpoints';
 import { useApi } from '../hooks/useApi';
 
 const themeIcons = {
-  school: School,
+  midnight: MoonStar,
   light: Palette,
 };
 
@@ -88,19 +88,20 @@ export default function Settings() {
             <p className="text-xs font-semibold uppercase tracking-[0.28em] text-[var(--color-text-subtle)]">Workspace settings</p>
             <h1 className="mt-3 text-3xl font-bold text-[var(--color-text)] sm:text-4xl">One place for profile, preferences, and theme</h1>
             <p className="mt-3 max-w-2xl text-sm leading-6 text-[var(--color-text-muted)] sm:text-base">
-              Keep restaurant identity, workspace behavior, and the School Theme system aligned in one consistent page.
+              Keep restaurant identity, workspace behavior, and the theme system aligned in one consistent page.
             </p>
           </div>
 
-          <div className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/10 px-4 py-3 text-sm font-medium text-[var(--color-text-muted)] backdrop-blur-md">
+          <div className="inline-flex items-center gap-2 rounded-xl border border-[var(--border-color)] bg-[var(--bg-card)] px-4 py-3 text-sm font-medium text-[var(--text-secondary)] backdrop-blur-md">
             <Palette className="h-4 w-4" />
-            Current theme: <span className="font-semibold text-[var(--color-text)]">{selectedTheme?.label || 'School Theme'}</span>
+            Current theme: <span className="font-semibold text-[var(--text-primary)]">{selectedTheme?.label || 'Midnight'}</span>
           </div>
         </div>
       </Card>
 
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
-        <Card>
+        <Card className="relative overflow-hidden">
+          <div className="absolute inset-x-0 top-0 h-24 bg-gradient-to-r from-[var(--color-primary-soft)] to-transparent opacity-90" />
           <div className="flex items-start gap-3">
             <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-[var(--color-primary-soft)] text-[var(--color-primary)]">
               <UserCircle2 className="h-5 w-5" />
@@ -118,7 +119,7 @@ export default function Settings() {
             <Input label="Address" name="address" value={profileForm.address} onChange={handleProfileChange} />
           </div>
 
-          <div className="mt-5 flex items-center justify-between gap-3">
+          <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-sm text-[var(--color-text-muted)]">
               {loading ? 'Loading profile...' : saveState.profile === 'saved' ? 'Saved successfully.' : saveState.profile === 'error' ? 'Unable to save changes.' : 'Keep your restaurant details up to date.'}
             </p>
@@ -128,7 +129,8 @@ export default function Settings() {
           </div>
         </Card>
 
-        <Card>
+        <Card className="relative overflow-hidden">
+          <div className="absolute inset-x-0 top-0 h-24 bg-gradient-to-r from-cyan-500/10 to-transparent opacity-90" />
           <div className="flex items-start gap-3">
             <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-[var(--color-primary-soft)] text-[var(--color-primary)]">
               <Settings2 className="h-5 w-5" />
@@ -149,7 +151,7 @@ export default function Settings() {
                 key={key}
                 type="button"
                 onClick={() => handlePreferenceToggle(key)}
-                className="flex w-full items-center justify-between rounded-xl border border-white/10 bg-white/10 px-4 py-3 text-left transition-all hover:scale-[1.01] hover:bg-white/15"
+                className="flex w-full items-center justify-between rounded-xl border border-[var(--border-color)] bg-[var(--bg-card-muted)] px-4 py-3 text-left transition-all hover:scale-[1.01] hover:bg-[var(--color-primary-soft)]"
               >
                 <span className="text-sm font-medium text-[var(--color-text)]">{label}</span>
                 <span
@@ -163,11 +165,11 @@ export default function Settings() {
             ))}
           </div>
 
-          <div className="mt-5 flex items-center justify-between gap-3">
+          <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-sm text-[var(--color-text-muted)]">
               {saveState.preferences === 'saved' ? 'Preferences saved.' : saveState.preferences === 'error' ? 'Could not save preferences.' : 'Tune how the dashboard behaves for your team.'}
             </p>
-            <Button onClick={handlePreferenceSave} disabled={saveState.preferences === 'saving'}>
+              <Button onClick={handlePreferenceSave} disabled={saveState.preferences === 'saving'}>
               {saveState.preferences === 'saving' ? 'Saving...' : 'Save preferences'}
             </Button>
           </div>
@@ -178,13 +180,14 @@ export default function Settings() {
           const active = theme === option.id;
 
           return (
-            <Card key={option.id} className={active ? 'border-[var(--color-primary)] ring-2 ring-[var(--color-primary-soft)]' : ''}>
+            <Card key={option.id} className={`relative overflow-hidden ${active ? 'border-[var(--color-primary)] ring-2 ring-[var(--color-primary-soft)]' : ''}`}>
+              <div className="absolute inset-x-0 top-0 h-20 bg-gradient-to-r from-[var(--color-primary-soft)] to-transparent opacity-80" />
               <div className="flex items-start justify-between gap-4">
                 <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-[var(--color-primary-soft)] text-[var(--color-primary)]">
                   <Icon className="h-5 w-5" />
                 </div>
                 {active ? (
-                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-emerald-100 text-emerald-600">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-300">
                     <Check className="h-4 w-4" />
                   </div>
                 ) : null}
@@ -193,15 +196,15 @@ export default function Settings() {
               <p className="mt-5 text-sm text-[var(--color-text-subtle)]">Theme Selection</p>
               <h2 className="mt-1 text-xl font-bold text-[var(--color-text)]">{option.label}</h2>
               <p className="mt-2 text-sm leading-6 text-[var(--color-text-muted)]">
-                {option.id === 'school'
-                  ? 'Balanced blue surfaces and soft contrast for a modern SaaS workspace.'
-                  : 'A cleaner bright workspace with softer glass cards and higher brightness.'}
+                {option.id === 'midnight'
+                  ? 'A high-contrast dark workspace with glass cards and strong readability.'
+                  : 'A fully visible bright workspace with clean cards and soft borders.'}
               </p>
 
               <div className="mt-6 grid grid-cols-3 gap-2">
-                <div className={`h-16 rounded-xl ${option.id === 'school' ? 'bg-[#f8fafc]' : 'bg-[#ffffff]'}`} />
-                <div className="h-16 rounded-xl bg-[#2563eb]" />
-                <div className={`h-16 rounded-xl ${option.id === 'school' ? 'bg-[#0f172a]' : 'bg-[#64748b]'}`} />
+                <div className={`h-16 rounded-xl ${option.id === 'midnight' ? 'bg-[#0b1320]' : 'bg-[#f9fafb]'}`} />
+                <div className={`h-16 rounded-xl ${option.id === 'midnight' ? 'bg-[rgba(255,255,255,0.08)]' : 'bg-[#ffffff]'}`} />
+                <div className={`h-16 rounded-xl ${option.id === 'midnight' ? 'bg-[#ffffff]' : 'bg-[#111827]'}`} />
               </div>
 
               <Button
@@ -216,16 +219,17 @@ export default function Settings() {
         })}
       </div>
 
-      <Card>
+      <Card className="relative overflow-hidden">
+        <div className="absolute inset-x-0 top-0 h-20 bg-gradient-to-r from-amber-500/10 to-transparent opacity-80" />
         <div className="flex items-start gap-3">
           <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-[var(--color-primary-soft)] text-[var(--color-primary)]">
-            <Store className="h-5 w-5" />
+            <SunMedium className="h-5 w-5" />
           </div>
           <div>
             <p className="text-sm text-[var(--color-text-subtle)]">Workspace guidance</p>
             <h2 className="mt-1 text-xl font-semibold text-[var(--color-text)]">Keep the team aligned</h2>
             <p className="mt-2 text-sm leading-6 text-[var(--color-text-muted)]">
-              Use School Theme for the default production look and Light Theme when you want a brighter workspace for daytime operations.
+              Use Midnight as the default production look and switch to Light when you want a brighter daytime workspace.
             </p>
           </div>
         </div>
