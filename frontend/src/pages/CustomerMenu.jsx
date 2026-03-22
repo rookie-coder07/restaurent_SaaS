@@ -8,6 +8,8 @@ import {
   AlertCircle,
   ArrowRight,
   Sparkles,
+  Expand,
+  X,
 } from 'lucide-react';
 import { useApi } from '../hooks/useApi';
 import { customerAPI } from '../services/apiEndpoints';
@@ -43,6 +45,7 @@ export default function CustomerMenu() {
   const [recentlyAddedItemId, setRecentlyAddedItemId] = useState(null);
   const [cartToast, setCartToast] = useState('');
   const [blockedItemIds, setBlockedItemIds] = useState({});
+  const [previewItem, setPreviewItem] = useState(null);
 
   const cart = useCustomerCartStore((state) => state.carts[cartKey] || []);
   const addItem = useCustomerCartStore((state) => state.addItem);
@@ -272,6 +275,49 @@ export default function CustomerMenu() {
         </div>
       )}
 
+      {previewItem && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/90 p-4">
+          <button
+            type="button"
+            aria-label="Close image preview"
+            onClick={() => setPreviewItem(null)}
+            className="absolute inset-0"
+          />
+
+          <div className="relative w-full max-w-5xl">
+            <button
+              type="button"
+              onClick={() => setPreviewItem(null)}
+              className="absolute right-3 top-3 z-10 rounded-full bg-white/90 p-2 text-slate-700 shadow-lg transition hover:bg-white"
+            >
+              <X className="h-5 w-5" />
+            </button>
+
+            <div className="overflow-hidden rounded-[2rem] bg-white shadow-2xl">
+              <div className="flex min-h-[65vh] items-center justify-center bg-gradient-to-br from-slate-100 via-white to-amber-50 p-4 sm:p-6">
+                <img
+                  src={previewItem.imageUrl}
+                  alt={previewItem.name}
+                  className="max-h-[75vh] w-full rounded-[1.5rem] object-contain"
+                />
+              </div>
+
+              <div className="border-t border-slate-200 px-5 py-4 sm:px-6">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0">
+                    <h3 className="break-words text-lg font-bold text-slate-900 sm:text-xl">{previewItem.name}</h3>
+                    <p className="mt-1 break-words text-sm leading-6 text-slate-600">{previewItem.description}</p>
+                  </div>
+                  <span className="w-fit rounded-full bg-slate-100 px-3 py-1 text-sm font-semibold text-slate-900">
+                    {formatCurrency(previewItem.price)}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       <CartDrawer
         isOpen={showCart}
         items={cart}
@@ -340,15 +386,38 @@ export default function CustomerMenu() {
               return (
                 <div
                   key={item.id}
-                  className="group overflow-hidden rounded-3xl border border-gray-200 bg-white shadow-sm transition hover:-translate-y-1 hover:shadow-lg"
+                  className="group overflow-hidden rounded-[2rem] border border-gray-200 bg-white shadow-sm transition hover:-translate-y-1 hover:shadow-lg"
                 >
-                  <div className="flex h-48 items-center justify-center bg-gradient-to-br from-amber-50 via-white to-slate-50 p-4 sm:h-52">
-                    <img
-                      src={itemImageUrl}
-                      alt={item.name}
-                      className="h-full w-full rounded-2xl object-contain transition duration-500 group-hover:scale-[1.03]"
-                    />
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setPreviewItem({
+                        imageUrl: itemImageUrl,
+                        name: item.name,
+                        description: item.description,
+                        price: item.price,
+                      })
+                    }
+                    className="relative block w-full overflow-hidden bg-slate-100 text-left"
+                  >
+                    <div className="aspect-[4/3] w-full sm:aspect-[5/4]">
+                      <img
+                        src={itemImageUrl}
+                        alt={item.name}
+                        className="h-full w-full object-cover transition duration-500 group-hover:scale-[1.04]"
+                      />
+                    </div>
+
+                    <div className="absolute inset-x-0 bottom-0 flex items-center justify-between bg-gradient-to-t from-slate-950/80 via-slate-950/20 to-transparent px-4 pb-4 pt-12 text-white">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold sm:text-base">{item.name}</p>
+                        <p className="text-xs text-white/80">Tap to view full image</p>
+                      </div>
+                      <span className="inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-white/20 backdrop-blur">
+                        <Expand className="h-4 w-4" />
+                      </span>
+                    </div>
+                  </button>
 
                   <div className="p-4 sm:p-5">
                     <div className="flex min-w-0 flex-col gap-3">
