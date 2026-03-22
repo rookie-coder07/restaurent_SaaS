@@ -1,48 +1,186 @@
-import { Check, MoonStar, Palette, School, Sparkles } from 'lucide-react';
-import { useTheme } from '../context/ThemeContext';
+import { useEffect, useMemo, useState } from 'react';
+import { Check, Palette, School, Settings2, Store, UserCircle2 } from 'lucide-react';
+import useTheme from '../hooks/useTheme';
 import Card from '../components/common/Card';
 import Button from '../components/common/Button';
+import Input from '../components/common/Input';
+import { restaurantAPI } from '../services/apiEndpoints';
+import { useApi } from '../hooks/useApi';
 
 const themeIcons = {
-  default: Sparkles,
   school: School,
-  dark: MoonStar,
+  light: Palette,
 };
 
 export default function Settings() {
   const { theme, setTheme, themes } = useTheme();
+  const { data: profileData, loading } = useApi(restaurantAPI.getProfile);
+  const [profileForm, setProfileForm] = useState({
+    name: '',
+    email: '',
+    phone: '',
+    address: '',
+  });
+  const [preferences, setPreferences] = useState({
+    autoRefresh: true,
+    compactTables: false,
+    emailAlerts: true,
+  });
+  const [saveState, setSaveState] = useState({
+    profile: 'idle',
+    preferences: 'idle',
+  });
+
+  useEffect(() => {
+    if (!profileData) {
+      return;
+    }
+
+    setProfileForm({
+      name: profileData.name || '',
+      email: profileData.email || '',
+      phone: profileData.phone || '',
+      address: profileData.address || '',
+    });
+  }, [profileData]);
+
+  const selectedTheme = useMemo(
+    () => themes.find((option) => option.id === theme) || themes[0],
+    [theme, themes]
+  );
+
+  const handleProfileChange = (event) => {
+    const { name, value } = event.target;
+    setProfileForm((current) => ({ ...current, [name]: value }));
+  };
+
+  const handlePreferenceToggle = (key) => {
+    setPreferences((current) => ({ ...current, [key]: !current[key] }));
+  };
+
+  const handleProfileSave = async () => {
+    try {
+      setSaveState((current) => ({ ...current, profile: 'saving' }));
+      await restaurantAPI.updateProfile(profileForm);
+      setSaveState((current) => ({ ...current, profile: 'saved' }));
+    } catch (error) {
+      console.error('Failed to save profile settings', error);
+      setSaveState((current) => ({ ...current, profile: 'error' }));
+    }
+  };
+
+  const handlePreferenceSave = async () => {
+    try {
+      setSaveState((current) => ({ ...current, preferences: 'saving' }));
+      await restaurantAPI.updateSettings(preferences);
+      setSaveState((current) => ({ ...current, preferences: 'saved' }));
+    } catch (error) {
+      console.error('Failed to save app preferences', error);
+      setSaveState((current) => ({ ...current, preferences: 'error' }));
+    }
+  };
 
   return (
     <div className="space-y-6">
-      <Card className="overflow-hidden bg-[radial-gradient(circle_at_top_right,_rgba(37,99,235,0.15),_transparent_40%),var(--color-surface)]">
+      <Card className="overflow-hidden">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.28em] text-[var(--color-text-subtle)]">Appearance</p>
-            <h1 className="mt-3 text-3xl font-bold text-[var(--color-text)] sm:text-4xl">Theme settings</h1>
+            <p className="text-xs font-semibold uppercase tracking-[0.28em] text-[var(--color-text-subtle)]">Workspace settings</p>
+            <h1 className="mt-3 text-3xl font-bold text-[var(--color-text)] sm:text-4xl">One place for profile, preferences, and theme</h1>
             <p className="mt-3 max-w-2xl text-sm leading-6 text-[var(--color-text-muted)] sm:text-base">
-              Choose a professional SaaS look for your workspace. Your choice is saved locally and applied instantly.
+              Keep restaurant identity, workspace behavior, and the School Theme system aligned in one consistent page.
             </p>
           </div>
 
-          <div className="inline-flex items-center gap-2 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-4 py-3 text-sm font-medium text-[var(--color-text-muted)]">
+          <div className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/10 px-4 py-3 text-sm font-medium text-[var(--color-text-muted)] backdrop-blur-md">
             <Palette className="h-4 w-4" />
-            Current theme: <span className="font-semibold text-[var(--color-text)]">{theme}</span>
+            Current theme: <span className="font-semibold text-[var(--color-text)]">{selectedTheme?.label || 'School Theme'}</span>
           </div>
         </div>
       </Card>
 
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
+        <Card>
+          <div className="flex items-start gap-3">
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-[var(--color-primary-soft)] text-[var(--color-primary)]">
+              <UserCircle2 className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="text-sm text-[var(--color-text-subtle)]">Profile Settings</p>
+              <h2 className="mt-1 text-xl font-semibold text-[var(--color-text)]">Restaurant profile</h2>
+            </div>
+          </div>
+
+          <div className="mt-5 space-y-4">
+            <Input label="Restaurant name" name="name" value={profileForm.name} onChange={handleProfileChange} />
+            <Input label="Email" name="email" type="email" value={profileForm.email} onChange={handleProfileChange} />
+            <Input label="Phone" name="phone" value={profileForm.phone} onChange={handleProfileChange} />
+            <Input label="Address" name="address" value={profileForm.address} onChange={handleProfileChange} />
+          </div>
+
+          <div className="mt-5 flex items-center justify-between gap-3">
+            <p className="text-sm text-[var(--color-text-muted)]">
+              {loading ? 'Loading profile...' : saveState.profile === 'saved' ? 'Saved successfully.' : saveState.profile === 'error' ? 'Unable to save changes.' : 'Keep your restaurant details up to date.'}
+            </p>
+            <Button onClick={handleProfileSave} disabled={saveState.profile === 'saving'}>
+              {saveState.profile === 'saving' ? 'Saving...' : 'Save profile'}
+            </Button>
+          </div>
+        </Card>
+
+        <Card>
+          <div className="flex items-start gap-3">
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-[var(--color-primary-soft)] text-[var(--color-primary)]">
+              <Settings2 className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="text-sm text-[var(--color-text-subtle)]">App Preferences</p>
+              <h2 className="mt-1 text-xl font-semibold text-[var(--color-text)]">Workspace behavior</h2>
+            </div>
+          </div>
+
+          <div className="mt-5 space-y-3">
+            {[
+              ['autoRefresh', 'Auto-refresh operational dashboards'],
+              ['compactTables', 'Use compact tables and lists'],
+              ['emailAlerts', 'Receive important email alerts'],
+            ].map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => handlePreferenceToggle(key)}
+                className="flex w-full items-center justify-between rounded-xl border border-white/10 bg-white/10 px-4 py-3 text-left transition-all hover:scale-[1.01] hover:bg-white/15"
+              >
+                <span className="text-sm font-medium text-[var(--color-text)]">{label}</span>
+                <span
+                  className={`inline-flex h-6 w-11 items-center rounded-full p-1 transition ${
+                    preferences[key] ? 'bg-[var(--color-primary)] justify-end' : 'bg-[var(--color-surface-muted)] justify-start'
+                  }`}
+                >
+                  <span className="h-4 w-4 rounded-full bg-white shadow-sm" />
+                </span>
+              </button>
+            ))}
+          </div>
+
+          <div className="mt-5 flex items-center justify-between gap-3">
+            <p className="text-sm text-[var(--color-text-muted)]">
+              {saveState.preferences === 'saved' ? 'Preferences saved.' : saveState.preferences === 'error' ? 'Could not save preferences.' : 'Tune how the dashboard behaves for your team.'}
+            </p>
+            <Button onClick={handlePreferenceSave} disabled={saveState.preferences === 'saving'}>
+              {saveState.preferences === 'saving' ? 'Saving...' : 'Save preferences'}
+            </Button>
+          </div>
+        </Card>
+
         {themes.map((option) => {
           const Icon = themeIcons[option.id] || Palette;
           const active = theme === option.id;
 
           return (
-            <Card
-              key={option.id}
-              className={`transition-all duration-200 ${active ? 'border-[var(--color-primary)] ring-2 ring-[var(--color-primary-soft)]' : ''}`}
-            >
+            <Card key={option.id} className={active ? 'border-[var(--color-primary)] ring-2 ring-[var(--color-primary-soft)]' : ''}>
               <div className="flex items-start justify-between gap-4">
-                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[var(--color-primary-soft)] text-[var(--color-primary)]">
+                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-[var(--color-primary-soft)] text-[var(--color-primary)]">
                   <Icon className="h-5 w-5" />
                 </div>
                 {active ? (
@@ -52,37 +190,18 @@ export default function Settings() {
                 ) : null}
               </div>
 
-              <h2 className="mt-5 text-xl font-bold text-[var(--color-text)]">{option.label}</h2>
-              <p className="mt-2 text-sm leading-6 text-[var(--color-text-muted)]">{option.description}</p>
+              <p className="mt-5 text-sm text-[var(--color-text-subtle)]">Theme Selection</p>
+              <h2 className="mt-1 text-xl font-bold text-[var(--color-text)]">{option.label}</h2>
+              <p className="mt-2 text-sm leading-6 text-[var(--color-text-muted)]">
+                {option.id === 'school'
+                  ? 'Balanced blue surfaces and soft contrast for a modern SaaS workspace.'
+                  : 'A cleaner bright workspace with softer glass cards and higher brightness.'}
+              </p>
 
               <div className="mt-6 grid grid-cols-3 gap-2">
-                <div
-                  className={`h-16 rounded-2xl ${
-                    option.id === 'default'
-                      ? 'bg-[#ffffff]'
-                      : option.id === 'school'
-                        ? 'bg-[#f1f5f9]'
-                        : 'bg-[#0f172a]'
-                  }`}
-                />
-                <div
-                  className={`h-16 rounded-2xl ${
-                    option.id === 'default'
-                      ? 'bg-[#4f46e5]'
-                      : option.id === 'school'
-                        ? 'bg-[#2563eb]'
-                        : 'bg-[#1e293b]'
-                  }`}
-                />
-                <div
-                  className={`h-16 rounded-2xl ${
-                    option.id === 'default'
-                      ? 'bg-[#111827]'
-                      : option.id === 'school'
-                        ? 'bg-[#0f172a]'
-                        : 'bg-[#e5e7eb]'
-                  }`}
-                />
+                <div className={`h-16 rounded-xl ${option.id === 'school' ? 'bg-[#f8fafc]' : 'bg-[#ffffff]'}`} />
+                <div className="h-16 rounded-xl bg-[#2563eb]" />
+                <div className={`h-16 rounded-xl ${option.id === 'school' ? 'bg-[#0f172a]' : 'bg-[#64748b]'}`} />
               </div>
 
               <Button
@@ -96,6 +215,21 @@ export default function Settings() {
           );
         })}
       </div>
+
+      <Card>
+        <div className="flex items-start gap-3">
+          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-[var(--color-primary-soft)] text-[var(--color-primary)]">
+            <Store className="h-5 w-5" />
+          </div>
+          <div>
+            <p className="text-sm text-[var(--color-text-subtle)]">Workspace guidance</p>
+            <h2 className="mt-1 text-xl font-semibold text-[var(--color-text)]">Keep the team aligned</h2>
+            <p className="mt-2 text-sm leading-6 text-[var(--color-text-muted)]">
+              Use School Theme for the default production look and Light Theme when you want a brighter workspace for daytime operations.
+            </p>
+          </div>
+        </div>
+      </Card>
     </div>
   );
 }

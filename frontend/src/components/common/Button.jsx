@@ -8,17 +8,17 @@ export default function Button({
   ...props
 }) {
   const baseClassName =
-    'inline-flex items-center justify-center gap-2 rounded-2xl font-semibold transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[var(--color-primary)] disabled:cursor-not-allowed disabled:opacity-60';
+    'inline-flex items-center justify-center gap-2 rounded-xl font-semibold transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[var(--color-primary)] disabled:cursor-not-allowed disabled:opacity-60';
 
   const variantClassName = {
     primary:
-      'bg-[var(--color-primary)] text-white shadow-[0_12px_30px_rgba(79,70,229,0.18)] hover:brightness-95 active:translate-y-px',
+      'bg-[var(--color-primary)] text-white shadow-sm hover:scale-[1.02] hover:brightness-95 active:translate-y-px',
     secondary:
-      'border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text)] hover:bg-[var(--color-surface-muted)]',
+      'border border-white/10 bg-white/10 text-[var(--color-text)] backdrop-blur-md hover:scale-[1.02] hover:bg-white/15',
     ghost:
-      'text-[var(--color-text-muted)] hover:bg-[var(--color-surface-muted)] hover:text-[var(--color-text)]',
+      'text-[var(--color-text-muted)] hover:scale-[1.02] hover:bg-white/10 hover:text-[var(--color-text)]',
     danger:
-      'bg-[#dc2626] text-white shadow-[0_12px_30px_rgba(220,38,38,0.16)] hover:brightness-95',
+      'bg-[#dc2626] text-white shadow-sm hover:scale-[1.02] hover:brightness-95',
   }[variant];
 
   const sizeClassName = {
