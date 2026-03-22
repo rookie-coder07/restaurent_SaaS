@@ -52,21 +52,18 @@ export default function CartDrawer({
             ) : (
               <div className="space-y-3">
                 {items.map((item) => (
-                  <div
-                    key={item.id}
-                    className="rounded-2xl border border-gray-200 bg-gray-50 p-4"
-                  >
-                    <div className="flex items-start justify-between gap-3">
+                  <div key={item.id} className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
+                    <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                       <div className="min-w-0 flex-1">
-                        <h3 className="font-semibold text-gray-900">{item.name}</h3>
+                        <h3 className="break-words font-semibold text-gray-900">{item.name}</h3>
                         <p className="mt-1 text-sm text-gray-500">{formatCurrency(item.price)} each</p>
                       </div>
-                      <p className="text-sm font-semibold text-gray-900">
+                      <p className="shrink-0 text-sm font-semibold text-gray-900">
                         {formatCurrency(item.price * item.quantity)}
                       </p>
                     </div>
 
-                    <div className="mt-4 flex items-center justify-between">
+                    <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                       <div className="flex items-center rounded-full border border-gray-200 bg-white">
                         <button
                           onClick={() => onUpdateQuantity(item.id, item.quantity - 1)}
@@ -87,7 +84,7 @@ export default function CartDrawer({
 
                       <button
                         onClick={() => onUpdateQuantity(item.id, 0)}
-                        className="inline-flex items-center gap-2 text-sm font-medium text-red-600 transition hover:text-red-700"
+                        className="inline-flex items-center justify-center gap-2 text-sm font-medium text-red-600 transition hover:text-red-700 sm:justify-start"
                       >
                         <Trash2 className="h-4 w-4" />
                         Remove
@@ -105,7 +102,7 @@ export default function CartDrawer({
               <span className="text-lg font-bold text-gray-900">{formatCurrency(total)}</span>
             </div>
 
-            <div className="flex gap-3">
+            <div className="flex flex-col gap-3 sm:flex-row">
               <button
                 onClick={onClearCart}
                 disabled={items.length === 0 || isPlacingOrder}

@@ -288,11 +288,11 @@ export default function CustomerMenu() {
       )}
 
       <header className="sticky top-0 z-30 border-b border-gray-200/70 bg-white/90 backdrop-blur">
-        <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-4 sm:px-6">
-          <div>
+        <div className="mx-auto flex max-w-5xl items-start justify-between gap-3 px-4 py-4 sm:items-center sm:px-6">
+          <div className="min-w-0">
             <p className="text-xs font-semibold uppercase tracking-[0.3em] text-amber-500">Scan to Order</p>
-            <h1 className="mt-1 text-2xl font-bold text-gray-900">Menu</h1>
-            <p className="text-sm text-gray-600">Table {tableNumber || 'Guest'}</p>
+            <h1 className="mt-1 text-xl font-bold text-gray-900 sm:text-2xl">Menu</h1>
+            <p className="break-words text-sm text-gray-600">Table {tableNumber || 'Guest'}</p>
           </div>
 
           <button
@@ -309,8 +309,8 @@ export default function CustomerMenu() {
         </div>
       </header>
 
-      <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6">
-        <div className="mb-8 rounded-3xl border border-amber-100 bg-white/80 p-5 shadow-sm">
+      <div className="mx-auto max-w-5xl px-4 py-6 sm:px-6 sm:py-8">
+        <div className="mb-6 rounded-3xl border border-amber-100 bg-white/80 p-4 shadow-sm sm:mb-8 sm:p-5">
           <div className="flex items-start gap-3">
             <div className="rounded-2xl bg-amber-100 p-3 text-amber-700">
               <Sparkles className="h-5 w-5" />
@@ -331,7 +331,7 @@ export default function CustomerMenu() {
             <p className="mt-2 text-gray-500">Please check back in a bit or ask the restaurant staff for help.</p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
+          <div className="grid grid-cols-1 gap-4 sm:gap-5 md:grid-cols-2 xl:grid-cols-3">
             {menuItems.map((item) => {
               const buttonAdded = recentlyAddedItemId === item.id;
               const buttonBlocked = blockedItemIds[item.id];
@@ -345,37 +345,39 @@ export default function CustomerMenu() {
                   <img
                     src={itemImageUrl}
                     alt={item.name}
-                    className="h-44 w-full object-cover transition duration-500 group-hover:scale-[1.03]"
+                    className="h-40 w-full object-cover transition duration-500 group-hover:scale-[1.03] sm:h-44"
                   />
 
-                  <div className="p-5">
-                    <div className="flex items-start justify-between gap-4">
-                      <div>
-                        <h3 className="text-lg font-bold text-gray-900">{item.name}</h3>
-                        <p className="mt-2 text-sm leading-6 text-gray-600">{item.description}</p>
+                  <div className="p-4 sm:p-5">
+                    <div className="flex min-w-0 flex-col gap-3">
+                      <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="min-w-0 flex-1">
+                          <h3 className="break-words text-base font-bold text-gray-900 sm:text-lg">{item.name}</h3>
+                          <p className="mt-2 break-words text-sm leading-6 text-gray-600">{item.description}</p>
+                        </div>
+                        <span className="w-fit shrink-0 rounded-full bg-gray-100 px-3 py-1 text-sm font-semibold text-gray-900">
+                          {formatCurrency(item.price)}
+                        </span>
                       </div>
-                      <span className="rounded-full bg-gray-100 px-3 py-1 text-sm font-semibold text-gray-900">
-                        {formatCurrency(item.price)}
-                      </span>
-                    </div>
 
-                    <div className="mt-5 flex items-center justify-between gap-3">
-                      <span className={`text-sm font-medium ${item.isAvailable ? 'text-emerald-600' : 'text-red-500'}`}>
-                        {item.isAvailable ? 'Available now' : 'Currently unavailable'}
-                      </span>
+                      <div className="mt-2 flex flex-col gap-3 sm:mt-4 sm:flex-row sm:items-center sm:justify-between">
+                        <span className={`text-sm font-medium ${item.isAvailable ? 'text-emerald-600' : 'text-red-500'}`}>
+                          {item.isAvailable ? 'Available now' : 'Currently unavailable'}
+                        </span>
 
-                      <button
-                        onClick={() => handleAddToCart(item)}
-                        disabled={!item.isAvailable || buttonBlocked}
-                        className={`inline-flex min-w-[8.5rem] items-center justify-center gap-2 rounded-full px-4 py-2.5 text-sm font-semibold transition ${
-                          buttonAdded
-                            ? 'scale-105 bg-emerald-500 text-white'
-                            : 'bg-gray-900 text-white hover:bg-black'
-                        } disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-500`}
-                      >
-                        {buttonAdded ? <Check className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
-                        {buttonAdded ? 'Added' : 'Add to Cart'}
-                      </button>
+                        <button
+                          onClick={() => handleAddToCart(item)}
+                          disabled={!item.isAvailable || buttonBlocked}
+                          className={`inline-flex w-full items-center justify-center gap-2 rounded-full px-4 py-2.5 text-sm font-semibold transition sm:w-auto sm:min-w-[8.5rem] ${
+                            buttonAdded
+                              ? 'scale-105 bg-emerald-500 text-white'
+                              : 'bg-gray-900 text-white hover:bg-black'
+                          } disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-500`}
+                        >
+                          {buttonAdded ? <Check className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+                          {buttonAdded ? 'Added' : 'Add to Cart'}
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -387,8 +389,8 @@ export default function CustomerMenu() {
 
       {cartItemCount > 0 && !showCart && (
         <div className="fixed inset-x-0 bottom-0 z-30 border-t border-gray-200 bg-white/95 px-4 py-3 shadow-[0_-8px_30px_rgba(15,23,42,0.08)] backdrop-blur md:px-6">
-          <div className="mx-auto flex max-w-5xl items-center justify-between gap-4">
-            <div>
+          <div className="mx-auto flex max-w-5xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+            <div className="min-w-0">
               <p className="text-sm font-semibold text-gray-900">
                 {cartItemCount} {cartItemCount === 1 ? 'item' : 'items'} in cart
               </p>
@@ -397,7 +399,7 @@ export default function CustomerMenu() {
 
             <button
               onClick={() => setShowCart(true)}
-              className="inline-flex items-center gap-2 rounded-full bg-emerald-500 px-5 py-3 text-sm font-semibold text-white transition hover:bg-emerald-600"
+              className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-emerald-500 px-5 py-3 text-sm font-semibold text-white transition hover:bg-emerald-600 sm:w-auto"
             >
               Proceed to Order
               <ArrowRight className="h-4 w-4" />

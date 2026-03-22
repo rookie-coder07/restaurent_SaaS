@@ -196,7 +196,7 @@ export default function MenuManagement() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5 sm:space-y-6">
       {/* Alerts */}
       {success && (
         <div className="p-4 bg-green-50 border border-green-200 rounded-lg flex items-center gap-3">
@@ -213,12 +213,12 @@ export default function MenuManagement() {
       )}
 
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold text-gray-900">Menu Management</h1>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <h1 className="text-2xl font-bold text-gray-900 sm:text-3xl">Menu Management</h1>
         {activeTab === 'items' && (
           <button
             onClick={handleAddItem}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+            className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-white transition hover:bg-blue-700 sm:w-auto"
           >
             <Plus className="w-5 h-5" />
             Add Item
@@ -227,7 +227,7 @@ export default function MenuManagement() {
         {activeTab === 'categories' && (
           <button
             onClick={() => setShowCategoryForm(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+            className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-white transition hover:bg-blue-700 sm:w-auto"
           >
             <Plus className="w-5 h-5" />
             Add Category
@@ -236,10 +236,10 @@ export default function MenuManagement() {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-4 border-b border-gray-200">
+      <div className="flex overflow-x-auto border-b border-gray-200">
         <button
           onClick={() => setActiveTab('items')}
-          className={`px-4 py-3 font-semibold transition ${
+          className={`shrink-0 px-4 py-3 font-semibold transition ${
             activeTab === 'items'
               ? 'text-blue-600 border-b-2 border-blue-600'
               : 'text-gray-600 hover:text-gray-900'
@@ -249,7 +249,7 @@ export default function MenuManagement() {
         </button>
         <button
           onClick={() => { setActiveTab('categories'); loadCategories(); }}
-          className={`px-4 py-3 font-semibold transition ${
+          className={`shrink-0 px-4 py-3 font-semibold transition ${
             activeTab === 'categories'
               ? 'text-blue-600 border-b-2 border-blue-600'
               : 'text-gray-600 hover:text-gray-900'
@@ -264,44 +264,56 @@ export default function MenuManagement() {
         <div className="grid grid-cols-1 gap-4">
           {items.length > 0 ? (
             items.map((item) => (
-              <div key={item.id} className="card flex items-center justify-between hover:shadow-lg transition">
-                <div className="flex items-center gap-4 flex-1">
-                  <img
-                    src={getMenuItemImageUrl(item)}
-                    alt={item.name}
-                    className="w-16 h-16 object-cover rounded-lg"
-                  />
-                  <div className="flex-1">
-                    <h3 className="font-semibold text-gray-900">{item.name}</h3>
-                    <p className="text-sm text-gray-600">{item.description}</p>
-                    <div className="flex gap-2 mt-1">
-                      {item.tags?.map((tag, i) => (
-                        <span key={i} className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded">
-                          {tag}
-                        </span>
-                      ))}
+              <div key={item.id} className="card overflow-hidden p-4 transition hover:shadow-lg sm:p-5">
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="flex min-w-0 flex-col gap-4 sm:flex-1 sm:flex-row sm:items-start">
+                    <img
+                      src={getMenuItemImageUrl(item)}
+                      alt={item.name}
+                      className="h-20 w-full rounded-xl object-cover sm:h-20 sm:w-20 sm:flex-shrink-0"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="min-w-0">
+                          <h3 className="break-words text-base font-semibold text-gray-900 sm:text-lg">
+                            {item.name}
+                          </h3>
+                          <p className="mt-1 break-words text-sm leading-6 text-gray-600">
+                            {item.description}
+                          </p>
+                        </div>
+                        <div className="shrink-0 rounded-full bg-gray-100 px-3 py-1 text-left sm:text-right">
+                          <p className="text-base font-bold text-gray-900">{formatCurrency(item.price)}</p>
+                          <p className="text-xs text-gray-600">{item.preparationTime} mins</p>
+                        </div>
+                      </div>
+
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {item.tags?.map((tag, i) => (
+                          <span key={i} className="rounded-full bg-blue-100 px-2.5 py-1 text-xs text-blue-700">
+                            {tag}
+                          </span>
+                        ))}
+                      </div>
                     </div>
                   </div>
-                </div>
-                <div className="flex items-center gap-6 text-right">
-                  <div>
-                    <p className="font-bold text-gray-900">{formatCurrency(item.price)}</p>
-                    <p className="text-xs text-gray-600">{item.preparationTime} mins</p>
-                  </div>
-                  <div className="flex gap-2">
+
+                  <div className="flex items-center justify-end gap-2 border-t border-gray-100 pt-3 sm:border-0 sm:pt-0">
                     <button
                       onClick={() => handleEditItem(item)}
-                      className="p-2 hover:bg-blue-100 rounded-lg text-blue-600 transition"
+                      className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-blue-600 transition hover:bg-blue-100"
                       title="Edit"
                     >
                       <Edit2 className="w-5 h-5" />
+                      <span className="text-sm font-medium sm:hidden">Edit</span>
                     </button>
                     <button
                       onClick={() => handleDeleteItem(item.id)}
-                      className="p-2 hover:bg-red-100 rounded-lg text-red-600 transition"
+                      className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-red-600 transition hover:bg-red-100"
                       title="Delete"
                     >
                       <Trash2 className="w-5 h-5" />
+                      <span className="text-sm font-medium sm:hidden">Delete</span>
                     </button>
                   </div>
                 </div>
@@ -360,8 +372,8 @@ export default function MenuManagement() {
       {/* Form Modal - Item */}
       {showForm && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg shadow-lg max-w-2xl w-full max-h-96 overflow-y-auto">
-            <div className="p-6 border-b border-gray-200 flex items-center justify-between sticky top-0 bg-white">
+          <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-lg bg-white shadow-lg">
+            <div className="sticky top-0 flex items-center justify-between border-b border-gray-200 bg-white p-4 sm:p-6">
               <h2 className="text-xl font-bold text-gray-900">
                 {editingItem ? 'Edit Item' : 'Add New Item'}
               </h2>
@@ -373,8 +385,8 @@ export default function MenuManagement() {
               </button>
             </div>
 
-            <form onSubmit={handleSubmit} className="p-6 space-y-4">
-              <div className="grid grid-cols-2 gap-4">
+            <form onSubmit={handleSubmit} className="space-y-4 p-4 sm:p-6">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <input
                   type="text"
                   placeholder="Item Name"
@@ -401,7 +413,7 @@ export default function MenuManagement() {
                 className="input h-20"
               />
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <input
                   type="number"
                   placeholder="Preparation Time (mins)"
@@ -448,7 +460,7 @@ export default function MenuManagement() {
                 </label>
 
                 {(formData.imagePreview || formData.imageName) && (
-                  <div className="flex items-center gap-4 rounded-lg border border-gray-200 bg-gray-50 p-3">
+                  <div className="flex flex-col gap-3 rounded-lg border border-gray-200 bg-gray-50 p-3 sm:flex-row sm:items-center sm:gap-4">
                     <img
                       src={formData.imagePreview || getMenuItemImageUrl(editingItem || { name: formData.name })}
                       alt={formData.name || 'Menu item preview'}
@@ -473,18 +485,18 @@ export default function MenuManagement() {
                 )}
               </div>
 
-              <div className="flex gap-4 mt-6">
+              <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row">
                 <button
                   type="button"
                   onClick={() => { setShowForm(false); setError(null); setFormData(createEmptyFormData()); }}
-                  className="flex-1 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 font-medium"
+                  className="flex-1 rounded-lg border border-gray-300 px-4 py-2 font-medium hover:bg-gray-50"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={submitting}
-                  className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 font-medium flex items-center justify-center gap-2"
+                  className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 font-medium text-white hover:bg-blue-700 disabled:bg-gray-400"
                 >
                   {submitting ? <Loader className="w-4 h-4 animate-spin" /> : null}
                   {editingItem ? 'Update' : 'Create'} Item
@@ -498,8 +510,8 @@ export default function MenuManagement() {
       {/* Category Form Modal */}
       {showCategoryForm && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg shadow-lg max-w-md w-full">
-            <div className="p-6 border-b border-gray-200 flex items-center justify-between">
+          <div className="w-full max-w-md rounded-lg bg-white shadow-lg">
+            <div className="flex items-center justify-between border-b border-gray-200 p-4 sm:p-6">
               <h2 className="text-xl font-bold text-gray-900">Add Category</h2>
               <button
                 onClick={() => { setShowCategoryForm(false); setError(null); }}
@@ -509,7 +521,7 @@ export default function MenuManagement() {
               </button>
             </div>
 
-            <form onSubmit={handleAddCategory} className="p-6 space-y-4">
+            <form onSubmit={handleAddCategory} className="space-y-4 p-4 sm:p-6">
               <input
                 type="text"
                 placeholder="Category Name"
@@ -519,18 +531,18 @@ export default function MenuManagement() {
                 required
               />
 
-              <div className="flex gap-4">
+              <div className="flex flex-col-reverse gap-3 sm:flex-row">
                 <button
                   type="button"
                   onClick={() => { setShowCategoryForm(false); setError(null); }}
-                  className="flex-1 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
+                  className="flex-1 rounded-lg border border-gray-300 px-4 py-2 hover:bg-gray-50"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={submitting}
-                  className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400"
+                  className="flex-1 rounded-lg bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 disabled:bg-gray-400"
                 >
                   {submitting ? 'Creating...' : 'Create'}
                 </button>

@@ -30,7 +30,7 @@ export default function QRTest() {
   };
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6 sm:space-y-8">
       <div className="flex flex-col gap-4">
         <button
           onClick={() => navigate(-1)}
@@ -46,8 +46,8 @@ export default function QRTest() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-8 lg:grid-cols-2">
-        <div className="rounded-3xl bg-white p-6 shadow-md">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2 lg:gap-8">
+        <div className="rounded-3xl bg-white p-4 shadow-md sm:p-6">
           <h2 className="mb-4 flex items-center gap-2 text-xl font-bold text-gray-900">
             <QrCode className="h-5 w-5" />
             Select a Table
@@ -67,7 +67,7 @@ export default function QRTest() {
                       : 'border-gray-200 hover:border-blue-400'
                   }`}
                 >
-                  <p className="font-semibold text-gray-900">Table {table.tableNumber}</p>
+                    <p className="break-words font-semibold text-gray-900">Table {table.tableNumber}</p>
                   <p className="text-sm text-gray-600">Capacity: {table.seatCapacity}</p>
                   <p className="mt-1 truncate text-xs text-gray-500">{table.qrCode || `table=${table.tableNumber}`}</p>
                 </button>
@@ -77,7 +77,7 @@ export default function QRTest() {
         </div>
 
         {qrUrl && (
-          <div className="rounded-3xl border border-blue-200 bg-blue-50 p-6">
+          <div className="rounded-3xl border border-blue-200 bg-blue-50 p-4 sm:p-6">
             <h2 className="mb-4 flex items-center gap-2 text-xl font-bold text-gray-900">
               <Code2 className="h-5 w-5" />
               QR URL Generated
@@ -89,7 +89,7 @@ export default function QRTest() {
                 <p className="break-all font-mono text-sm text-blue-600">{qrUrl}</p>
               </div>
 
-              <div className="flex gap-2">
+              <div className="flex flex-col gap-2 sm:flex-row">
                 <button
                   onClick={copyToClipboard}
                   className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-3 text-white transition hover:bg-blue-700"
@@ -102,7 +102,7 @@ export default function QRTest() {
                   href={qrUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-3 text-white transition hover:bg-emerald-700"
+                  className="flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-3 text-white transition hover:bg-emerald-700"
                 >
                   <ExternalLink className="h-4 w-4" />
                   Test
@@ -123,7 +123,7 @@ export default function QRTest() {
         )}
       </div>
 
-      <div className="rounded-3xl border border-amber-200 bg-amber-50 p-6">
+      <div className="rounded-3xl border border-amber-200 bg-amber-50 p-4 sm:p-6">
         <h3 className="mb-3 font-bold text-amber-900">How to Test</h3>
         <ol className="list-inside list-decimal space-y-2 text-sm text-amber-900">
           <li>Select a table from the list.</li>
