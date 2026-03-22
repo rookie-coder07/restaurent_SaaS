@@ -10,8 +10,9 @@ const API_BASE_URL =
 
 const isDevelopmentHost =
   window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+const shouldDebugApi = import.meta.env.DEV && import.meta.env.VITE_DEBUG_API === 'true';
 
-if (import.meta.env.DEV) {
+if (shouldDebugApi) {
   console.log('='.repeat(60));
   console.log('Frontend API Configuration');
   console.log('='.repeat(60));
@@ -42,14 +43,14 @@ api.interceptors.request.use(
       config.headers.Authorization = `Bearer ${token}`;
     }
 
-    if (import.meta.env.DEV) {
+    if (shouldDebugApi) {
       console.log(`API Request: ${config.method?.toUpperCase()} ${API_BASE_URL}${config.url}`);
     }
 
     return config;
   },
   (error) => {
-    if (import.meta.env.DEV) {
+    if (shouldDebugApi) {
       console.error('Request interceptor error:', error);
     }
     return Promise.reject(error);
@@ -58,7 +59,7 @@ api.interceptors.request.use(
 
 api.interceptors.response.use(
   (response) => {
-    if (import.meta.env.DEV) {
+    if (shouldDebugApi) {
       console.log(`API Response: ${response.status} ${API_BASE_URL}${response.config.url}`);
     }
     return response;
@@ -66,7 +67,7 @@ api.interceptors.response.use(
   async (error) => {
     const originalRequest = error.config;
 
-    if (import.meta.env.DEV) {
+    if (shouldDebugApi) {
       if (error.response) {
         console.error('API Error Response:', {
           status: error.response.status,
