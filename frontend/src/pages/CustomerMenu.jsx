@@ -342,11 +342,13 @@ export default function CustomerMenu() {
                   key={item.id}
                   className="group overflow-hidden rounded-3xl border border-gray-200 bg-white shadow-sm transition hover:-translate-y-1 hover:shadow-lg"
                 >
-                  <img
-                    src={itemImageUrl}
-                    alt={item.name}
-                    className="h-40 w-full object-cover transition duration-500 group-hover:scale-[1.03] sm:h-44"
-                  />
+                  <div className="flex h-48 items-center justify-center bg-gradient-to-br from-amber-50 via-white to-slate-50 p-4 sm:h-52">
+                    <img
+                      src={itemImageUrl}
+                      alt={item.name}
+                      className="h-full w-full rounded-2xl object-contain transition duration-500 group-hover:scale-[1.03]"
+                    />
+                  </div>
 
                   <div className="p-4 sm:p-5">
                     <div className="flex min-w-0 flex-col gap-3">

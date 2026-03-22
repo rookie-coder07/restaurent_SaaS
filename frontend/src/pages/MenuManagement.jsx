@@ -267,11 +267,13 @@ export default function MenuManagement() {
               <div key={item.id} className="card overflow-hidden p-4 transition hover:shadow-lg sm:p-5">
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                   <div className="flex min-w-0 flex-col gap-4 sm:flex-1 sm:flex-row sm:items-start">
-                    <img
-                      src={getMenuItemImageUrl(item)}
-                      alt={item.name}
-                      className="h-20 w-full rounded-xl object-cover sm:h-20 sm:w-20 sm:flex-shrink-0"
-                    />
+                    <div className="flex h-28 w-full items-center justify-center rounded-xl bg-gradient-to-br from-amber-50 via-white to-slate-50 p-3 sm:h-20 sm:w-20 sm:flex-shrink-0">
+                      <img
+                        src={getMenuItemImageUrl(item)}
+                        alt={item.name}
+                        className="h-full w-full rounded-lg object-contain"
+                      />
+                    </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                         <div className="min-w-0">
@@ -461,11 +463,13 @@ export default function MenuManagement() {
 
                 {(formData.imagePreview || formData.imageName) && (
                   <div className="flex flex-col gap-3 rounded-lg border border-gray-200 bg-gray-50 p-3 sm:flex-row sm:items-center sm:gap-4">
-                    <img
-                      src={formData.imagePreview || getMenuItemImageUrl(editingItem || { name: formData.name })}
-                      alt={formData.name || 'Menu item preview'}
-                      className="h-16 w-16 rounded-lg object-cover"
-                    />
+                    <div className="flex h-24 w-full items-center justify-center rounded-lg bg-white p-3 sm:h-16 sm:w-16">
+                      <img
+                        src={formData.imagePreview || getMenuItemImageUrl(editingItem || { name: formData.name })}
+                        alt={formData.name || 'Menu item preview'}
+                        className="h-full w-full rounded-lg object-contain"
+                      />
+                    </div>
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-medium text-gray-900 truncate">
                         {formData.imageName || 'Current menu image'}
