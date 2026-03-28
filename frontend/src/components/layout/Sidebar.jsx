@@ -1,12 +1,10 @@
 import { Link, useLocation } from 'react-router-dom';
 import {
   BarChart3,
-  ChefHat,
+  ClipboardList,
   MenuSquare,
-  ShoppingCart,
   Sparkles,
   Users,
-  TableProperties,
   QrCode,
   Palette,
   UtensilsCrossed,
@@ -14,23 +12,23 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
 
-const menuItems = [
-  { icon: BarChart3, label: 'Dashboard', href: '/', roles: ['owner', 'manager'] },
-  { icon: MenuSquare, label: 'Menu', href: '/menu-management', roles: ['owner', 'manager'] },
-  { icon: ShoppingCart, label: 'Orders', href: '/orders', roles: ['owner', 'manager'] },
-  { icon: ChefHat, label: 'Kitchen', href: '/kitchen', roles: ['kitchen_staff', 'manager', 'owner'] },
-  { icon: TableProperties, label: 'Tables', href: '/tables', roles: ['owner', 'manager'] },
-  { icon: Users, label: 'Staff', href: '/staff', roles: ['owner', 'manager'] },
-  { icon: Sparkles, label: 'Analytics', href: '/analytics', roles: ['owner', 'manager'] },
-  { icon: QrCode, label: 'QR Lab', href: '/qr-test', roles: ['owner', 'manager'] },
-  { icon: Palette, label: 'Settings', href: '/settings', roles: ['owner', 'manager', 'kitchen_staff'] },
+const adminMenuItems = [
+  { icon: BarChart3, label: 'Dashboard', href: '/admin', roles: ['owner'] },
+  { icon: MenuSquare, label: 'Menu', href: '/admin/menu', roles: ['owner'] },
+  { icon: ClipboardList, label: 'Orders', href: '/admin/orders', roles: ['owner'] },
+  { icon: Users, label: 'Staff Access', href: '/admin/staff', roles: ['owner'] },
+  { icon: Sparkles, label: 'Analytics', href: '/admin/analytics', roles: ['owner'] },
+  { icon: QrCode, label: 'QR Tools', href: '/admin/qr-tools', roles: ['owner'] },
+  { icon: Palette, label: 'Settings', href: '/admin/settings', roles: ['owner'] },
 ];
 
 export default function Sidebar({ isOpen, onClose }) {
   const location = useLocation();
   const { user } = useAuth();
 
-  const filteredMenuItems = menuItems.filter((item) => item.roles.includes(user?.role || 'owner'));
+  const activeRole = user?.role || 'owner';
+  const filteredMenuItems = adminMenuItems.filter((item) => item.roles.includes(activeRole));
+  const isActivePath = (href) => location.pathname === href || location.pathname.startsWith(`${href}/`);
 
   return (
     <>
@@ -50,13 +48,13 @@ export default function Sidebar({ isOpen, onClose }) {
       >
         <div className="flex h-full flex-col">
           <div className="flex items-center justify-between border-b border-[var(--border-color)] px-5 py-5">
-            <Link to="/" className="flex items-center gap-3" onClick={onClose}>
+            <Link to="/admin" className="flex items-center gap-3" onClick={onClose}>
               <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-[var(--color-primary)] to-[var(--color-accent)] text-white shadow-lg">
                 <UtensilsCrossed className="h-5 w-5" />
               </div>
               <div>
                 <p className="text-base font-semibold text-[var(--text-primary)]">Restaurant SaaS</p>
-                <p className="text-xs text-[var(--text-secondary)]">Operations Dashboard</p>
+                <p className="text-xs text-[var(--text-secondary)]">Admin Portal</p>
               </div>
             </Link>
 
@@ -71,16 +69,20 @@ export default function Sidebar({ isOpen, onClose }) {
 
           <div className="px-4 py-5">
             <div className="rounded-2xl border border-[var(--border-color)] bg-[linear-gradient(135deg,var(--color-primary-soft),rgba(255,255,255,0.03))] p-4">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-[var(--text-secondary)]">Workspace</p>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-[var(--text-secondary)]">Admin Workspace</p>
               <p className="mt-2 text-sm font-semibold text-[var(--text-primary)]">{user?.restaurantName || 'Main branch'}</p>
               <p className="mt-1 text-xs text-[var(--text-secondary)]">Role: {user?.role || 'owner'}</p>
             </div>
           </div>
 
-          <nav className="flex-1 space-y-1 overflow-y-auto px-3 pb-6">
+          <div className="px-4 pb-2">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-[var(--text-secondary)]">Admin</p>
+          </div>
+
+          <nav className="space-y-1 overflow-y-auto px-3">
             {filteredMenuItems.map((item) => {
               const Icon = item.icon;
-              const isActive = location.pathname === item.href;
+              const isActive = isActivePath(item.href);
 
               return (
                 <Link

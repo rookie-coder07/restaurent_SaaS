@@ -1,4 +1,6 @@
 import axios from 'axios';
+import { clearPortalSession, readPortalSession, savePortalSession } from '../utils/authStorage';
+import { PORTAL_LOGIN, canAccessPortal, getPortalKeyFromPathname } from '../utils/portalRouting';
 
 const PRODUCTION_API_BASE_URL = 'https://restaurent-backend-448t.onrender.com/api';
 const DEVELOPMENT_API_BASE_URL = 'http://localhost:3000/api';
@@ -11,6 +13,30 @@ const API_BASE_URL =
 const isDevelopmentHost =
   window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
 const shouldDebugApi = import.meta.env.DEV && import.meta.env.VITE_DEBUG_API === 'true';
+
+function decodeTokenPayload(token) {
+  try {
+    const tokenParts = String(token || '').split('.');
+    if (tokenParts.length < 2) {
+      return null;
+    }
+
+    const normalizedPayload = tokenParts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const paddedPayload = normalizedPayload.padEnd(
+      normalizedPayload.length + ((4 - (normalizedPayload.length % 4)) % 4),
+      '='
+    );
+
+    return JSON.parse(window.atob(paddedPayload));
+  } catch {
+    return null;
+  }
+}
+
+function rejectMismatchedPortalSession(portal) {
+  clearPortalSession(portal);
+  window.location.href = PORTAL_LOGIN[portal] || PORTAL_LOGIN.admin;
+}
 
 if (shouldDebugApi) {
   console.log('='.repeat(60));
@@ -29,7 +55,10 @@ if (!isDevelopmentHost && API_BASE_URL.includes('localhost')) {
 
 const api = axios.create({
   baseURL: API_BASE_URL,
-  withCredentials: true,
+  // Portal auth is driven by bearer tokens from local storage.
+  // Keeping cookies off normal API calls prevents one stale cross-portal cookie
+  // from overriding the active POS/KOT/Admin session.
+  withCredentials: false,
   timeout: 30000,
   headers: {
     'Content-Type': 'application/json',
@@ -38,8 +67,17 @@ const api = axios.create({
 
 api.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem('accessToken');
+    const portal = getPortalKeyFromPathname(window.location.pathname);
+    const session = readPortalSession(portal);
+    const token = session?.accessToken;
+
     if (token) {
+      const tokenRole = decodeTokenPayload(token)?.role;
+      if (tokenRole && !canAccessPortal(tokenRole, portal)) {
+        rejectMismatchedPortalSession(portal);
+        return Promise.reject(new Error('Portal session does not match the current account role.'));
+      }
+
       config.headers.Authorization = `Bearer ${token}`;
     }
 
@@ -90,24 +128,47 @@ api.interceptors.response.use(
       originalRequest._retry = true;
 
       try {
-        const refreshToken = localStorage.getItem('refreshToken');
+        const portal = getPortalKeyFromPathname(window.location.pathname);
+        const existingSession = readPortalSession(portal);
+        const refreshToken = existingSession?.refreshToken;
         if (refreshToken) {
           const response = await axios.post(
             `${API_BASE_URL}/v1/auth/refresh-token`,
             { refreshToken },
-            { withCredentials: true }
+            {
+              // Refresh is driven by the token stored for the current portal.
+              // Leaving cookies off prevents another portal's stale cookie from
+              // replacing the active POS/KOT/Admin session.
+              withCredentials: false,
+            }
           );
 
           const { accessToken } = response.data.data;
-          localStorage.setItem('accessToken', accessToken);
+          const refreshedRole = decodeTokenPayload(accessToken)?.role;
+
+          if (refreshedRole && !canAccessPortal(refreshedRole, portal)) {
+            rejectMismatchedPortalSession(portal);
+            return Promise.reject(new Error('Portal session does not match the refreshed account role.'));
+          }
+
+          savePortalSession(portal, {
+            ...existingSession,
+            user: refreshedRole
+              ? {
+                  ...existingSession.user,
+                  role: refreshedRole,
+                }
+              : existingSession.user,
+            accessToken,
+          });
 
           originalRequest.headers.Authorization = `Bearer ${accessToken}`;
           return api(originalRequest);
         }
       } catch (refreshError) {
-        localStorage.removeItem('accessToken');
-        localStorage.removeItem('refreshToken');
-        window.location.href = '/login';
+        const portal = getPortalKeyFromPathname(window.location.pathname);
+        clearPortalSession(portal);
+        window.location.href = PORTAL_LOGIN[portal] || PORTAL_LOGIN.admin;
         return Promise.reject(refreshError);
       }
     }

@@ -8,10 +8,10 @@ export const authMiddleware = (req, res, next) => {
     // Get token from cookies or Authorization header
     let token = '';
     
-    if (req.cookies?.accessToken) {
-      token = req.cookies.accessToken;
-    } else if (req.headers.authorization?.startsWith('Bearer ')) {
+    if (req.headers.authorization?.startsWith('Bearer ')) {
       token = req.headers.authorization.substring(7);
+    } else if (req.cookies?.accessToken) {
+      token = req.cookies.accessToken;
     }
 
     if (!token) {
@@ -53,10 +53,10 @@ export const optionalAuth = (req, res, next) => {
   try {
     let token = '';
     
-    if (req.cookies?.accessToken) {
-      token = req.cookies.accessToken;
-    } else if (req.headers.authorization?.startsWith('Bearer ')) {
+    if (req.headers.authorization?.startsWith('Bearer ')) {
       token = req.headers.authorization.substring(7);
+    } else if (req.cookies?.accessToken) {
+      token = req.cookies.accessToken;
     }
 
     if (token) {

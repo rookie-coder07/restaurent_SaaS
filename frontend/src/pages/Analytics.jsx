@@ -17,12 +17,16 @@ import {
 } from 'recharts';
 import { useApi } from '../hooks/useApi';
 import { orderAPI } from '../services/apiEndpoints';
-import { formatCurrency, formatDate } from '../utils/formatters';
+import { formatCurrency, formatDate, formatDisplayOrderNumber } from '../utils/formatters';
 import Card from '../components/common/Card';
 import Button from '../components/common/Button';
 import Input from '../components/common/Input';
 import StatCard from '../components/common/StatCard';
 import EmptyState from '../components/common/EmptyState';
+
+function isSettledOrder(order) {
+  return order?.status === 'completed' || order?.paymentStatus === 'paid';
+}
 
 export default function Analytics() {
   const [dateRange, setDateRange] = useState({
@@ -41,13 +45,14 @@ export default function Analytics() {
     });
   }, [orders, dateRange]);
 
+  const settledOrders = filteredOrders.filter((order) => isSettledOrder(order));
   const totalOrders = filteredOrders.length;
-  const totalRevenue = filteredOrders.reduce((sum, order) => sum + (order.totalAmount || order.total || 0), 0);
-  const avgOrderValue = totalOrders > 0 ? totalRevenue / totalOrders : 0;
-  const completedOrders = filteredOrders.filter((order) => order.status === 'served' || order.status === 'completed').length;
+  const totalRevenue = settledOrders.reduce((sum, order) => sum + (order.totalAmount || order.total || 0), 0);
+  const avgOrderValue = settledOrders.length > 0 ? totalRevenue / settledOrders.length : 0;
+  const completedOrders = settledOrders.length;
 
   const dailyData = {};
-  filteredOrders.forEach((order) => {
+  settledOrders.forEach((order) => {
     const date = new Date(order.createdAt).toLocaleDateString();
     if (!dailyData[date]) {
       dailyData[date] = { date, orders: 0, revenue: 0 };
@@ -58,10 +63,11 @@ export default function Analytics() {
   const chartData = Object.values(dailyData).sort((a, b) => new Date(a.date) - new Date(b.date));
 
   const statusData = [
-    { name: 'Completed', value: completedOrders, color: '#10B981' },
+    { name: 'Settled', value: completedOrders, color: '#10B981' },
     { name: 'Pending', value: filteredOrders.filter((order) => order.status === 'pending').length, color: '#F59E0B' },
     { name: 'Preparing', value: filteredOrders.filter((order) => order.status === 'preparing').length, color: '#3B82F6' },
     { name: 'Ready', value: filteredOrders.filter((order) => order.status === 'ready').length, color: '#8B5CF6' },
+    { name: 'Served', value: filteredOrders.filter((order) => order.status === 'served').length, color: '#64748B' },
     { name: 'Cancelled', value: filteredOrders.filter((order) => order.status === 'cancelled').length, color: '#EF4444' },
   ].filter((entry) => entry.value > 0);
 
@@ -110,20 +116,20 @@ export default function Analytics() {
           <div className="rounded-[1.25rem] bg-[var(--color-surface-muted)] p-4">
             <p className="text-xs uppercase tracking-[0.2em] text-[var(--color-text-subtle)]">Range Summary</p>
             <p className="mt-2 text-sm font-semibold text-[var(--color-text)]">{totalOrders} orders in selected period</p>
-            <p className="mt-1 text-sm text-[var(--color-text-muted)]">Revenue: {formatCurrency(totalRevenue)}</p>
+            <p className="mt-1 text-sm text-[var(--color-text-muted)]">Settled revenue: {formatCurrency(totalRevenue)}</p>
           </div>
         </div>
       </Card>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard label="Total Orders" value={totalOrders} subtitle="Within selected range" tone="primary" />
-        <StatCard label="Revenue" value={formatCurrency(totalRevenue)} subtitle="Gross order revenue" tone="success" />
-        <StatCard label="Avg Order Value" value={formatCurrency(avgOrderValue)} subtitle="Per order average" tone="neutral" />
+        <StatCard label="Revenue" value={formatCurrency(totalRevenue)} subtitle="Settled sales only" tone="success" />
+        <StatCard label="Avg Order Value" value={formatCurrency(avgOrderValue)} subtitle="Per settled bill" tone="neutral" />
         <StatCard
           icon={TrendingUp}
-          label="Completed"
+          label="Settled"
           value={completedOrders}
-          subtitle={`${totalOrders > 0 ? Math.round((completedOrders / totalOrders) * 100) : 0}% completion rate`}
+          subtitle={`${totalOrders > 0 ? Math.round((completedOrders / totalOrders) * 100) : 0}% of orders collected`}
           tone="warning"
         />
       </div>
@@ -213,7 +219,7 @@ export default function Analytics() {
               {filteredOrders.slice(0, 10).map((order) => (
                 <div key={order.id} className="flex flex-col gap-3 rounded-2xl border border-[var(--color-border)] p-4 sm:flex-row sm:items-center sm:justify-between">
                   <div className="min-w-0">
-                    <p className="break-words text-sm font-semibold text-[var(--color-text)]">Order #{order.id?.slice(-8)}</p>
+                    <p className="break-words text-sm font-semibold text-[var(--color-text)]">{formatDisplayOrderNumber(order)}</p>
                     <p className="mt-1 text-sm text-[var(--color-text-muted)]">{formatDate(order.createdAt)}</p>
                   </div>
                   <div className="flex flex-wrap items-center gap-2 sm:justify-end">
@@ -222,6 +228,9 @@ export default function Analytics() {
                     </span>
                     <span className="rounded-full bg-[var(--color-primary-soft)] px-3 py-1 text-xs font-semibold text-[var(--color-primary)]">
                       {order.status}
+                    </span>
+                    <span className="rounded-full bg-[var(--color-surface-muted)] px-3 py-1 text-xs font-semibold text-[var(--color-text)]">
+                      {order.paymentStatus || 'unpaid'}
                     </span>
                     <span className="text-sm text-[var(--color-text-muted)]">{order.items?.length || 0} items</span>
                   </div>

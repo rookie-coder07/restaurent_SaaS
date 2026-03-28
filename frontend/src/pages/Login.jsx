@@ -1,21 +1,90 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { Eye, EyeOff, Loader, Sparkles, ShieldCheck } from 'lucide-react';
+import { Eye, EyeOff, Loader, ShieldCheck, Sparkles } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { validateEmail } from '../utils/validators';
+import { canAccessPortal, PORTAL_HOME } from '../utils/portalRouting';
+import { clearPortalSession, hasPortalSession, readPortalSession } from '../utils/authStorage';
 import Card from '../components/common/Card';
 import Input from '../components/common/Input';
 import Button from '../components/common/Button';
 import Toast from '../components/common/Toast';
 
-export default function Login() {
+const PORTAL_CONFIG = {
+  admin: {
+    badge: 'Admin Portal',
+    title: 'Control business, menu, and reporting.',
+    description:
+      'For owners handling business setup, menu control, staff, orders, analytics, and settings.',
+    featureCards: [
+      { label: 'Control', value: 'Business overview' },
+      { label: 'Menu', value: 'Item management' },
+      { label: 'Insights', value: 'Sales analytics' },
+    ],
+    modes: [
+      { key: 'owner', label: 'Owner', helper: 'Restaurant account login', isStaff: false },
+    ],
+  },
+  pos: {
+    badge: 'POS Portal',
+    title: 'Fast billing for waiters and cashiers.',
+    description:
+      'For table selection, order taking, cart review, and quick billing during service.',
+    featureCards: [
+      { label: 'Tables', value: 'Live floor view' },
+      { label: 'Billing', value: 'Quick order flow' },
+      { label: 'Service', value: 'Dine-in & takeaway' },
+    ],
+    modes: [
+      { key: 'staff', label: 'Waiter / Cashier', helper: 'Staff account login', isStaff: true },
+    ],
+  },
+  kot: {
+    badge: 'KOT Portal',
+    title: 'Kitchen execution with zero distractions.',
+    description:
+      'For kitchen staff managing active tickets, ready queue, and preparation flow on the display screen.',
+    featureCards: [
+      { label: 'Queue', value: 'Active tickets only' },
+      { label: 'Prep', value: 'One-tap status updates' },
+      { label: 'Speed', value: 'Full-screen workflow' },
+    ],
+    modes: [
+      { key: 'kitchen_staff', label: 'Kitchen Staff', helper: 'Kitchen-only login', isStaff: true },
+    ],
+  },
+};
+
+export default function Login({ portal = 'admin' }) {
   const navigate = useNavigate();
   const { login, isLoading, error: authError } = useAuth();
+  const config = PORTAL_CONFIG[portal] || PORTAL_CONFIG.admin;
 
   const [formData, setFormData] = useState({ email: '', password: '' });
   const [errors, setErrors] = useState({});
   const [showPassword, setShowPassword] = useState(false);
-  const [isStaff, setIsStaff] = useState(false);
+  const [selectedModeKey, setSelectedModeKey] = useState(config.modes[0]?.key || 'owner');
+
+  const selectedMode = useMemo(
+    () => config.modes.find((mode) => mode.key === selectedModeKey) || config.modes[0],
+    [config.modes, selectedModeKey]
+  );
+
+  useEffect(() => {
+    setSelectedModeKey(config.modes[0]?.key || 'owner');
+  }, [config.modes, portal]);
+
+  useEffect(() => {
+    if (hasPortalSession(portal)) {
+      const portalUser = readPortalSession(portal)?.user;
+      if (canAccessPortal(portalUser?.role, portal)) {
+        navigate(PORTAL_HOME[portal], { replace: true });
+        return;
+      }
+
+      clearPortalSession(portal);
+    }
+  }, [navigate, portal]);
 
   const validateForm = () => {
     const newErrors = {};
@@ -30,9 +99,12 @@ export default function Login() {
     e.preventDefault();
     if (!validateForm()) return;
 
-    const success = await login(formData.email, formData.password, isStaff);
+    const success = await login(formData.email, formData.password, selectedMode?.isStaff, portal);
     if (success) {
-      navigate(isStaff ? '/kitchen' : '/');
+      const loggedInRole = readPortalSession(portal)?.user?.role;
+      if (canAccessPortal(loggedInRole, portal)) {
+        navigate(PORTAL_HOME[portal], { replace: true });
+      }
     }
   };
 
@@ -43,30 +115,23 @@ export default function Login() {
           <div>
             <div className="inline-flex items-center gap-2 rounded-full bg-[var(--color-primary-soft)] px-3 py-1 text-sm font-semibold text-[var(--color-primary)]">
               <Sparkles className="h-4 w-4" />
-              Restaurant SaaS
+              {config.badge}
             </div>
             <h1 className="mt-6 text-4xl font-bold tracking-tight text-[var(--color-text)] sm:text-5xl">
-              Run service, kitchen, and tables from one dashboard.
+              {config.title}
             </h1>
             <p className="mt-5 max-w-xl text-base leading-7 text-[var(--color-text-muted)]">
-              A mobile-friendly operating system for restaurants with live kitchen workflows, QR ordering, analytics,
-              and staff management.
+              {config.description}
             </p>
           </div>
 
           <div className="mt-8 grid gap-3 sm:grid-cols-3">
-            <div className="rounded-[1.5rem] bg-[var(--color-surface-muted)] p-4">
-              <p className="text-xs uppercase tracking-[0.2em] text-[var(--color-text-subtle)]">Kitchen</p>
-              <p className="mt-2 text-lg font-semibold text-[var(--color-text)]">Real-time queue</p>
-            </div>
-            <div className="rounded-[1.5rem] bg-[var(--color-surface-muted)] p-4">
-              <p className="text-xs uppercase tracking-[0.2em] text-[var(--color-text-subtle)]">Ordering</p>
-              <p className="mt-2 text-lg font-semibold text-[var(--color-text)]">QR-first flow</p>
-            </div>
-            <div className="rounded-[1.5rem] bg-[var(--color-surface-muted)] p-4">
-              <p className="text-xs uppercase tracking-[0.2em] text-[var(--color-text-subtle)]">Analytics</p>
-              <p className="mt-2 text-lg font-semibold text-[var(--color-text)]">Daily revenue</p>
-            </div>
+            {config.featureCards.map((card) => (
+              <div key={card.label} className="rounded-[1.5rem] bg-[var(--color-surface-muted)] p-4">
+                <p className="text-xs uppercase tracking-[0.2em] text-[var(--color-text-subtle)]">{card.label}</p>
+                <p className="mt-2 text-lg font-semibold text-[var(--color-text)]">{card.value}</p>
+              </div>
+            ))}
           </div>
         </Card>
 
@@ -79,45 +144,44 @@ export default function Login() {
               </div>
               <h2 className="mt-4 text-3xl font-bold text-[var(--color-text)]">Welcome back</h2>
               <p className="mt-2 text-sm text-[var(--color-text-muted)]">
-                Choose your role and sign in to continue managing your restaurant.
+                Sign in to continue inside the {config.badge.toLowerCase()}.
               </p>
             </div>
 
             {authError ? <Toast type="error" message={authError} /> : null}
 
             <form onSubmit={handleSubmit} className="mt-6 space-y-5">
-              <div className="grid grid-cols-2 gap-3 rounded-[1.5rem] bg-[var(--color-surface-muted)] p-2">
-                <button
-                  type="button"
-                  onClick={() => setIsStaff(false)}
-                  className={`rounded-[1rem] px-4 py-3 text-sm font-semibold transition ${
-                    !isStaff
-                      ? 'bg-[var(--color-primary)] text-white shadow-[0_14px_30px_rgba(79,70,229,0.2)]'
-                      : 'text-[var(--color-text-muted)]'
-                  }`}
-                >
-                  Owner / Manager
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setIsStaff(true)}
-                  className={`rounded-[1rem] px-4 py-3 text-sm font-semibold transition ${
-                    isStaff
-                      ? 'bg-[var(--color-primary)] text-white shadow-[0_14px_30px_rgba(79,70,229,0.2)]'
-                      : 'text-[var(--color-text-muted)]'
-                  }`}
-                >
-                  Kitchen / Staff
-                </button>
-              </div>
+              {config.modes.length > 1 ? (
+                <div className={`grid gap-3 rounded-[1.5rem] bg-[var(--color-surface-muted)] p-2 ${config.modes.length === 2 ? 'grid-cols-2' : 'grid-cols-1 sm:grid-cols-2'}`}>
+                  {config.modes.map((mode) => (
+                    <button
+                      key={mode.key}
+                      type="button"
+                      onClick={() => setSelectedModeKey(mode.key)}
+                      className={`rounded-[1rem] px-4 py-3 text-left text-sm font-semibold transition ${
+                        selectedModeKey === mode.key
+                          ? 'bg-[var(--color-primary)] text-white shadow-[0_14px_30px_rgba(79,70,229,0.2)]'
+                          : 'text-[var(--color-text-muted)]'
+                      }`}
+                    >
+                      <span className="block">{mode.label}</span>
+                      <span className={`mt-1 block text-xs ${selectedModeKey === mode.key ? 'text-white/80' : 'text-[var(--color-text-subtle)]'}`}>
+                        {mode.helper}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
 
               <div>
                 <Input
                   label="Email"
                   type="email"
+                  name="username"
+                  autoComplete="username"
                   value={formData.email}
                   onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                  placeholder="owner@restaurant.com"
+                  placeholder={selectedMode?.isStaff ? 'staff@restaurant.com' : 'owner@restaurant.com'}
                 />
                 {errors.email ? <p className="mt-2 text-sm text-red-500">{errors.email}</p> : null}
               </div>
@@ -128,6 +192,7 @@ export default function Login() {
                   <div className="relative">
                     <input
                       type={showPassword ? 'text' : 'password'}
+                      name="password"
                       value={formData.password}
                       onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                       className="input pr-12"
@@ -148,16 +213,18 @@ export default function Login() {
 
               <Button type="submit" fullWidth size="lg" disabled={isLoading}>
                 {isLoading ? <Loader className="h-4 w-4 animate-spin" /> : null}
-                {isLoading ? 'Logging in...' : 'Login'}
+                {isLoading ? 'Logging in...' : `Open ${config.badge}`}
               </Button>
             </form>
 
-            <div className="mt-6 rounded-[1.5rem] border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-4 text-center">
-              <p className="text-sm text-[var(--color-text-muted)]">New to the platform?</p>
-              <Link to="/register" className="mt-2 inline-flex text-sm font-semibold text-[var(--color-primary)]">
-                Create restaurant account
-              </Link>
-            </div>
+            {portal === 'admin' ? (
+              <div className="mt-6 rounded-[1.5rem] border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-4 text-center">
+                <p className="text-sm text-[var(--color-text-muted)]">New to the platform?</p>
+                <Link to="/register" className="mt-2 inline-flex text-sm font-semibold text-[var(--color-primary)]">
+                  Create restaurant account
+                </Link>
+              </div>
+            ) : null}
           </div>
         </Card>
       </div>

@@ -30,7 +30,7 @@ export const createStaff = asyncHandler(async (req, res) => {
 export const getStaffUsers = asyncHandler(async (req, res) => {
   const filters = {
     role: req.query.role,
-    isActive: req.query.isActive === 'true',
+    isActive: req.query.isActive !== undefined ? req.query.isActive === 'true' : undefined,
     limit: parseInt(req.query.limit) || 50,
     skip: parseInt(req.query.skip) || 0,
   };
@@ -45,7 +45,7 @@ export const deactivateStaff = asyncHandler(async (req, res) => {
 
   const user = await RestaurantService.deactivateStaffUser(req.restaurantId, staffId);
 
-  return sendSuccess(res, 200, user, 'Staff user deactivated successfully');
+  return sendSuccess(res, 200, user, 'Staff user deleted successfully');
 });
 
 export const updateSubscription = asyncHandler(async (req, res) => {

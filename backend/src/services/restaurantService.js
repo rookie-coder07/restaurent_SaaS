@@ -371,7 +371,8 @@ export class RestaurantService {
       let query = supabase
         .from('users')
         .select('*')
-        .eq('restaurant_id', restaurantId);
+        .eq('restaurant_id', restaurantId)
+        .in('role', ['staff', 'kitchen_staff']);
 
       if (filters.role) {
         query = query.eq('role', filters.role);
@@ -405,10 +406,7 @@ export class RestaurantService {
     try {
       const { data: user, error } = await supabase
         .from('users')
-        .update({
-          status: 'inactive',
-          updated_at: new Date().toISOString(),
-        })
+        .delete()
         .eq('restaurant_id', restaurantId)
         .eq('id', staffId)
         .select()
@@ -418,7 +416,7 @@ export class RestaurantService {
 
       return this.transformStaffUser(user);
     } catch (error) {
-      logger.error('❌ Deactivate staff user error:', error);
+      logger.error('❌ Delete staff user error:', error);
       throw error;
     }
   }

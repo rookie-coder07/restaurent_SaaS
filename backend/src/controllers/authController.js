@@ -78,7 +78,10 @@ export const loginStaff = asyncHandler(async (req, res) => {
 });
 
 export const refreshToken = asyncHandler(async (req, res) => {
-  const refreshToken = req.cookies?.refreshToken || req.body.refreshToken;
+  // Prefer the refresh token sent by the active SPA portal session.
+  // Falling back to cookies is still allowed for same-origin flows, but
+  // cookies should not override the portal-specific token from local storage.
+  const refreshToken = req.body.refreshToken || req.cookies?.refreshToken;
 
   if (!refreshToken) {
     return sendError(res, 401, 'Refresh token is required');

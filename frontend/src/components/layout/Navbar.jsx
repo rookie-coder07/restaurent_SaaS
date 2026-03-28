@@ -1,6 +1,7 @@
 import { Menu } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
 import ThemeToggle from '../common/ThemeToggle';
+import PortalLogoutButton from '../common/PortalLogoutButton';
 
 export default function Navbar({ sectionLabel, pageTitle, onMenuClick }) {
   const { user } = useAuth();
@@ -28,6 +29,8 @@ export default function Navbar({ sectionLabel, pageTitle, onMenuClick }) {
           <div className="hidden rounded-full border border-cyan-400/20 bg-cyan-400/10 px-3 py-1 text-xs font-medium text-cyan-300 sm:inline-flex">
             Live workspace
           </div>
+
+          <PortalLogoutButton portal="admin" />
 
           <ThemeToggle className="px-3 py-2 text-sm md:text-base" />
 

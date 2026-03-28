@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { ChefHat, Loader, Plus, Shield, Trash2, User, Users } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { ChefHat, Loader, Plus, Trash2, User, Users } from 'lucide-react';
 import { useApi } from '../hooks/useApi';
 import { restaurantAPI } from '../services/apiEndpoints';
 import Card from '../components/common/Card';
@@ -11,29 +11,33 @@ import EmptyState from '../components/common/EmptyState';
 import StatCard from '../components/common/StatCard';
 
 const ROLE_META = {
-  manager: {
-    label: 'Manager',
-    color: 'bg-violet-100 text-violet-700',
-    icon: Shield,
-  },
   staff: {
-    label: 'Staff',
+    label: 'POS Staff',
     color: 'bg-sky-100 text-sky-700',
     icon: User,
   },
   kitchen_staff: {
-    label: 'Kitchen Staff',
+    label: 'KOT Staff',
     color: 'bg-amber-100 text-amber-700',
     icon: ChefHat,
   },
 };
 
+const STAFF_FILTERS = [
+  { id: 'all', label: 'All Access', description: 'POS staff and KOT staff' },
+  { id: 'staff', label: 'POS Staff', description: 'Waiters and cashiers using the POS portal' },
+  { id: 'kitchen_staff', label: 'KOT Staff', description: 'Kitchen team using the KOT portal' },
+];
+
 export default function StaffManagement() {
-  const { data: staffData = {}, loading, execute: refetch } = useApi(() => restaurantAPI.getStaff(100, 0));
+  const { data: staffData = {}, loading, execute: refetch } = useApi(() =>
+    restaurantAPI.getStaff({ limit: 100, skip: 0, isActive: true })
+  );
   const [showForm, setShowForm] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
+  const [activeFilter, setActiveFilter] = useState('all');
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -43,9 +47,12 @@ export default function StaffManagement() {
   });
 
   const staff = staffData?.staff || [];
-  const managerCount = staff.filter((member) => member.role === 'manager').length;
   const staffCount = staff.filter((member) => member.role === 'staff').length;
   const kitchenCount = staff.filter((member) => member.role === 'kitchen_staff').length;
+  const filteredStaff = useMemo(
+    () => (activeFilter === 'all' ? staff : staff.filter((member) => member.role === activeFilter)),
+    [activeFilter, staff]
+  );
 
   const resetForm = () => {
     setFormData({
@@ -56,6 +63,18 @@ export default function StaffManagement() {
       password: '',
     });
     setShowForm(false);
+  };
+
+  const openCreateForm = (role = 'staff') => {
+    setError(null);
+    setFormData({
+      name: '',
+      email: '',
+      phone: '',
+      role,
+      password: '',
+    });
+    setShowForm(true);
   };
 
   const validateStaffForm = () => {
@@ -91,16 +110,22 @@ export default function StaffManagement() {
     setSubmitting(true);
 
     try {
-      await restaurantAPI.createStaff({
+      const targetRole = formData.role;
+      const response = await restaurantAPI.createStaff({
         ...formData,
         name: formData.name.trim(),
         email: formData.email.trim().toLowerCase(),
         phone: formData.phone.trim(),
       });
-      setSuccess('Staff member added successfully');
+      const createdStaff = response.data?.data;
+      const roleLabel = ROLE_META[targetRole]?.label || 'Staff';
+
+      setActiveFilter(targetRole);
+      setSuccess(`${roleLabel} login created for ${createdStaff?.email || formData.email.trim().toLowerCase()}`);
       resetForm();
       await refetch();
-      window.setTimeout(() => setSuccess(null), 3000);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      window.setTimeout(() => setSuccess(null), 5000);
     } catch (err) {
       const details = err.response?.data?.details;
       const detailedMessage =
@@ -120,7 +145,7 @@ export default function StaffManagement() {
       await restaurantAPI.deactivateStaff(staffId);
       setSuccess('Staff member removed');
       await refetch();
-      window.setTimeout(() => setSuccess(null), 3000);
+      window.setTimeout(() => setSuccess(null), 5000);
     } catch (err) {
       setError(err.response?.data?.message || 'Failed to remove staff');
     }
@@ -143,39 +168,62 @@ export default function StaffManagement() {
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.25em] text-[var(--color-text-subtle)]">Staff</p>
-            <h1 className="mt-3 text-3xl font-bold text-[var(--color-text)]">Manage team access</h1>
+            <h1 className="mt-3 text-3xl font-bold text-[var(--color-text)]">Create POS and KOT staff access</h1>
             <p className="mt-2 text-sm text-[var(--color-text-muted)]">
-              Add managers, staff, and kitchen users with a mobile-friendly team roster.
+              Create logins for POS staff and KOT staff from one clean admin screen.
             </p>
           </div>
-          <Button onClick={() => setShowForm(true)}>
-            <Plus className="h-4 w-4" />
-            Add Staff
-          </Button>
+          <div className="flex flex-col gap-3 sm:flex-row">
+            <Button variant="secondary" onClick={() => openCreateForm('staff')}>
+              <Plus className="h-4 w-4" />
+              Add POS Staff
+            </Button>
+            <Button onClick={() => openCreateForm('kitchen_staff')}>
+              <Plus className="h-4 w-4" />
+              Add KOT Staff
+            </Button>
+          </div>
         </div>
       </Card>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <StatCard icon={Shield} label="Managers" value={managerCount} subtitle="Admin-level users" tone="primary" />
-        <StatCard icon={User} label="Staff" value={staffCount} subtitle="Front-of-house members" tone="neutral" />
-        <StatCard icon={ChefHat} label="Kitchen" value={kitchenCount} subtitle="Kitchen team members" tone="warning" />
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <StatCard icon={User} label="POS Staff" value={staffCount} subtitle="Front-of-house members" tone="neutral" />
+        <StatCard icon={ChefHat} label="KOT Staff" value={kitchenCount} subtitle="Kitchen team members" tone="warning" />
       </div>
 
-      {staff.length === 0 ? (
+      <div className="grid gap-3 lg:grid-cols-3">
+        {STAFF_FILTERS.map((filter) => (
+          <button
+            key={filter.id}
+            type="button"
+            onClick={() => setActiveFilter(filter.id)}
+            className={`rounded-[1.5rem] border p-4 text-left shadow-[var(--shadow-card)] transition ${
+              activeFilter === filter.id
+                ? 'border-[var(--color-primary)] bg-[var(--color-primary-soft)]'
+                : 'border-[var(--border-color)] bg-[var(--color-surface)] hover:bg-[var(--color-surface-muted)]'
+            }`}
+          >
+            <p className="text-sm font-bold text-[var(--color-text)]">{filter.label}</p>
+            <p className="mt-2 text-xs leading-5 text-[var(--color-text-muted)]">{filter.description}</p>
+          </button>
+        ))}
+      </div>
+
+      {filteredStaff.length === 0 ? (
         <EmptyState
           icon={Users}
-          title="No staff members yet"
-          description="Invite your first team member to start assigning roles across operations."
+          title={activeFilter === 'all' ? 'No staff members yet' : `No ${STAFF_FILTERS.find((item) => item.id === activeFilter)?.label.toLowerCase()} yet`}
+          description="Create the right portal access for your team and they will appear here."
           action={
-            <Button onClick={() => setShowForm(true)}>
+            <Button onClick={() => openCreateForm(activeFilter === 'all' ? 'staff' : activeFilter)}>
               <Plus className="h-4 w-4" />
-              Add Staff
+              Create Access
             </Button>
           }
         />
       ) : (
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-          {staff.map((member) => {
+          {filteredStaff.map((member) => {
             const meta = ROLE_META[member.role] || ROLE_META.staff;
             const Icon = meta.icon;
 
@@ -221,7 +269,12 @@ export default function StaffManagement() {
         </div>
       )}
 
-      <Modal title="Add Staff Member" isOpen={showForm} onClose={() => { resetForm(); setError(null); }} maxWidth="max-w-lg">
+      <Modal
+        title={formData.role === 'kitchen_staff' ? 'Create KOT Staff Login' : 'Create POS Staff Login'}
+        isOpen={showForm}
+        onClose={() => { resetForm(); setError(null); }}
+        maxWidth="max-w-lg"
+      >
         <form onSubmit={handleSubmit} className="space-y-4">
           {error ? (
             <div className="rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm font-medium text-red-300">
@@ -258,9 +311,8 @@ export default function StaffManagement() {
           <label className="space-y-2">
             <span className="text-sm font-medium text-[var(--color-text)]">Role</span>
             <select value={formData.role} onChange={(e) => setFormData({ ...formData, role: e.target.value })} className="input" required>
-              <option value="staff">Staff</option>
-              <option value="kitchen_staff">Kitchen Staff</option>
-              <option value="manager">Manager</option>
+              <option value="staff">POS Staff</option>
+              <option value="kitchen_staff">KOT Staff</option>
             </select>
           </label>
 
@@ -279,7 +331,7 @@ export default function StaffManagement() {
             </Button>
             <Button type="submit" className="w-full sm:flex-1" disabled={submitting}>
               {submitting ? <Loader className="h-4 w-4 animate-spin" /> : null}
-              Add Staff
+              Create Login
             </Button>
           </div>
         </form>

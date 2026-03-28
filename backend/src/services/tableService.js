@@ -2,6 +2,8 @@ import logger from '../utils/logger.js';
 import supabase from '../config/supabase.js';
 
 export class TableService {
+  static ACTIVE_ORDER_STATUSES = ['pending', 'preparing', 'ready', 'served', 'in_progress'];
+
   // Helper function to transform snake_case to camelCase
   static transformTable(table) {
     if (!table) return null;
@@ -25,6 +27,131 @@ export class TableService {
   static transformTables(tables) {
     if (!Array.isArray(tables)) return [];
     return tables.map(table => this.transformTable(table));
+  }
+
+  static getEffectiveStatus(table, hasActiveOrder = false) {
+    if (hasActiveOrder) {
+      return 'occupied';
+    }
+
+    if (table.reserved_by || table.reservedBy || table.status === 'reserved') {
+      return 'reserved';
+    }
+
+    return 'available';
+  }
+
+  static async getActiveOrderTableIds(restaurantId) {
+    const { data: orders, error } = await supabase
+      .from('orders')
+      .select('table_id')
+      .eq('restaurant_id', restaurantId)
+      .neq('payment_status', 'paid')
+      .in('status', this.ACTIVE_ORDER_STATUSES);
+
+    if (error) {
+      throw error;
+    }
+
+    return new Set((orders || []).map((order) => order.table_id).filter(Boolean));
+  }
+
+  static async syncTableLifecycle(restaurantId, tableId) {
+    const { data: table, error: tableError } = await supabase
+      .from('tables')
+      .select('*')
+      .eq('restaurant_id', restaurantId)
+      .eq('id', tableId)
+      .single();
+
+    if (tableError || !table) {
+      throw tableError || new Error('Table not found');
+    }
+
+    const activeTableIds = await this.getActiveOrderTableIds(restaurantId);
+    const hasActiveOrder = activeTableIds.has(tableId);
+    const nextStatus = this.getEffectiveStatus(table, hasActiveOrder);
+    const shouldClearReservation = hasActiveOrder || nextStatus === 'available';
+    const needsUpdate =
+      table.status !== nextStatus ||
+      (shouldClearReservation && (table.reserved_by || table.reservation_time));
+
+    if (!needsUpdate) {
+      return this.transformTable(table);
+    }
+
+    const { data: updatedTable, error: updateError } = await supabase
+      .from('tables')
+      .update({
+        status: nextStatus,
+        reserved_by: shouldClearReservation ? null : table.reserved_by,
+        reservation_time: shouldClearReservation ? null : table.reservation_time,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', tableId)
+      .eq('restaurant_id', restaurantId)
+      .select()
+      .single();
+
+    if (updateError || !updatedTable) {
+      throw updateError || new Error('Failed to sync table lifecycle');
+    }
+
+    return this.transformTable(updatedTable);
+  }
+
+  static async syncRestaurantTableLifecycles(restaurantId) {
+    const { data: tables, error: tablesError } = await supabase
+      .from('tables')
+      .select('*')
+      .eq('restaurant_id', restaurantId);
+
+    if (tablesError) {
+      throw tablesError;
+    }
+
+    if (!tables || tables.length === 0) {
+      return [];
+    }
+
+    const activeTableIds = await this.getActiveOrderTableIds(restaurantId);
+    const updates = tables
+      .map((table) => {
+        const hasActiveOrder = activeTableIds.has(table.id);
+        const nextStatus = this.getEffectiveStatus(table, hasActiveOrder);
+        const shouldClearReservation = hasActiveOrder || nextStatus === 'available';
+        const needsUpdate =
+          table.status !== nextStatus ||
+          (shouldClearReservation && (table.reserved_by || table.reservation_time));
+
+        if (!needsUpdate) {
+          return null;
+        }
+
+        return (async () => {
+          const { error: updateError } = await supabase
+            .from('tables')
+            .update({
+              status: nextStatus,
+              reserved_by: shouldClearReservation ? null : table.reserved_by,
+              reservation_time: shouldClearReservation ? null : table.reservation_time,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', table.id)
+            .eq('restaurant_id', restaurantId);
+
+          if (updateError) {
+            throw updateError;
+          }
+        })();
+      })
+      .filter(Boolean);
+
+    if (updates.length > 0) {
+      await Promise.all(updates);
+    }
+
+    return tables;
   }
 
   // ============ TABLES ============
@@ -55,7 +182,7 @@ export class TableService {
       }
 
       logger.info(`✅ Table created successfully: ID=${table.id}, Number=${tableData.tableNumber}`);
-      return this.transformTable(table);
+      return await this.syncTableLifecycle(restaurantId, table.id);
     } catch (error) {
       logger.error('❌ Create table error:', error.message);
       throw error;
@@ -64,6 +191,8 @@ export class TableService {
 
   static async getTableById(restaurantId, tableId) {
     try {
+      await this.syncTableLifecycle(restaurantId, tableId);
+
       const { data: table, error } = await supabase
         .from('tables')
         .select('*')
@@ -73,7 +202,7 @@ export class TableService {
 
       if (error || !table) throw error || new Error('Table not found');
 
-      return this.transformTable(table);
+      return await this.syncTableLifecycle(restaurantId, tableId);
     } catch (error) {
       logger.error('❌ Get table error:', error);
       throw error;
@@ -82,6 +211,8 @@ export class TableService {
 
   static async getTablesByRestaurant(restaurantId, filters = {}) {
     try {
+      await this.syncRestaurantTableLifecycles(restaurantId);
+
       let query = supabase
         .from('tables')
         .select('*')
@@ -122,7 +253,7 @@ export class TableService {
       if (error || !table) throw error || new Error('Table not found');
 
       logger.info(`✅ Table status updated: ${tableId} → ${status}`);
-      return this.transformTable(table);
+      return await this.syncTableLifecycle(restaurantId, tableId);
     } catch (error) {
       logger.error('❌ Update table status error:', error);
       throw error;
@@ -168,7 +299,7 @@ export class TableService {
         .select('*', { count: 'exact', head: true })
         .eq('restaurant_id', restaurantId)
         .eq('table_id', tableId)
-        .neq('status', 'completed');
+        .in('status', this.ACTIVE_ORDER_STATUSES);
 
       if (countError) throw countError;
 
@@ -194,6 +325,8 @@ export class TableService {
 
   static async getAvailableTables(restaurantId, capacity = null) {
     try {
+      await this.syncRestaurantTableLifecycles(restaurantId);
+
       let query = supabase
         .from('tables')
         .select('*')
@@ -217,6 +350,19 @@ export class TableService {
 
   static async reserveTable(restaurantId, tableId, reservationData) {
     try {
+      const { count, error: activeOrderError } = await supabase
+        .from('orders')
+        .select('*', { count: 'exact', head: true })
+        .eq('restaurant_id', restaurantId)
+        .eq('table_id', tableId)
+        .in('status', this.ACTIVE_ORDER_STATUSES);
+
+      if (activeOrderError) throw activeOrderError;
+
+      if ((count || 0) > 0) {
+        throw new Error('Cannot reserve a table that already has an active order');
+      }
+
       const { data: table, error } = await supabase
         .from('tables')
         .update({
@@ -242,10 +388,19 @@ export class TableService {
 
   static async releaseTable(restaurantId, tableId) {
     try {
+      const { count, error: activeOrderError } = await supabase
+        .from('orders')
+        .select('*', { count: 'exact', head: true })
+        .eq('restaurant_id', restaurantId)
+        .eq('table_id', tableId)
+        .in('status', this.ACTIVE_ORDER_STATUSES);
+
+      if (activeOrderError) throw activeOrderError;
+
       const { data: table, error } = await supabase
         .from('tables')
         .update({
-          status: 'available',
+          status: count > 0 ? 'occupied' : 'available',
           reserved_by: null,
           reservation_time: null,
           updated_at: new Date().toISOString(),
@@ -267,6 +422,8 @@ export class TableService {
 
   static async getTableStatus(restaurantId) {
     try {
+      await this.syncRestaurantTableLifecycles(restaurantId);
+
       const { data: statuses, error } = await supabase
         .from('tables')
         .select('status')
@@ -292,6 +449,8 @@ export class TableService {
 
   static async getTables(restaurantId, filters = {}) {
     try {
+      await this.syncRestaurantTableLifecycles(restaurantId);
+
       let query = supabase
         .from('tables')
         .select('*')

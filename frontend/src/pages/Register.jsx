@@ -52,7 +52,7 @@ export default function Register() {
     });
 
     if (success) {
-      navigate('/');
+      navigate('/admin');
     }
   };
 
@@ -64,7 +64,7 @@ export default function Register() {
             <div className="flex flex-col justify-between rounded-[1.75rem] bg-[var(--color-surface-muted)] p-5 sm:p-6">
               <div>
                 <Link
-                  to="/login"
+                  to="/admin/login"
                   className="inline-flex items-center gap-2 text-sm font-semibold text-[var(--color-primary)]"
                 >
                   <ArrowLeft className="h-4 w-4" />
@@ -202,7 +202,7 @@ export default function Register() {
 
               <p className="mt-6 text-center text-sm text-[var(--color-text-muted)]">
                 Already have an account?{' '}
-                <Link to="/login" className="font-semibold text-[var(--color-primary)]">
+                <Link to="/admin/login" className="font-semibold text-[var(--color-primary)]">
                   Login
                 </Link>
               </p>

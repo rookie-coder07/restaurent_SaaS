@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { Download, Loader, Plus, ShoppingCart, X } from 'lucide-react';
 import { useApi } from '../hooks/useApi';
 import { orderAPI, menuAPI, tableAPI } from '../services/apiEndpoints';
-import { formatCurrency, formatDate } from '../utils/formatters';
+import { formatCurrency, formatDate, formatDisplayOrderNumber } from '../utils/formatters';
 import Card from '../components/common/Card';
 import Button from '../components/common/Button';
 import Input from '../components/common/Input';
@@ -17,8 +17,17 @@ const STATUS_STYLES = {
   preparing: 'bg-sky-100 text-sky-700',
   ready: 'bg-emerald-100 text-emerald-700',
   served: 'bg-slate-200 text-slate-700',
+  completed: 'bg-emerald-100 text-emerald-700',
   cancelled: 'bg-red-100 text-red-700',
 };
+
+function isSettledOrder(order) {
+  return order?.status === 'completed' || order?.paymentStatus === 'paid';
+}
+
+function formatPaymentMethodLabel(value) {
+  return String(value || 'cash').toUpperCase();
+}
 
 export default function Orders() {
   const { data: ordersData = {}, loading, execute: refetchOrders } = useApi(() => orderAPI.getOrders({ limit: 100 }));
@@ -35,6 +44,9 @@ export default function Orders() {
   const [success, setSuccess] = useState(null);
   const [selectedItems, setSelectedItems] = useState([]);
   const [selectedTable, setSelectedTable] = useState('');
+  const [showBulkCancelModal, setShowBulkCancelModal] = useState(false);
+  const [bulkCancelReason, setBulkCancelReason] = useState('');
+  const [isBulkCancelling, setIsBulkCancelling] = useState(false);
 
   const orders = ordersData?.items || [];
   const items = itemsData?.items || [];
@@ -71,7 +83,9 @@ export default function Orders() {
     return sortedData;
   }, [orders, filterStatus, dateRange, sort]);
 
-  const totalRevenue = filteredOrders.reduce((sum, order) => sum + (order.totalAmount || order.total || 0), 0);
+  const totalRevenue = filteredOrders
+    .filter((order) => isSettledOrder(order))
+    .reduce((sum, order) => sum + (order.totalAmount || order.total || 0), 0);
 
   const handleAddItem = (item) => {
     setSelectedItems((current) => {
@@ -158,6 +172,36 @@ export default function Orders() {
     }
   };
 
+  const handleBulkCancelPendingBills = async () => {
+    const trimmedReason = bulkCancelReason.trim();
+    if (!trimmedReason) {
+      setError('Add a reason before cancelling pending bills.');
+      return;
+    }
+
+    try {
+      setIsBulkCancelling(true);
+      setError(null);
+
+      const response = await orderAPI.cancelPendingBills({ reason: trimmedReason });
+      const result = response.data?.data || {};
+
+      setShowBulkCancelModal(false);
+      setBulkCancelReason('');
+      setSuccess(
+        result.cancelledCount > 0
+          ? `${result.cancelledCount} pending bill${result.cancelledCount === 1 ? '' : 's'} cancelled successfully.`
+          : 'No pending bills were available to cancel.'
+      );
+      await refetchOrders();
+      window.setTimeout(() => setSuccess(null), 4000);
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to cancel pending bills');
+    } finally {
+      setIsBulkCancelling(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex h-full items-center justify-center">
@@ -181,6 +225,12 @@ export default function Orders() {
             </p>
           </div>
           <div className="flex flex-col gap-3 sm:flex-row">
+            <Button
+              variant="danger"
+              onClick={() => setShowBulkCancelModal(true)}
+            >
+              Cancel Pending Bills
+            </Button>
             <Button variant="secondary">
               <Download className="h-4 w-4" />
               Export
@@ -195,11 +245,11 @@ export default function Orders() {
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <StatCard label="Filtered Orders" value={filteredOrders.length} subtitle="Current result set" tone="primary" />
-        <StatCard label="Revenue" value={formatCurrency(totalRevenue)} subtitle="For selected filters" tone="success" />
+        <StatCard label="Revenue" value={formatCurrency(totalRevenue)} subtitle="Settled sales only" tone="success" />
         <StatCard
-          label="Served"
-          value={filteredOrders.filter((order) => order.status === 'served').length}
-          subtitle="Completed orders"
+          label="Settled"
+          value={filteredOrders.filter((order) => isSettledOrder(order)).length}
+          subtitle="Bills marked paid"
           tone="neutral"
         />
       </div>
@@ -218,6 +268,7 @@ export default function Orders() {
               <option value="preparing">Preparing</option>
               <option value="ready">Ready</option>
               <option value="served">Served</option>
+              <option value="completed">Completed</option>
               <option value="cancelled">Cancelled</option>
             </select>
           </label>
@@ -269,7 +320,7 @@ export default function Orders() {
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                   <div className="min-w-0">
                     <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--color-text-subtle)]">
-                      Order #{order.id?.slice(-8)}
+                      {formatDisplayOrderNumber(order)}
                     </p>
                     <h3 className="mt-2 text-lg font-bold text-[var(--color-text)]">Table {order.tableNumber || 'N/A'}</h3>
                     <p className="mt-1 text-sm text-[var(--color-text-muted)]">{formatDate(order.createdAt)}</p>
@@ -278,6 +329,12 @@ export default function Orders() {
                   <div className="flex flex-wrap items-center gap-2">
                     <span className={`rounded-full px-3 py-1 text-xs font-semibold ${STATUS_STYLES[order.status] || STATUS_STYLES.pending}`}>
                       {order.status}
+                    </span>
+                    <span className="rounded-full bg-[var(--color-primary-soft)] px-3 py-1 text-xs font-semibold text-[var(--color-primary)]">
+                      {formatPaymentMethodLabel(order.paymentMethod)}
+                    </span>
+                    <span className="rounded-full bg-[var(--color-surface-muted)] px-3 py-1 text-xs font-semibold text-[var(--color-text)]">
+                      {order.paymentStatus || 'unpaid'}
                     </span>
                     <span className="rounded-full bg-[var(--color-surface-muted)] px-3 py-1 text-sm font-semibold text-[var(--color-text)]">
                       {formatCurrency(order.totalAmount || order.total || 0)}
@@ -312,12 +369,14 @@ export default function Orders() {
                     <select
                       value={order.status}
                       onChange={(e) => handleStatusUpdate(order.id, e.target.value)}
+                      disabled={order.status === 'completed' || order.status === 'cancelled'}
                       className="input"
                     >
                       <option value="pending">Pending</option>
                       <option value="preparing">Preparing</option>
                       <option value="ready">Ready</option>
                       <option value="served">Served</option>
+                      {order.status === 'completed' ? <option value="completed">Completed</option> : null}
                       <option value="cancelled">Cancelled</option>
                     </select>
                   </label>
@@ -449,6 +508,12 @@ export default function Orders() {
               <span className={`rounded-full px-3 py-1 text-xs font-semibold ${STATUS_STYLES[selectedOrder.status] || STATUS_STYLES.pending}`}>
                 {selectedOrder.status}
               </span>
+              <span className="rounded-full bg-[var(--color-primary-soft)] px-3 py-1 text-xs font-semibold text-[var(--color-primary)]">
+                {formatPaymentMethodLabel(selectedOrder.paymentMethod)}
+              </span>
+              <span className="rounded-full bg-[var(--color-surface-muted)] px-3 py-1 text-xs font-semibold text-[var(--color-text)]">
+                {selectedOrder.paymentStatus || 'unpaid'}
+              </span>
               <span className="text-sm text-[var(--color-text-muted)]">{formatDate(selectedOrder.createdAt)}</span>
             </div>
 
@@ -476,6 +541,61 @@ export default function Orders() {
             </div>
           </div>
         ) : null}
+      </Modal>
+
+      <Modal
+        title="Cancel All Pending Bills"
+        isOpen={showBulkCancelModal}
+        onClose={() => {
+          if (isBulkCancelling) {
+            return;
+          }
+
+          setShowBulkCancelModal(false);
+          setBulkCancelReason('');
+        }}
+        maxWidth="max-w-lg"
+      >
+        <div className="space-y-4">
+          <div className="rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm font-medium text-red-300">
+            This will cancel every unpaid bill that is still in the <strong>pending</strong> state for this restaurant.
+            Preparing, ready, served, and settled bills will not be touched.
+          </div>
+
+          <label className="space-y-2">
+            <span className="text-sm font-medium text-[var(--color-text)]">Reason</span>
+            <textarea
+              value={bulkCancelReason}
+              onChange={(event) => setBulkCancelReason(event.target.value)}
+              className="input min-h-[110px] resize-y"
+              placeholder="Example: day-end cleanup of stale pending bills."
+            />
+          </label>
+
+          <div className="flex flex-col-reverse gap-3 sm:flex-row">
+            <Button
+              type="button"
+              variant="secondary"
+              className="w-full sm:flex-1"
+              onClick={() => {
+                setShowBulkCancelModal(false);
+                setBulkCancelReason('');
+              }}
+              disabled={isBulkCancelling}
+            >
+              Keep Bills
+            </Button>
+            <Button
+              type="button"
+              variant="danger"
+              className="w-full sm:flex-1"
+              onClick={handleBulkCancelPendingBills}
+              disabled={isBulkCancelling}
+            >
+              {isBulkCancelling ? 'Cancelling...' : 'Confirm Cancel'}
+            </Button>
+          </div>
+        </div>
       </Modal>
     </div>
   );

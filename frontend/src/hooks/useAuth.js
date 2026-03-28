@@ -1,6 +1,8 @@
 import { useAuthStore } from '../context/authStore.js';
 import { authAPI } from '../services/apiEndpoints.js';
 import { useNavigate } from 'react-router-dom';
+import { canAccessPortal, PORTAL_LOGIN } from '../utils/portalRouting.js';
+import { clearAllPortalSessions, clearPortalSession, savePortalSession } from '../utils/authStorage.js';
 
 const AUTH_RETRYABLE_ERROR_CODES = new Set(['ECONNABORTED', 'ERR_NETWORK']);
 
@@ -27,7 +29,7 @@ export const useAuth = () => {
     return null;
   };
 
-  const login = async (email, password, isStaff = false) => {
+  const login = async (email, password, isStaff = false, portal = 'admin') => {
     try {
       authStore.setLoading(true);
       authStore.setError(null);
@@ -53,12 +55,21 @@ export const useAuth = () => {
       }
 
       const { accessToken, refreshToken, restaurant, user } = response.data.data;
+      const session = {
+        accessToken,
+        refreshToken,
+        user: normalizeUser(restaurant, user, isStaff),
+      };
 
-      localStorage.setItem('accessToken', accessToken);
-      localStorage.setItem('refreshToken', refreshToken);
+      if (!canAccessPortal(session.user?.role, portal)) {
+        clearPortalSession(portal);
+        authStore.logout(portal);
+        authStore.setError(`This account does not have access to the ${portal.toUpperCase()} portal.`);
+        return false;
+      }
 
-      authStore.setTokens(accessToken, refreshToken);
-      authStore.setUser(normalizeUser(restaurant, user, isStaff));
+      savePortalSession(portal, session);
+      authStore.setPortalSession(portal, session);
       authStore.setError(null);
 
       return true;
@@ -82,12 +93,14 @@ export const useAuth = () => {
       const response = await authAPI.register(data);
 
       const { accessToken, refreshToken, restaurant } = response.data.data;
+      const session = {
+        accessToken,
+        refreshToken,
+        user: normalizeUser(restaurant, null, false),
+      };
 
-      localStorage.setItem('accessToken', accessToken);
-      localStorage.setItem('refreshToken', refreshToken);
-
-      authStore.setTokens(accessToken, refreshToken);
-      authStore.setUser(normalizeUser(restaurant, null, false));
+      savePortalSession('admin', session);
+      authStore.setPortalSession('admin', session);
       authStore.setError(null);
 
       return true;
@@ -100,14 +113,21 @@ export const useAuth = () => {
     }
   };
 
-  const logout = async () => {
+  const logout = async (portal = authStore.activePortal || 'admin', { allPortals = false } = {}) => {
     try {
       await authAPI.logout();
     } catch (error) {
       console.error('Logout error:', error);
     } finally {
-      authStore.logout();
-      navigate('/login');
+      if (allPortals) {
+        clearAllPortalSessions();
+        authStore.logout();
+        navigate('/');
+        return;
+      }
+
+      authStore.logout(portal);
+      navigate(portal === 'admin' ? '/' : PORTAL_LOGIN[portal] || PORTAL_LOGIN.admin);
     }
   };
 

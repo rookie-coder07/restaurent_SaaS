@@ -3,12 +3,13 @@ import { useState, useEffect } from 'react';
 import { useApi } from '../hooks/useApi';
 import { customerAPI } from '../services/apiEndpoints';
 import { Clock, Check, AlertCircle, ChefHat, Loader } from 'lucide-react';
+import { formatDisplayOrderNumber } from '../utils/formatters';
 
 const STATUS_STEPS = [
   { status: 'pending', label: 'Order Received', icon: Clock },
   { status: 'preparing', label: 'Preparing', icon: ChefHat },
   { status: 'ready', label: 'Ready to Serve', icon: Check },
-  { status: 'completed', label: 'Completed', icon: Check },
+  { status: 'served', label: 'Completed', icon: Check },
 ];
 
 export default function OrderStatus() {
@@ -36,7 +37,7 @@ export default function OrderStatus() {
 
   // Switch to slower polling after order is ready
   useEffect(() => {
-    if (order?.status === 'ready' || order?.status === 'completed') {
+    if (order?.status === 'ready' || order?.status === 'served' || order?.status === 'completed') {
       setPollingInterval(5000);
     }
   }, [order?.status]);
@@ -88,7 +89,8 @@ export default function OrderStatus() {
     );
   }
 
-  const currentStepIndex = STATUS_STEPS.findIndex(step => step.status === order.status);
+  const progressStatus = order.status === 'completed' ? 'served' : order.status;
+  const currentStepIndex = STATUS_STEPS.findIndex(step => step.status === progressStatus);
 
   return (
     <div className="min-h-screen bg-gray-50 py-8">
@@ -97,18 +99,18 @@ export default function OrderStatus() {
         <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
           <div className="flex items-start justify-between mb-4">
             <div>
-              <h1 className="text-3xl font-bold text-gray-900">Order #{order.id?.slice(0, 8).toUpperCase()}</h1>
+              <h1 className="text-3xl font-bold text-gray-900">{formatDisplayOrderNumber(order)}</h1>
               <p className="text-gray-600 mt-1">Table {tableNumber}</p>
             </div>
             <div className="text-right">
               <p className="text-2xl font-bold text-gray-900">₹{order.totalAmount?.toFixed(2)}</p>
               <p className={`text-sm font-medium mt-1 px-3 py-1 rounded-full inline-block ${
-                order.status === 'completed' ? 'bg-green-100 text-green-800' :
+                order.status === 'served' || order.status === 'completed' ? 'bg-green-100 text-green-800' :
                 order.status === 'ready' ? 'bg-blue-100 text-blue-800' :
                 order.status === 'preparing' ? 'bg-amber-100 text-amber-800' :
                 'bg-gray-100 text-gray-800'
               }`}>
-                {order.status?.charAt(0).toUpperCase() + order.status?.slice(1)}
+                {order.status === 'completed' ? 'Completed' : order.status?.charAt(0).toUpperCase() + order.status?.slice(1)}
               </p>
             </div>
           </div>
@@ -179,7 +181,7 @@ export default function OrderStatus() {
 
         {/* Status Messages */}
         <div className="space-y-4">
-          {order.status === 'completed' && (
+          {(order.status === 'served' || order.status === 'completed') && (
             <div className="bg-green-50 border border-green-200 rounded-lg p-4">
               <div className="flex items-center gap-3">
                 <Check className="w-6 h-6 text-green-600" />

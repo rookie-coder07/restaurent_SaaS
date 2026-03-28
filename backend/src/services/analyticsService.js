@@ -174,23 +174,28 @@ export class AnalyticsService {
     try {
       const { data: orders, error } = await supabase
         .from('orders')
-        .select('status, created_at, total_amount')
+        .select('status, payment_status, created_at, total_amount')
         .eq('restaurant_id', restaurantId)
         .gte('created_at', startDate)
         .lte('created_at', endDate);
 
       if (error) throw error;
 
+      const settledOrders = (orders || []).filter(
+        (order) => order.status === 'completed' || order.payment_status === 'paid'
+      );
+
       const metrics = {
         totalOrders: orders?.length || 0,
         pendingOrders: orders?.filter(o => o.status === 'pending').length || 0,
-        completedOrders: orders?.filter(o => o.status === 'completed').length || 0,
+        servedOrders: orders?.filter(o => o.status === 'served').length || 0,
+        completedOrders: settledOrders.length,
         cancelledOrders: orders?.filter(o => o.status === 'cancelled').length || 0,
-        totalRevenue: orders?.reduce((sum, o) => sum + (o.total_amount || 0), 0) || 0,
+        totalRevenue: settledOrders.reduce((sum, order) => sum + (order.total_amount || 0), 0),
       };
 
-      metrics.averageOrderValue = metrics.totalOrders > 0 
-        ? parseFloat((metrics.totalRevenue / metrics.totalOrders).toFixed(2)) 
+      metrics.averageOrderValue = metrics.completedOrders > 0 
+        ? parseFloat((metrics.totalRevenue / metrics.completedOrders).toFixed(2)) 
         : 0;
 
       return metrics;

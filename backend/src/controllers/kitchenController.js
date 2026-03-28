@@ -26,19 +26,22 @@ export const getKitchenAllOrders = asyncHandler(async (req, res) => {
   return sendSuccess(res, 200, result, 'Orders fetched successfully');
 });
 
-// Update order status from kitchen
-export const updateOrderStatus = asyncHandler(async (req, res) => {
-  const { orderId } = req.params;
-  const { status, cancelReason } = req.body;
+export const updateKitchenTicketStatus = asyncHandler(async (req, res) => {
+  const { orderId, ticketId } = req.params;
+  const result = await OrderService.updateKitchenTicketStatus(req.user.restaurantId, orderId, ticketId, req.body.status);
+  return sendSuccess(res, 200, result, 'Kitchen ticket status updated successfully');
+});
 
-  const order = await OrderService.updateOrderStatus(
-    req.user.restaurantId,
-    orderId,
-    status,
-    cancelReason
-  );
+export const reprintKitchenTicket = asyncHandler(async (req, res) => {
+  const { orderId, ticketId } = req.params;
+  const result = await OrderService.reprintKitchenTicket(req.user.restaurantId, orderId, ticketId);
+  return sendSuccess(res, 200, result, 'Kitchen ticket reprinted successfully');
+});
 
-  return sendSuccess(res, 200, order, 'Order status updated successfully');
+export const refireKitchenTicket = asyncHandler(async (req, res) => {
+  const { orderId, ticketId } = req.params;
+  const result = await OrderService.refireKitchenTicket(req.user.restaurantId, orderId, ticketId);
+  return sendSuccess(res, 200, result, 'Kitchen ticket re-fired successfully');
 });
 
 // Get single order details

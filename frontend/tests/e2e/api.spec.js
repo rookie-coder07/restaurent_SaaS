@@ -1,92 +1,139 @@
 import { test, expect } from '@playwright/test';
+import { jsonSuccess, mockApi } from './helpers/mockApi.js';
 
-test.describe('API Integration Tests', () => {
-  const API_URL = 'http://localhost:3000/api/v1';
-  const testEmail = 'test@example.com';
-  const testPassword = 'Test123@456';
+test.describe('Phase 0 Smoke', () => {
+  test('kitchen staff can log in and advance a KOT ticket', async ({ page }) => {
+    const consoleMessages = [];
+    page.on('console', (message) => {
+      consoleMessages.push(message.text());
+    });
 
-  test('API should be accessible', async ({ request }) => {
-    const response = await request.post(`${API_URL}/auth/login`, {
-      data: {
-        email: testEmail,
-        password: testPassword,
+    let activeOrders = [
+      {
+        id: 'order-kot-1',
+        status: 'pending',
+        createdAt: '2026-03-28T08:30:00.000Z',
+        tableNumber: 6,
+        displayOrderNumber: 'ORD-20260328-006',
+        items: [{ menuItemId: 'item-1', quantity: 2, name: 'Paneer Fried Rice' }],
       },
-    }).catch(() => null);
+    ];
 
-    // Either login succeeds, returns proper error, or rate limited
-    if (response) {
-      expect([200, 401, 400, 429]).toContain(response.status());
-    }
-  });
+    await mockApi(page, async ({ url, method, body }) => {
+      const { pathname } = url;
 
-  test('Should handle auth endpoints', async ({ request }) => {
-    // Test register endpoint
-    const registerResponse = await request.post(`${API_URL}/auth/register`, {
-      data: {
-        restaurantName: 'Test ' + Date.now(),
-        email: 'newtest' + Date.now() + '@example.com',
-        phone: '9876543210',
-        city: 'Bellary',
-        password: 'Test123@456',
-      },
-    }).catch(() => null);
-
-    if (registerResponse) {
-      expect([200, 201, 400, 409, 429]).toContain(registerResponse.status());
-    }
-  });
-
-  test('Menu API should return data', async ({ request }) => {
-    // First login to get token
-    const loginResponse = await request.post(`${API_URL}/auth/login`, {
-      data: {
-        email: testEmail,
-        password: testPassword,
-      },
-    }).catch(() => null);
-
-    if (loginResponse && loginResponse.ok) {
-      const loginData = await loginResponse.json();
-      const token = loginData.data?.accessToken || loginData.accessToken;
-
-      if (token) {
-        // Get menu items
-        const menuResponse = await request.get(`${API_URL}/menu`, {
-          headers: {
-            Authorization: `Bearer ${token}`,
+      if (pathname.endsWith('/v1/auth/staff/login') && method === 'POST') {
+        return jsonSuccess({
+          accessToken: 'kot-token',
+          refreshToken: 'kot-refresh',
+          user: {
+            id: 'kitchen-1',
+            name: 'Kitchen Staff',
+            email: 'kot@restaurant.com',
+            role: 'kitchen_staff',
+            restaurantId: 'rest-1',
           },
-        }).catch(() => null);
-
-        if (menuResponse) {
-          expect([200, 400, 401]).toContain(menuResponse.status());
-        }
+        }, 'Logged in');
       }
-    }
+
+      if (pathname.endsWith('/v1/orders/active') && method === 'GET') {
+        return jsonSuccess(activeOrders, 'Active orders fetched successfully');
+      }
+
+      if (pathname.endsWith('/v1/orders/order-kot-1/status') && method === 'PATCH') {
+        activeOrders = activeOrders.map((order) =>
+          order.id === 'order-kot-1' ? { ...order, status: body.status } : order
+        );
+        return jsonSuccess({ ...activeOrders[0] }, 'Order status updated successfully');
+      }
+
+      return jsonSuccess({});
+    });
+
+    await page.goto('/kot/login');
+    await page.getByLabel(/Email/i).fill('kot@restaurant.com');
+    await page.getByLabel(/Password/i).fill('Test123@456');
+    await page.getByRole('button', { name: /Open KOT Portal/i }).click();
+
+    await expect(page).toHaveURL(/\/kot$/);
+    await expect(page.getByText('#06')).toBeVisible();
+    await page.getByRole('button', { name: /Start Preparing/i }).click();
+    await expect(page.getByRole('button', { name: /Mark Ready/i })).toBeVisible();
+
+    expect(consoleMessages.some((message) => message.includes('Throttling navigation'))).toBeFalsy();
   });
 
-  test('Kitchen endpoint should be accessible', async ({ request }) => {
-    const loginResponse = await request.post(`${API_URL}/auth/login`, {
-      data: {
-        email: testEmail,
-        password: testPassword,
-      },
-    }).catch(() => null);
+  test('admin can create staff access and see it in the staff list', async ({ page }) => {
+    let staffUsers = [];
 
-    if (loginResponse && loginResponse.ok) {
-      const loginData = await loginResponse.json();
-      const token = loginData.data?.accessToken || loginData.accessToken;
+    await mockApi(page, async ({ url, method, body }) => {
+      const { pathname, searchParams } = url;
 
-      if (token) {
-        const kitchenResponse = await request.get(`${API_URL}/kitchen/active-orders`, {
-          headers: {
-            Authorization: `Bearer ${token}`,
+      if (pathname.endsWith('/v1/auth/login') && method === 'POST') {
+        return jsonSuccess({
+          accessToken: 'admin-token',
+          refreshToken: 'admin-refresh',
+          restaurant: {
+            id: 'rest-1',
+            restaurantId: 'rest-1',
+            name: 'Test Restaurant',
+            email: 'test@example.com',
+            role: 'owner',
           },
-        }).catch(() => null);
-
-        if (kitchenResponse) {
-          expect([200, 400, 401]).toContain(kitchenResponse.status());
-        }
+        }, 'Logged in');
       }
-    }
+
+      if (pathname.endsWith('/v1/restaurants/profile') && method === 'GET') {
+        return jsonSuccess({
+          id: 'rest-1',
+          name: 'Test Restaurant',
+          role: 'owner',
+        });
+      }
+
+      if (pathname.endsWith('/v1/restaurants/staff') && method === 'GET') {
+        const requestedRole = searchParams.get('role');
+        const filtered = requestedRole ? staffUsers.filter((member) => member.role === requestedRole) : staffUsers;
+        return jsonSuccess({ staff: filtered, total: filtered.length, limit: 100, skip: 0 });
+      }
+
+      if (pathname.endsWith('/v1/restaurants/staff') && method === 'POST') {
+        const createdStaff = {
+          id: `staff-${staffUsers.length + 1}`,
+          name: body.name,
+          email: body.email,
+          phone: body.phone,
+          role: body.role,
+          isActive: true,
+        };
+        staffUsers = [...staffUsers, createdStaff];
+        return jsonSuccess(createdStaff, 'Staff user created successfully', 201);
+      }
+
+      if (pathname.endsWith('/v1/orders') && method === 'GET') {
+        return jsonSuccess({ items: [], total: 0, limit: 50, skip: 0 });
+      }
+
+      return jsonSuccess({});
+    });
+
+    await page.goto('/admin/login');
+    await page.getByLabel(/Email/i).fill('test@example.com');
+    await page.getByLabel(/Password/i).fill('Test123@456');
+    await page.getByRole('button', { name: /Open Admin Portal/i }).click();
+
+    await expect(page).toHaveURL(/\/admin$/);
+    await page.goto('/admin/staff');
+    await expect(page.getByRole('heading', { name: /Create POS and KOT staff access/i })).toBeVisible();
+
+    await page.getByRole('button', { name: /Add POS Staff/i }).click();
+    await page.getByLabel(/^Name$/i).fill('Waiter One');
+    await page.getByLabel(/^Email$/i).fill('waiter1@restaurant.com');
+    await page.getByLabel(/^Phone$/i).fill('9876543210');
+    await page.getByLabel(/Temporary Password/i).fill('Temp123@456');
+    await page.getByRole('button', { name: /Create Login/i }).click();
+
+    await expect(page.getByText(/POS Staff login created for waiter1@restaurant.com/i)).toBeVisible();
+    await expect(page.getByText('waiter1@restaurant.com', { exact: true })).toBeVisible();
   });
 });

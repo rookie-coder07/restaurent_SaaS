@@ -3,10 +3,110 @@ import { sendSuccess, sendError } from '../utils/apiResponse.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import OrderService from '../services/orderService.js';
 
+function getTableIdFromBody(body = {}) {
+  if (Object.prototype.hasOwnProperty.call(body, 'tableId')) {
+    return body.tableId;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'table_id')) {
+    return body.table_id;
+  }
+
+  return undefined;
+}
+
+function getOptionalNotes(body = {}) {
+  return Object.prototype.hasOwnProperty.call(body, 'notes') ? body.notes : undefined;
+}
+
+function getOptionalTotalAmount(body = {}) {
+  if (Object.prototype.hasOwnProperty.call(body, 'totalAmount')) {
+    return Number(body.totalAmount);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'total')) {
+    return Number(body.total);
+  }
+
+  return undefined;
+}
+
+function getOptionalPaymentMethod(body = {}) {
+  if (Object.prototype.hasOwnProperty.call(body, 'paymentMethod')) {
+    return body.paymentMethod;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'payment_method')) {
+    return body.payment_method;
+  }
+
+  return undefined;
+}
+
+function getOptionalAmountReceived(body = {}) {
+  if (Object.prototype.hasOwnProperty.call(body, 'amountReceived')) {
+    return Number(body.amountReceived);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'amount_received')) {
+    return Number(body.amount_received);
+  }
+
+  return undefined;
+}
+
+function getOptionalPaymentNote(body = {}) {
+  if (Object.prototype.hasOwnProperty.call(body, 'paymentNote')) {
+    return body.paymentNote;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'payment_note')) {
+    return body.payment_note;
+  }
+
+  return undefined;
+}
+
 export const createOrder = asyncHandler(async (req, res) => {
-  const order = await OrderService.createOrder(req.restaurantId, req.body);
+  const normalizedOrder = {
+    tableId: getTableIdFromBody(req.body) ?? null,
+    items: (req.body.items || []).map((item) => ({
+      menuItemId: item.menuItemId || item.itemId || item.id,
+      quantity: item.quantity || item.qty,
+      unitPrice: item.unitPrice ?? item.price ?? 0,
+      specialInstructions: item.specialInstructions || '',
+      itemNote: item.itemNote || item.note || item.specialInstructions || '',
+      modifiers: item.modifiers || [],
+      name: item.name || '',
+    })),
+    totalAmount: getOptionalTotalAmount(req.body),
+    orderType: req.body.orderType || req.body.order_type || 'dine-in',
+    paymentMethod: getOptionalPaymentMethod(req.body),
+    notes: getOptionalNotes(req.body) ?? '',
+  };
+
+  if (normalizedOrder.orderType === 'dine-in' && !normalizedOrder.tableId) {
+    return sendError(res, 400, 'Table is required for dine-in orders');
+  }
+
+  const order = await OrderService.createOrder(
+    req.restaurantId || req.user?.restaurantId,
+    normalizedOrder
+  );
 
   return sendSuccess(res, 201, order, 'Order created successfully');
+});
+
+export const getActiveOrderByTable = asyncHandler(async (req, res) => {
+  const { tableId } = req.params;
+  const order = await OrderService.getActiveOrderByTable(req.restaurantId, tableId);
+
+  return sendSuccess(
+    res,
+    200,
+    order,
+    order ? 'Active table order fetched successfully' : 'No active table order found'
+  );
 });
 
 export const getOrderById = asyncHandler(async (req, res) => {
@@ -32,6 +132,54 @@ export const getOrders = asyncHandler(async (req, res) => {
   return sendSuccess(res, 200, result, 'Orders fetched successfully');
 });
 
+export const getActiveOrders = asyncHandler(async (req, res) => {
+  const orders = await OrderService.getActiveOrders(req.user.restaurantId);
+  return sendSuccess(res, 200, orders, 'Active orders fetched successfully');
+});
+
+export const getOpenBills = asyncHandler(async (req, res) => {
+  const orders = await OrderService.getOpenBills(req.user.restaurantId);
+  return sendSuccess(res, 200, orders, 'Open bills fetched successfully');
+});
+
+export const cancelPendingBills = asyncHandler(async (req, res) => {
+  const result = await OrderService.cancelPendingBills(req.user.restaurantId, req.body.reason);
+  return sendSuccess(res, 200, result, 'Pending bills cancelled successfully');
+});
+
+export const updateOrder = asyncHandler(async (req, res) => {
+  const { orderId } = req.params;
+  const normalizedOrder = {
+    tableId: getTableIdFromBody(req.body),
+    items: (req.body.items || []).map((item) => ({
+      menuItemId: item.menuItemId || item.itemId || item.id,
+      quantity: item.quantity || item.qty,
+      unitPrice: item.unitPrice ?? item.price ?? 0,
+      specialInstructions: item.specialInstructions || '',
+      itemNote: item.itemNote || item.note || item.specialInstructions || '',
+      modifiers: item.modifiers || [],
+      name: item.name || '',
+    })),
+    totalAmount: getOptionalTotalAmount(req.body),
+    orderType: req.body.orderType || req.body.order_type || undefined,
+    paymentMethod: getOptionalPaymentMethod(req.body),
+    notes: getOptionalNotes(req.body),
+  };
+
+  if (normalizedOrder.orderType === 'dine-in' && normalizedOrder.tableId === null) {
+    return sendError(res, 400, 'Table is required for dine-in orders');
+  }
+
+  const order = await OrderService.updateOrder(req.restaurantId, orderId, normalizedOrder);
+  return sendSuccess(res, 200, order, 'Order updated successfully');
+});
+
+export const sendOrderToKitchen = asyncHandler(async (req, res) => {
+  const { orderId } = req.params;
+  const result = await OrderService.sendOrderToKitchen(req.restaurantId, orderId);
+  return sendSuccess(res, 200, result, 'Order sent to kitchen successfully');
+});
+
 export const updateOrderStatus = asyncHandler(async (req, res) => {
   const { orderId } = req.params;
   const { status, cancelReason } = req.body;
@@ -44,6 +192,18 @@ export const updateOrderStatus = asyncHandler(async (req, res) => {
   );
 
   return sendSuccess(res, 200, order, 'Order status updated successfully');
+});
+
+export const settleOrder = asyncHandler(async (req, res) => {
+  const { orderId } = req.params;
+
+  const settlement = await OrderService.settleOrder(req.restaurantId, orderId, {
+    method: getOptionalPaymentMethod(req.body),
+    amountReceived: getOptionalAmountReceived(req.body),
+    paymentNote: getOptionalPaymentNote(req.body) ?? '',
+  });
+
+  return sendSuccess(res, 200, settlement, 'Order settled successfully');
 });
 
 export const getDailyRevenue = asyncHandler(async (req, res) => {

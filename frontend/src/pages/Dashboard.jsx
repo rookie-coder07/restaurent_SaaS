@@ -1,7 +1,7 @@
 import { BarChart3, Calendar, Loader, TrendingUp, Users } from 'lucide-react';
 import { useApi } from '../hooks/useApi';
 import { restaurantAPI, orderAPI, tableAPI } from '../services/apiEndpoints';
-import { formatCurrency, formatDate } from '../utils/formatters';
+import { formatCurrency, formatDate, formatDisplayOrderNumber } from '../utils/formatters';
 import Card from '../components/common/Card';
 import StatCard from '../components/common/StatCard';
 import Skeleton from '../components/common/Skeleton';
@@ -11,7 +11,7 @@ import ResponsiveGrid from '../components/common/ResponsiveGrid';
 export default function Dashboard() {
   const { data: profile, loading } = useApi(restaurantAPI.getProfile);
   const { data: ordersData = {} } = useApi(() => orderAPI.getOrders({ limit: 20 }));
-  const { data: staffData = {} } = useApi(() => restaurantAPI.getStaff(100, 0));
+  const { data: staffData = {} } = useApi(() => restaurantAPI.getStaff({ limit: 100, skip: 0, isActive: true }));
   const { data: tablesData = {} } = useApi(() => tableAPI.getTables({}));
 
   const orders = ordersData?.items || [];
@@ -111,7 +111,7 @@ export default function Dashboard() {
                   className="flex w-full flex-col gap-3 rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card-muted)] p-5 sm:flex-row sm:items-center sm:justify-between"
                 >
                   <div className="min-w-0">
-                    <p className="text-sm font-semibold text-[var(--text-primary)]">Order #{order.id?.slice(-8)}</p>
+                    <p className="text-sm font-semibold text-[var(--text-primary)]">{formatDisplayOrderNumber(order)}</p>
                     <p className="mt-1 text-sm text-[var(--text-secondary)]">
                       Table {order.tableNumber || 'N/A'} • {formatDate(order.createdAt)}
                     </p>

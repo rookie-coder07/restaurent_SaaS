@@ -198,6 +198,10 @@ export class AuthService {
         throw new Error('User account is inactive');
       }
 
+      if (user.role === 'manager') {
+        throw new Error('Manager role has been removed. Create a POS Staff or KOT Staff account instead.');
+      }
+
       const accessToken = this.generateAccessToken(
         user.id,
         user.restaurant_id,

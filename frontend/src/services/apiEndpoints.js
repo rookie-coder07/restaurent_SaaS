@@ -14,7 +14,14 @@ export const restaurantAPI = {
   updateProfile: (data) => api.put('/v1/restaurants/profile', data),
   updateSettings: (data) => api.put('/v1/restaurants/settings', data),
   createStaff: (data) => api.post('/v1/restaurants/staff', data),
-  getStaff: (limit, skip) => api.get('/v1/restaurants/staff', { params: { limit, skip } }),
+  getStaff: (filtersOrLimit = {}, skip) => {
+    const params =
+      typeof filtersOrLimit === 'object'
+        ? filtersOrLimit
+        : { limit: filtersOrLimit, skip };
+
+    return api.get('/v1/restaurants/staff', { params });
+  },
   deactivateStaff: (staffId) => api.delete(`/v1/restaurants/staff/${staffId}`),
 };
 
@@ -36,15 +43,25 @@ export const menuAPI = {
 export const orderAPI = {
   createOrder: (data) => api.post('/v1/orders', data),
   getOrders: (filters) => api.get('/v1/orders', { params: filters }),
+  getActiveOrders: () => api.get('/v1/orders/active'),
+  getOpenBills: () => api.get('/v1/orders/open'),
+  cancelPendingBills: (data) => api.post('/v1/orders/cancel-pending', data),
+  getActiveOrderForTable: (tableId) => api.get(`/v1/orders/table/${tableId}/active`),
   getOrder: (orderId) => api.get(`/v1/orders/${orderId}`),
+  updateOrder: (orderId, data) => api.put(`/v1/orders/${orderId}`, data),
+  sendToKitchen: (orderId) => api.post(`/v1/orders/${orderId}/send-to-kitchen`),
+  settleOrder: (orderId, data) => api.post(`/v1/orders/${orderId}/settle`, data),
   updateStatus: (orderId, data) => api.put(`/v1/orders/${orderId}/status`, data),
+  updateKitchenStatus: (orderId, data) => api.patch(`/v1/orders/${orderId}/status`, data),
 };
 
 export const kitchenAPI = {
   getActiveOrders: () => api.get('/v1/kitchen/orders'),
   getAllOrders: (filters) => api.get('/v1/kitchen/orders/all', { params: filters }),
   getOrderDetail: (orderId) => api.get(`/v1/kitchen/orders/${orderId}`),
-  updateStatus: (orderId, data) => api.put(`/v1/kitchen/orders/${orderId}/status`, data),
+  updateStatus: (orderId, ticketId, data) => api.put(`/v1/kitchen/orders/${orderId}/tickets/${ticketId}/status`, data),
+  reprintTicket: (orderId, ticketId) => api.post(`/v1/kitchen/orders/${orderId}/tickets/${ticketId}/reprint`),
+  refireTicket: (orderId, ticketId) => api.post(`/v1/kitchen/orders/${orderId}/tickets/${ticketId}/refire`),
 };
 
 export const tableAPI = {
