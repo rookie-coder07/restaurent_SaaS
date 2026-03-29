@@ -261,7 +261,7 @@ export default function CustomerMenu() {
       const createdOrder = response.data?.data;
 
       setOrderStatus('success');
-      setOrderMessage('Order placed successfully! The kitchen will start preparing your food.');
+      setOrderMessage('Order placed successfully! A waiter will review it shortly before it is sent to the kitchen.');
       removeCart(cartKey);
       setShowCart(false);
 

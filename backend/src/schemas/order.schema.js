@@ -41,7 +41,7 @@ export const updateOrderSchema = createOrderSchema;
 
 export const updateOrderStatusSchema = Joi.object({
   status: Joi.string()
-    .valid('pending', 'preparing', 'ready', 'served', 'cancelled')
+    .valid('awaiting_waiter_approval', 'pending', 'preparing', 'ready', 'served', 'cancelled')
     .required(),
   cancelReason: Joi.string().trim().max(200).when('status', {
     is: 'cancelled',

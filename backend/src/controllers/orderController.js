@@ -83,6 +83,7 @@ export const createOrder = asyncHandler(async (req, res) => {
     orderType: req.body.orderType || req.body.order_type || 'dine-in',
     paymentMethod: getOptionalPaymentMethod(req.body),
     notes: getOptionalNotes(req.body) ?? '',
+    requiresWaiterApproval: !req.user,
   };
 
   if (normalizedOrder.orderType === 'dine-in' && !normalizedOrder.tableId) {

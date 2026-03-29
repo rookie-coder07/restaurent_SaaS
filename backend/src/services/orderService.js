@@ -9,9 +9,9 @@ import {
 } from '../utils/kotMetadata.js';
 
 export class OrderService {
-  static ACTIVE_ORDER_STATUSES = ['pending', 'preparing', 'ready', 'in_progress'];
+  static ACTIVE_ORDER_STATUSES = ['awaiting_waiter_approval', 'pending', 'preparing', 'ready', 'in_progress'];
 
-  static OPEN_BILL_STATUSES = ['pending', 'preparing', 'ready', 'served', 'in_progress'];
+  static OPEN_BILL_STATUSES = ['awaiting_waiter_approval', 'pending', 'preparing', 'ready', 'served', 'in_progress'];
 
   static CLOSED_ORDER_STATUSES = ['completed'];
 
@@ -542,6 +542,7 @@ export class OrderService {
 
       const normalizedItems = await this.validateOrderItems(finalRestaurantId, orderData.items);
       const computedTotalAmount = this.computeOrderTotal(normalizedItems);
+      const initialStatus = orderData.requiresWaiterApproval ? 'awaiting_waiter_approval' : 'pending';
       const initialKotMeta = {
         lineDetails: this.buildLineDetailsMap(normalizedItems),
         kitchen: {
@@ -555,7 +556,7 @@ export class OrderService {
         .insert([{
           restaurant_id: finalRestaurantId,
           table_id: orderData.tableId,
-          status: 'pending',
+          status: initialStatus,
           total_amount: Number(orderData.totalAmount ?? computedTotalAmount ?? 0),
           payment_method: this.normalizePaymentMethod(orderData.paymentMethod) || 'cash',
           payment_status: 'unpaid',
@@ -997,11 +998,13 @@ export class OrderService {
         throw new Error('Cancellation reason is required');
       }
 
+      const cancellableStatuses = ['awaiting_waiter_approval', 'pending'];
+
       const { data: pendingOrders, error: pendingOrdersError } = await supabase
         .from('orders')
         .select('id, table_id, notes, payment_status')
         .eq('restaurant_id', restaurantId)
-        .eq('status', 'pending');
+        .in('status', cancellableStatuses);
 
       if (pendingOrdersError) throw pendingOrdersError;
 
@@ -1043,7 +1046,7 @@ export class OrderService {
         Array.from(touchedTableIds).map((tableId) => TableService.syncTableLifecycle(restaurantId, tableId))
       );
 
-      logger.info(`Bulk cancelled ${cancellableOrders.length} pending bills for restaurant ${restaurantId}`);
+      logger.info(`Bulk cancelled ${cancellableOrders.length} unapproved/pending bills for restaurant ${restaurantId}`);
 
       return {
         cancelledCount: cancellableOrders.length,

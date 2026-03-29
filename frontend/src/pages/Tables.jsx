@@ -27,7 +27,7 @@ import Toast from '../components/common/Toast';
 import EmptyState from '../components/common/EmptyState';
 import StatCard from '../components/common/StatCard';
 
-const ACTIVE_ORDER_STATUSES = new Set(['pending', 'preparing', 'ready', 'served']);
+const ACTIVE_ORDER_STATUSES = new Set(['awaiting_waiter_approval', 'pending', 'preparing', 'ready', 'served']);
 
 const TABLE_STATUS_META = {
   available: {

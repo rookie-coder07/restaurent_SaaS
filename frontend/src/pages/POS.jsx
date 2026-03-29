@@ -11,6 +11,18 @@ import Modal from '../components/common/Modal';
 import { formatCurrency, formatDisplayOrderNumber } from '../utils/formatters';
 import { printKitchenTicket } from '../utils/kotPrint';
 
+function formatOrderStatusLabel(status) {
+  if (!status) {
+    return 'Draft';
+  }
+
+  if (status === 'awaiting_waiter_approval') {
+    return 'Awaiting Waiter Approval';
+  }
+
+  return status.replace(/_/g, ' ');
+}
+
 function normalizeId(value) {
   return value?.id || value?._id || '';
 }
@@ -365,6 +377,7 @@ export default function POS() {
     () => cartItems.find((item) => item.id === editingItemId) || null,
     [cartItems, editingItemId]
   );
+  const shouldShowBlockingTableLoader = isLoadingTableOrder && !activeOrder && cartItems.length === 0;
 
   const syncBillingSearchParams = ({ tableId = '', orderId = '' } = {}) => {
     const nextSearchParams = new URLSearchParams(window.location.search);
@@ -899,7 +912,7 @@ export default function POS() {
             ))}
           </div>
         </section>
-      ) : isLoadingTableOrder ? (
+      ) : shouldShowBlockingTableLoader ? (
         <section className="flex min-h-[24rem] items-center justify-center rounded-[2rem] border border-[var(--border-color)] bg-[var(--bg-card)] p-6 shadow-[var(--shadow-card)]">
           <div className="text-center">
             <div className="mx-auto inline-flex h-16 w-16 items-center justify-center rounded-full bg-[var(--color-primary-soft)] text-[var(--color-primary)]">
@@ -926,12 +939,18 @@ export default function POS() {
                   <div className="flex flex-wrap items-center gap-2">
                     <span
                       className={`rounded-full px-3 py-1 text-xs font-bold uppercase tracking-[0.16em] ${
-                        isEditingActiveBill
-                          ? 'bg-amber-500/12 text-amber-600 dark:text-amber-300'
-                          : 'bg-emerald-500/12 text-emerald-600 dark:text-emerald-300'
+                        activeOrder?.status === 'awaiting_waiter_approval'
+                          ? 'bg-sky-500/12 text-sky-700 dark:text-sky-300'
+                          : isEditingActiveBill
+                            ? 'bg-amber-500/12 text-amber-600 dark:text-amber-300'
+                            : 'bg-emerald-500/12 text-emerald-600 dark:text-emerald-300'
                       }`}
                     >
-                      {isEditingActiveBill ? 'Running Bill Reopened' : 'New Bill'}
+                      {activeOrder?.status === 'awaiting_waiter_approval'
+                        ? 'Customer Order Waiting'
+                        : isEditingActiveBill
+                          ? 'Running Bill Reopened'
+                          : 'New Bill'}
                     </span>
                     {isEditingActiveBill ? (
                       <span className="rounded-full bg-[var(--bg-card-muted)] px-3 py-1 text-xs font-bold uppercase tracking-[0.16em] text-[var(--color-primary)]">
@@ -940,15 +959,23 @@ export default function POS() {
                     ) : null}
                   </div>
                   <p className="max-w-2xl text-sm text-[var(--text-secondary)]">
-                    {isEditingActiveBill
-                      ? `${activeOrder.items?.length || 0} saved lines loaded. Keep updating this same bill, and send only the real kitchen delta when new items are added.`
-                      : 'No active order yet for this table. Start a fresh running bill, send it to kitchen when ready, and settle it when the guest is ready to pay.'}
+                    {activeOrder?.status === 'awaiting_waiter_approval'
+                      ? `${activeOrder.items?.length || 0} customer-selected lines are waiting for waiter approval. Review them, make any changes you need, then approve and send the kitchen ticket.`
+                      : isEditingActiveBill
+                        ? `${activeOrder.items?.length || 0} saved lines loaded. Keep updating this same bill, and send only the real kitchen delta when new items are added.`
+                        : 'No active order yet for this table. Start a fresh running bill, send it to kitchen when ready, and settle it when the guest is ready to pay.'}
                   </p>
                   {isEditingActiveBill ? (
                     <div className="flex flex-wrap items-center gap-3 text-sm font-semibold text-[var(--text-secondary)]">
-                      <span>Status: <span className="text-[var(--text-primary)]">{activeOrder.status}</span></span>
+                      <span>Status: <span className="text-[var(--text-primary)]">{formatOrderStatusLabel(activeOrder.status)}</span></span>
                       <span>Total so far: <span className="text-[var(--text-primary)]">{formatCurrency(activeOrder.totalAmount || 0)}</span></span>
                       <span>Payment: <span className="text-[var(--text-primary)]">{activeOrder.paymentStatus || 'unpaid'}</span></span>
+                      {isLoadingTableOrder ? (
+                        <span className="inline-flex items-center gap-2 text-[var(--color-primary)]">
+                          <Loader className="h-4 w-4 animate-spin" />
+                          Refreshing bill
+                        </span>
+                      ) : null}
                     </div>
                   ) : null}
                   {latestKitchenTicket ? (
@@ -1055,11 +1082,15 @@ export default function POS() {
                 success={submitSuccess}
                 submitLabel={isEditingActiveBill ? 'SAVE CHANGES' : 'SAVE RUNNING BILL'}
                 sendToKitchenLabel={
-                  isEditingActiveBill
+                  activeOrder?.status === 'awaiting_waiter_approval'
                     ? hasUnsavedChanges
-                      ? 'SAVE & SEND TO KITCHEN'
-                      : 'SEND TO KITCHEN'
-                    : 'CREATE & SEND TO KITCHEN'
+                      ? 'SAVE & APPROVE FOR KITCHEN'
+                      : 'APPROVE & SEND TO KITCHEN'
+                    : isEditingActiveBill
+                      ? hasUnsavedChanges
+                        ? 'SAVE & SEND TO KITCHEN'
+                        : 'SEND TO KITCHEN'
+                      : 'CREATE & SEND TO KITCHEN'
                 }
                 settleLabel={
                   isEditingActiveBill

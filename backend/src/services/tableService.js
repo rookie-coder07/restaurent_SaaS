@@ -2,7 +2,7 @@ import logger from '../utils/logger.js';
 import supabase from '../config/supabase.js';
 
 export class TableService {
-  static ACTIVE_ORDER_STATUSES = ['pending', 'preparing', 'ready', 'served', 'in_progress'];
+  static ACTIVE_ORDER_STATUSES = ['awaiting_waiter_approval', 'pending', 'preparing', 'ready', 'served', 'in_progress'];
 
   // Helper function to transform snake_case to camelCase
   static transformTable(table) {

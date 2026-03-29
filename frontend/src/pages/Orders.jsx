@@ -13,6 +13,7 @@ import StatCard from '../components/common/StatCard';
 import SortDropdown from '../components/common/SortDropdown';
 
 const STATUS_STYLES = {
+  awaiting_waiter_approval: 'bg-sky-100 text-sky-700',
   pending: 'bg-amber-100 text-amber-700',
   preparing: 'bg-sky-100 text-sky-700',
   ready: 'bg-emerald-100 text-emerald-700',
@@ -190,13 +191,13 @@ export default function Orders() {
       setBulkCancelReason('');
       setSuccess(
         result.cancelledCount > 0
-          ? `${result.cancelledCount} pending bill${result.cancelledCount === 1 ? '' : 's'} cancelled successfully.`
-          : 'No pending bills were available to cancel.'
+          ? `${result.cancelledCount} waiting/pending bill${result.cancelledCount === 1 ? '' : 's'} cancelled successfully.`
+          : 'No waiting or pending bills were available to cancel.'
       );
       await refetchOrders();
       window.setTimeout(() => setSuccess(null), 4000);
     } catch (err) {
-      setError(err.response?.data?.message || 'Failed to cancel pending bills');
+      setError(err.response?.data?.message || 'Failed to cancel waiting/pending bills');
     } finally {
       setIsBulkCancelling(false);
     }
@@ -264,6 +265,7 @@ export default function Orders() {
               className="input"
             >
               <option value="all">All Orders</option>
+              <option value="awaiting_waiter_approval">Waiting for Waiter</option>
               <option value="pending">Pending</option>
               <option value="preparing">Preparing</option>
               <option value="ready">Ready</option>
@@ -372,6 +374,7 @@ export default function Orders() {
                       disabled={order.status === 'completed' || order.status === 'cancelled'}
                       className="input"
                     >
+                      <option value="awaiting_waiter_approval">Waiting for Waiter</option>
                       <option value="pending">Pending</option>
                       <option value="preparing">Preparing</option>
                       <option value="ready">Ready</option>
@@ -558,7 +561,7 @@ export default function Orders() {
       >
         <div className="space-y-4">
           <div className="rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm font-medium text-red-300">
-            This will cancel every unpaid bill that is still in the <strong>pending</strong> state for this restaurant.
+            This will cancel every unpaid bill that is still waiting for waiter approval or still in the <strong>pending</strong> state for this restaurant.
             Preparing, ready, served, and settled bills will not be touched.
           </div>
 
@@ -568,7 +571,7 @@ export default function Orders() {
               value={bulkCancelReason}
               onChange={(event) => setBulkCancelReason(event.target.value)}
               className="input min-h-[110px] resize-y"
-              placeholder="Example: day-end cleanup of stale pending bills."
+              placeholder="Example: day-end cleanup of stale waiting or pending bills."
             />
           </label>
 

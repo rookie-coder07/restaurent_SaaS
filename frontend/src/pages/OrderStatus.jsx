@@ -1,16 +1,29 @@
-import { useSearchParams, useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 import { useApi } from '../hooks/useApi';
 import { customerAPI } from '../services/apiEndpoints';
-import { Clock, Check, AlertCircle, ChefHat, Loader } from 'lucide-react';
+import { Clock, Check, AlertCircle, ChefHat, Loader, UserCheck } from 'lucide-react';
 import { formatDisplayOrderNumber } from '../utils/formatters';
 
 const STATUS_STEPS = [
+  { status: 'awaiting_waiter_approval', label: 'Waiting for Waiter', icon: UserCheck },
   { status: 'pending', label: 'Order Received', icon: Clock },
   { status: 'preparing', label: 'Preparing', icon: ChefHat },
   { status: 'ready', label: 'Ready to Serve', icon: Check },
   { status: 'served', label: 'Completed', icon: Check },
 ];
+
+function formatStatusLabel(status) {
+  if (status === 'awaiting_waiter_approval') {
+    return 'Waiting for Waiter';
+  }
+
+  if (status === 'completed') {
+    return 'Completed';
+  }
+
+  return status?.charAt(0).toUpperCase() + status?.slice(1);
+}
 
 export default function OrderStatus() {
   const [searchParams] = useSearchParams();
@@ -108,9 +121,10 @@ export default function OrderStatus() {
                 order.status === 'served' || order.status === 'completed' ? 'bg-green-100 text-green-800' :
                 order.status === 'ready' ? 'bg-blue-100 text-blue-800' :
                 order.status === 'preparing' ? 'bg-amber-100 text-amber-800' :
+                order.status === 'awaiting_waiter_approval' ? 'bg-sky-100 text-sky-800' :
                 'bg-gray-100 text-gray-800'
               }`}>
-                {order.status === 'completed' ? 'Completed' : order.status?.charAt(0).toUpperCase() + order.status?.slice(1)}
+                {formatStatusLabel(order.status)}
               </p>
             </div>
           </div>
@@ -208,11 +222,20 @@ export default function OrderStatus() {
             </div>
           )}
 
+          {order.status === 'awaiting_waiter_approval' && (
+            <div className="bg-sky-50 border border-sky-200 rounded-lg p-4">
+              <div className="flex items-center gap-3">
+                <UserCheck className="w-6 h-6 text-sky-600" />
+                <p className="text-sky-800 font-medium">Your order has been sent to the waiter for confirmation.</p>
+              </div>
+            </div>
+          )}
+
           {order.status === 'pending' && (
             <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
               <div className="flex items-center gap-3">
                 <Clock className="w-6 h-6 text-gray-600 animate-pulse" />
-                <p className="text-gray-800 font-medium">Order received. Kitchen is reviewing your order...</p>
+                <p className="text-gray-800 font-medium">Your waiter approved the order. Kitchen has received it.</p>
               </div>
             </div>
           )}

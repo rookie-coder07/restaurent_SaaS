@@ -11,6 +11,7 @@ export const ROLE_PERMISSIONS = {
 };
 
 export const ORDER_STATUS = {
+  AWAITING_WAITER_APPROVAL: 'awaiting_waiter_approval',
   PENDING: 'pending',
   PREPARING: 'preparing',
   READY: 'ready',

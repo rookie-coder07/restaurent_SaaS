@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { X, Download, Printer } from 'lucide-react';
 import QRCode from 'qrcode';
 import { buildQrMenuUrl } from '../utils/frontendUrl';
+import Modal from './common/Modal';
 
 export default function QRCodeModal({ table, restaurantName, onClose }) {
   const canvasRef = useRef(null);
@@ -131,21 +132,13 @@ export default function QRCodeModal({ table, restaurantName, onClose }) {
   });
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="w-full max-w-md overflow-hidden rounded-lg bg-white shadow-lg">
-        <div className="flex items-center justify-between border-b border-gray-200 p-6">
-          <h2 className="text-xl font-bold text-gray-900">
-            Table {table.tableNumber} - QR Code
-          </h2>
-          <button
-            onClick={onClose}
-            className="text-gray-500 hover:text-gray-700"
-          >
-            <X className="h-6 w-6" />
-          </button>
-        </div>
-
-        <div className="flex flex-col items-center p-6">
+    <Modal
+      title={`Table ${table.tableNumber} QR Code`}
+      isOpen={Boolean(table)}
+      onClose={onClose}
+      maxWidth="max-w-xl"
+    >
+      <div className="flex flex-col items-center">
           <div className="relative mb-6 rounded-lg bg-gray-50 p-4">
             <canvas
               ref={canvasRef}
@@ -188,9 +181,9 @@ export default function QRCodeModal({ table, restaurantName, onClose }) {
               </div>
             </>
           )}
-        </div>
+      </div>
 
-        <div className="flex gap-3 border-t border-gray-200 p-6">
+      <div className="flex flex-col gap-3 border-t border-[var(--color-border)] pt-5 sm:flex-row">
           <button
             onClick={handleDownload}
             disabled={loading || !!error}
@@ -213,8 +206,7 @@ export default function QRCodeModal({ table, restaurantName, onClose }) {
           >
             Close
           </button>
-        </div>
       </div>
-    </div>
+    </Modal>
   );
 }
