@@ -23,6 +23,33 @@ import QRTest from './pages/QRTest';
 import NotFound from './pages/NotFound';
 import Settings from './pages/Settings';
 import StaffAccess from './pages/StaffAccess';
+import { useAuthStore } from './context/authStore';
+import { readPortalSession } from './utils/authStorage';
+import { canAccessPortal } from './utils/portalRouting';
+
+function TablesEntryRedirect() {
+  const activePortal = useAuthStore((state) => state.activePortal);
+  const adminUser = readPortalSession('admin')?.user;
+  const posUser = readPortalSession('pos')?.user;
+
+  if (activePortal === 'pos' && canAccessPortal(posUser?.role, 'pos')) {
+    return <Navigate to="/pos/tables" replace />;
+  }
+
+  if (activePortal === 'admin' && canAccessPortal(adminUser?.role, 'admin')) {
+    return <Navigate to="/admin/tables" replace />;
+  }
+
+  if (canAccessPortal(adminUser?.role, 'admin')) {
+    return <Navigate to="/admin/tables" replace />;
+  }
+
+  if (canAccessPortal(posUser?.role, 'pos')) {
+    return <Navigate to="/pos/tables" replace />;
+  }
+
+  return <Navigate to="/admin/tables" replace />;
+}
 
 function App() {
 
@@ -53,6 +80,7 @@ function App() {
             <Route path="/admin/orders" element={<Orders />} />
             <Route path="/admin/staff" element={<Staff />} />
             <Route path="/admin/analytics" element={<Analytics />} />
+            <Route path="/admin/tables" element={<Tables />} />
             <Route path="/admin/qr-tools" element={<QRTest />} />
             <Route path="/admin/settings" element={<Settings />} />
           </Route>
@@ -73,7 +101,7 @@ function App() {
           <Route path="/staff" element={<Navigate to="/admin/staff" replace />} />
           <Route path="/qr-test" element={<Navigate to="/admin/qr-tools" replace />} />
           <Route path="/settings" element={<Navigate to="/admin/settings" replace />} />
-          <Route path="/tables" element={<Navigate to="/pos/tables" replace />} />
+          <Route path="/tables" element={<TablesEntryRedirect />} />
           <Route path="/kitchen" element={<Navigate to="/kot" replace />} />
 
           {/* 404 */}

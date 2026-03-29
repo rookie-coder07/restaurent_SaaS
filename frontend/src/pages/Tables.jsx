@@ -11,7 +11,7 @@ import {
   Trash2,
   Users,
 } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
 import { orderAPI, tableAPI } from '../services/apiEndpoints';
 import { useAuthStore } from '../context/authStore';
@@ -63,17 +63,22 @@ function getEffectiveTableStatus(table, activeOrders) {
 }
 
 export default function Tables() {
+  const location = useLocation();
   const navigate = useNavigate();
   const userRole = useAuthStore((state) => state.user?.role);
+  const currentPortal = location.pathname.startsWith('/admin') ? 'admin' : 'pos';
   const canManageTableConfig = userRole === 'owner';
+  const canOpenBilling = currentPortal === 'pos';
   const {
     data: tablesData = {},
     loading: tablesLoading,
+    error: tablesError,
     refetch: refetchTables,
   } = useApi(() => tableAPI.getTables({ limit: 200 }));
   const {
     data: openBillsData = [],
     loading: openBillsLoading,
+    error: openBillsError,
     refetch: refetchOrders,
   } = useApi(() => orderAPI.getOpenBills());
 
@@ -149,6 +154,7 @@ export default function Tables() {
   const availableCount = enrichedTables.filter((table) => table.effectiveStatus === 'available').length;
   const occupiedCount = enrichedTables.filter((table) => table.effectiveStatus === 'occupied').length;
   const reservedCount = enrichedTables.filter((table) => table.effectiveStatus === 'reserved').length;
+  const loadError = tablesError || openBillsError || null;
 
   const resetTableForm = () => {
     setFormData({
@@ -197,6 +203,11 @@ export default function Tables() {
   }, [refetchOrders, refetchTables]);
 
   const openBilling = (table, order = null) => {
+    if (!canOpenBilling) {
+      setError('Open billing from the POS portal to continue with this table.');
+      return;
+    }
+
     const searchParams = new URLSearchParams({
       tableId: table.id,
     });
@@ -329,6 +340,31 @@ export default function Tables() {
       {success ? <Toast type="success" message={success} /> : null}
       {error ? <Toast type="error" message={error} /> : null}
 
+      {loadError ? (
+        <Card className="border border-rose-500/20 bg-rose-500/10">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-rose-200">Data Load Issue</p>
+              <p className="mt-2 text-sm font-medium text-rose-100">
+                {tablesError
+                  ? `Tables could not be loaded: ${tablesError}`
+                  : `Open bill data could not be loaded: ${openBillsError}`}
+              </p>
+            </div>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                syncData().catch(() => {
+                  // Error state is surfaced above.
+                });
+              }}
+            >
+              Retry
+            </Button>
+          </div>
+        </Card>
+      ) : null}
+
       <Card className="overflow-hidden bg-[radial-gradient(circle_at_top_right,_rgba(14,165,233,0.16),_transparent_35%),var(--color-surface)]">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
@@ -363,17 +399,36 @@ export default function Tables() {
       </div>
 
       {enrichedTables.length === 0 ? (
-        <EmptyState
-          icon={TableProperties}
-          title="No tables configured"
-          description="Create your first table to start managing the floor."
-          action={canManageTableConfig ? (
-            <Button onClick={openCreateForm}>
-              <Plus className="h-4 w-4" />
-              Create First Table
-            </Button>
-          ) : null}
-        />
+        loadError ? (
+          <EmptyState
+            icon={TableProperties}
+            title="Unable to load tables"
+            description={loadError}
+            action={(
+              <Button
+                onClick={() => {
+                  syncData().catch(() => {
+                    // Error state is surfaced above.
+                  });
+                }}
+              >
+                Retry
+              </Button>
+            )}
+          />
+        ) : (
+          <EmptyState
+            icon={TableProperties}
+            title="No tables configured"
+            description="Create your first table to start managing the floor."
+            action={canManageTableConfig ? (
+              <Button onClick={openCreateForm}>
+                <Plus className="h-4 w-4" />
+                Create First Table
+              </Button>
+            ) : null}
+          />
+        )
       ) : (
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
           {enrichedTables.map((table) => {
@@ -449,6 +504,7 @@ export default function Tables() {
               handleDeleteTable(selectedTableData.id);
             }}
             canManageTableConfig={canManageTableConfig}
+            canOpenBilling={canOpenBilling}
           />
         ) : null}
       </Modal>
@@ -567,6 +623,7 @@ function TableDetails({
   onShowQR,
   onDelete,
   canManageTableConfig = false,
+  canOpenBilling = true,
 }) {
   const statusMeta = TABLE_STATUS_META[table.effectiveStatus] || TABLE_STATUS_META.available;
   const activeOrders = [...(table.activeOrders || [])].sort(
@@ -629,10 +686,16 @@ function TableDetails({
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--text-secondary)]">Open Bills</p>
               <p className="mt-2 text-2xl font-black text-[var(--text-primary)]">{activeOrders.length}</p>
             </div>
-            <Button onClick={() => onOpenBilling(currentOrder)}>
-              <Receipt className="h-4 w-4" />
-              {currentOrder ? 'Reopen Bill' : 'Start Billing'}
-            </Button>
+            {canOpenBilling ? (
+              <Button onClick={() => onOpenBilling(currentOrder)}>
+                <Receipt className="h-4 w-4" />
+                {currentOrder ? 'Reopen Bill' : 'Start Billing'}
+              </Button>
+            ) : (
+              <p className="max-w-xs text-right text-xs font-medium text-[var(--text-secondary)]">
+                Open the POS portal to bill this table.
+              </p>
+            )}
           </div>
         </div>
 
@@ -687,9 +750,11 @@ function TableDetails({
                         <p className="text-sm font-semibold text-[var(--text-primary)]">
                           {formatCurrency(order.totalAmount || 0)}
                         </p>
-                        <Button variant="secondary" onClick={() => onOpenBilling(order)}>
-                          Open Bill
-                        </Button>
+                        {canOpenBilling ? (
+                          <Button variant="secondary" onClick={() => onOpenBilling(order)}>
+                            Open Bill
+                          </Button>
+                        ) : null}
                       </div>
                     </div>
                   </div>

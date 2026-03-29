@@ -24,6 +24,10 @@ const PAGE_META = {
     section: 'Analytics',
     title: 'Revenue Analytics',
   },
+  '/admin/tables': {
+    section: 'Tables',
+    title: 'Live Floor View',
+  },
   '/admin/settings': {
     section: 'Settings',
     title: 'Workspace Settings',
