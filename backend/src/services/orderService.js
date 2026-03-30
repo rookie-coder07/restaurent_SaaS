@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto';
 import logger from '../utils/logger.js';
 import supabase from '../config/supabase.js';
 import TableService from './tableService.js';
+import InventoryService from './inventoryService.js';
 import {
   appendPublicNote,
   composeNotesWithKotMeta,
@@ -14,6 +15,12 @@ export class OrderService {
   static OPEN_BILL_STATUSES = ['awaiting_waiter_approval', 'pending', 'preparing', 'ready', 'served', 'in_progress'];
 
   static CLOSED_ORDER_STATUSES = ['completed'];
+
+  static ONLINE_SOURCES = ['direct', 'phone', 'website', 'swiggy', 'zomato'];
+
+  static ONLINE_WORKFLOW_STATUSES = ['new', 'accepted', 'rejected', 'preparing', 'ready', 'dispatched'];
+
+  static ONLINE_PAYMENT_STATES = ['pending', 'paid', 'cash_on_delivery', 'failed', 'refunded'];
 
   static normalizeOrderStatus(status) {
     if (!status) {
@@ -129,11 +136,16 @@ export class OrderService {
     const { publicNotes, kotMeta } = splitNotesAndKotMeta(order.notes);
     const lineDetails = kotMeta.lineDetails || {};
     const kitchenTickets = (kotMeta.kitchen?.tickets || []).map((ticket) => this.normalizeKitchenTicket(ticket));
+    const online = this.normalizeOnlineMeta(kotMeta.online, {
+      orderType: order.order_type,
+      paymentStatus: order.payment_status,
+    });
     return {
       id: order.id,
       restaurantId: order.restaurant_id,
       tableId: order.table_id,
       status: normalizedStatus,
+      orderType: online.fulfillmentType || order.order_type || (order.table_id ? 'dine-in' : 'takeaway'),
       totalAmount: order.total_amount,
       total: Number(order.total_amount || 0),
       paymentMethod: order.payment_method,
@@ -173,6 +185,7 @@ export class OrderService {
       kitchenTickets,
       activeKitchenTickets: kitchenTickets.filter((ticket) => ['pending', 'preparing', 'ready'].includes(ticket.status)),
       kitchenLastSentAt: kitchenTickets.length > 0 ? kitchenTickets[kitchenTickets.length - 1].createdAt : null,
+      online,
     };
   }
 
@@ -486,6 +499,107 @@ export class OrderService {
     return ['cash', 'upi'].includes(normalizedMethod) ? normalizedMethod : null;
   }
 
+  static normalizeOnlineSource(source) {
+    if (source === null) {
+      return null;
+    }
+
+    if (!source) {
+      return undefined;
+    }
+
+    const normalizedSource = String(source).trim().toLowerCase();
+    return this.ONLINE_SOURCES.includes(normalizedSource) ? normalizedSource : null;
+  }
+
+  static normalizeOnlineWorkflowStatus(status, fallback = 'new') {
+    if (status === null) {
+      return null;
+    }
+
+    if (!status) {
+      return fallback;
+    }
+
+    const normalizedStatus = String(status).trim().toLowerCase();
+    return this.ONLINE_WORKFLOW_STATUSES.includes(normalizedStatus) ? normalizedStatus : fallback;
+  }
+
+  static normalizeOnlinePaymentState(value, fallback = 'pending') {
+    if (value === null) {
+      return null;
+    }
+
+    if (!value) {
+      return fallback;
+    }
+
+    const normalizedValue = String(value).trim().toLowerCase();
+    return this.ONLINE_PAYMENT_STATES.includes(normalizedValue) ? normalizedValue : fallback;
+  }
+
+  static normalizeOnlineMeta(online = {}, context = {}) {
+    const inferredSource =
+      this.normalizeOnlineSource(online?.source) ??
+      (context.orderType && context.orderType !== 'dine-in' ? 'direct' : null);
+    const fulfillmentType = ['delivery', 'takeaway'].includes(String(online?.fulfillmentType || '').trim().toLowerCase())
+      ? String(online.fulfillmentType).trim().toLowerCase()
+      : context.orderType && context.orderType !== 'dine-in'
+        ? context.orderType
+        : null;
+    const inferredPaymentState =
+      online?.paymentState !== undefined && online?.paymentState !== null
+        ? this.normalizeOnlinePaymentState(online.paymentState)
+        : context.paymentStatus === 'paid'
+          ? 'paid'
+          : inferredSource
+            ? 'pending'
+            : null;
+
+    return {
+      source: inferredSource,
+      fulfillmentType,
+      workflowStatus: inferredSource ? this.normalizeOnlineWorkflowStatus(online?.workflowStatus, 'new') : null,
+      promisedAt: this.normalizeTimestamp(online?.promisedAt || null),
+      paymentState: inferredPaymentState,
+      customerName: String(online?.customerName || '').trim(),
+      customerPhone: String(online?.customerPhone || '').trim(),
+      customerAddress: String(online?.customerAddress || '').trim(),
+      channelOrderId: String(online?.channelOrderId || '').trim(),
+      acceptedAt: this.normalizeTimestamp(online?.acceptedAt || null),
+      rejectedAt: this.normalizeTimestamp(online?.rejectedAt || null),
+      readyAt: this.normalizeTimestamp(online?.readyAt || null),
+      dispatchedAt: this.normalizeTimestamp(online?.dispatchedAt || null),
+    };
+  }
+
+  static mergeOnlineMeta(existingOnline = {}, nextOnline = {}, context = {}) {
+    const baseOnline = this.normalizeOnlineMeta(existingOnline, context);
+    const mergedOnline = {
+      ...baseOnline,
+      ...(nextOnline || {}),
+    };
+
+    return this.normalizeOnlineMeta(mergedOnline, context);
+  }
+
+  static mapOnlineWorkflowToOrderStatus(workflowStatus, currentStatus) {
+    switch (workflowStatus) {
+      case 'accepted':
+        return currentStatus === 'awaiting_waiter_approval' ? 'pending' : currentStatus || 'pending';
+      case 'preparing':
+        return 'preparing';
+      case 'ready':
+        return 'ready';
+      case 'dispatched':
+        return 'served';
+      case 'rejected':
+        return 'cancelled';
+      default:
+        return currentStatus;
+    }
+  }
+
   static appendOrderNote(existingNotes = '', noteToAppend = '') {
     return appendPublicNote(existingNotes, noteToAppend);
   }
@@ -543,8 +657,13 @@ export class OrderService {
       const normalizedItems = await this.validateOrderItems(finalRestaurantId, orderData.items);
       const computedTotalAmount = this.computeOrderTotal(normalizedItems);
       const initialStatus = orderData.requiresWaiterApproval ? 'awaiting_waiter_approval' : 'pending';
+      const initialOnlineMeta = this.normalizeOnlineMeta(orderData.online, {
+        orderType: orderData.orderType,
+        paymentStatus: 'unpaid',
+      });
       const initialKotMeta = {
         lineDetails: this.buildLineDetailsMap(normalizedItems),
+        online: initialOnlineMeta,
         kitchen: {
           lastSentSnapshot: [],
           tickets: [],
@@ -847,8 +966,15 @@ export class OrderService {
         ? Number((amountReceived - totalAmount).toFixed(2))
         : 0;
 
-      const notes = this.appendOrderNote(
-        existingOrder.notes,
+      const { publicNotes, kotMeta } = splitNotesAndKotMeta(existingOrder.notes);
+      const nextNotes = this.appendOrderNote(
+        composeNotesWithKotMeta(publicNotes, {
+          ...kotMeta,
+          online: this.mergeOnlineMeta(kotMeta.online, { paymentState: 'paid' }, {
+            orderType: kotMeta.online?.fulfillmentType || (existingOrder.table_id ? 'dine-in' : 'takeaway'),
+            paymentStatus: 'paid',
+          }),
+        }),
         this.formatSettlementNote({
           method,
           amountReceived,
@@ -863,7 +989,7 @@ export class OrderService {
           status: 'completed',
           payment_method: method,
           payment_status: 'paid',
-          notes,
+          notes: nextNotes,
           updated_at: new Date().toISOString(),
         })
         .eq('id', orderId)
@@ -1270,7 +1396,7 @@ export class OrderService {
     try {
       const { data: existingOrder, error: existingOrderError } = await supabase
         .from('orders')
-        .select('id, restaurant_id, table_id, status, notes, payment_method')
+        .select('id, restaurant_id, table_id, status, notes, payment_method, payment_status')
         .eq('id', orderId)
         .eq('restaurant_id', restaurantId)
         .single();
@@ -1288,9 +1414,14 @@ export class OrderService {
       const resolvedTableId =
         orderData.tableId !== undefined ? orderData.tableId : existingOrder.table_id;
       const { publicNotes: existingPublicNotes, kotMeta: existingKotMeta } = splitNotesAndKotMeta(existingOrder.notes);
+      const mergedOnlineMeta = this.mergeOnlineMeta(existingKotMeta.online, orderData.online, {
+        orderType: orderData.orderType || existingKotMeta.online?.fulfillmentType || (existingOrder.table_id ? 'dine-in' : 'takeaway'),
+        paymentStatus: existingOrder.payment_status,
+      });
       const nextKotMeta = {
         ...existingKotMeta,
         lineDetails: this.buildLineDetailsMap(normalizedItems),
+        online: mergedOnlineMeta,
       };
 
       const { data: existingOrderItems, error: existingItemsError } = await supabase
@@ -1364,6 +1495,132 @@ export class OrderService {
       return await this.getOrderById(restaurantId, orderId);
     } catch (error) {
       logger.error('Update order error:', error);
+      throw error;
+    }
+  }
+
+  static async getOnlineOrderInbox(restaurantId, filters = {}) {
+    try {
+      const { data: orders, error } = await supabase
+        .from('orders')
+        .select(`
+          *,
+          order_items (
+            id,
+            menu_item_id,
+            quantity,
+            unit_price,
+            menu_items (
+              name,
+              preparation_time
+            )
+          ),
+          tables!table_id (
+            table_number
+          )
+        `)
+        .eq('restaurant_id', restaurantId)
+        .neq('status', 'completed')
+        .order('updated_at', { ascending: false })
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        throw error;
+      }
+
+      const transformedOrders = await this.attachDisplayNumbers(
+        restaurantId,
+        (orders || []).map((order) => ({
+          ...this.transformOrder(order),
+          tableNumber: order.tables?.table_number || null,
+          table: order.tables,
+        }))
+      );
+
+      return transformedOrders.filter((order) => {
+        const sourceMatches = filters.source
+          ? order.online?.source === String(filters.source).trim().toLowerCase()
+          : true;
+        const statusMatches = filters.status
+          ? order.online?.workflowStatus === String(filters.status).trim().toLowerCase()
+          : order.online?.source;
+
+        return Boolean(order.online?.source) && sourceMatches && statusMatches;
+      });
+    } catch (error) {
+      logger.error('Get online order inbox error:', error);
+      throw error;
+    }
+  }
+
+  static async updateOnlineOrder(restaurantId, orderId, updates = {}) {
+    try {
+      const rawOrder = await this.fetchOrderRecord(restaurantId, orderId);
+      const { publicNotes, kotMeta } = splitNotesAndKotMeta(rawOrder.notes);
+      const existingOnline = this.normalizeOnlineMeta(kotMeta.online, {
+        orderType: kotMeta.online?.fulfillmentType || (rawOrder.table_id ? 'dine-in' : 'takeaway'),
+        paymentStatus: rawOrder.payment_status,
+      });
+
+      if (!existingOnline.source && !updates.source) {
+        throw new Error('Only online orders can be updated from the inbox');
+      }
+
+      const now = new Date().toISOString();
+      const workflowStatus = updates.workflowStatus
+        ? this.normalizeOnlineWorkflowStatus(updates.workflowStatus, existingOnline.workflowStatus || 'new')
+        : existingOnline.workflowStatus;
+      const nextOnline = this.mergeOnlineMeta(existingOnline, {
+        source: updates.source,
+        fulfillmentType: existingOnline.fulfillmentType || (rawOrder.table_id ? 'dine-in' : 'takeaway'),
+        promisedAt: updates.promisedAt,
+        paymentState: updates.paymentState,
+        customerName: updates.customerName,
+        customerPhone: updates.customerPhone,
+        customerAddress: updates.customerAddress,
+        channelOrderId: updates.channelOrderId,
+        workflowStatus,
+        acceptedAt: workflowStatus === 'accepted' ? existingOnline.acceptedAt || now : existingOnline.acceptedAt,
+        rejectedAt: workflowStatus === 'rejected' ? now : existingOnline.rejectedAt,
+        readyAt: workflowStatus === 'ready' ? now : existingOnline.readyAt,
+        dispatchedAt: workflowStatus === 'dispatched' ? now : existingOnline.dispatchedAt,
+      }, {
+        orderType: existingOnline.fulfillmentType || (rawOrder.table_id ? 'dine-in' : 'takeaway'),
+        paymentStatus: rawOrder.payment_status,
+      });
+
+      const nextStatus = this.mapOnlineWorkflowToOrderStatus(workflowStatus, this.normalizeOrderStatus(rawOrder.status));
+      const nextNotes = composeNotesWithKotMeta(
+        workflowStatus === 'rejected'
+          ? this.appendOrderNote(publicNotes, this.formatCancellationNote('online order rejected', 'online-inbox'))
+          : publicNotes,
+        {
+          ...kotMeta,
+          online: nextOnline,
+        }
+      );
+
+      const { error: updateError } = await supabase
+        .from('orders')
+        .update({
+          status: nextStatus,
+          notes: nextNotes,
+          updated_at: now,
+        })
+        .eq('id', orderId)
+        .eq('restaurant_id', restaurantId);
+
+      if (updateError) {
+        throw updateError;
+      }
+
+      if (rawOrder.table_id) {
+        await TableService.syncTableLifecycle(restaurantId, rawOrder.table_id);
+      }
+
+      return await this.getOrderById(restaurantId, orderId);
+    } catch (error) {
+      logger.error('Update online order error:', error);
       throw error;
     }
   }
@@ -1618,6 +1875,22 @@ export class OrderService {
         items: ticketItems,
       });
 
+      const consumptionItems = ticketItems
+        .filter((item) => item.action === 'add')
+        .map((item) => ({
+          menuItemId: item.menuItemId,
+          quantity: item.quantity,
+          name: item.name,
+        }));
+
+      if (consumptionItems.length > 0) {
+        await InventoryService.consumeMenuItems(restaurantId, consumptionItems, {
+          source: 'send_to_kitchen',
+          referenceId: `${orderId}:${nextTicket.id}`,
+          reason: 'Recipe-based auto deduction on kitchen send',
+        });
+      }
+
       const nextKotMeta = {
         ...kotMeta,
         lineDetails: this.buildLineDetailsMap(transformedOrder.items),
@@ -1695,6 +1968,25 @@ export class OrderService {
       };
       const nextTickets = existingTickets.map((ticket, index) => (index === ticketIndex ? targetTicket : ticket));
       const derivedOrderStatus = this.deriveOrderStatusFromTickets(nextTickets, rawOrder.status);
+      const existingOnline = this.normalizeOnlineMeta(kotMeta.online, {
+        orderType: kotMeta.online?.fulfillmentType || (rawOrder.table_id ? 'dine-in' : 'takeaway'),
+        paymentStatus: rawOrder.payment_status,
+      });
+      const nextOnlineWorkflowStatus = existingOnline.source
+        ? normalizedStatus === 'served'
+          ? 'dispatched'
+          : normalizedStatus
+        : existingOnline.workflowStatus;
+      const nextOnline = existingOnline.source
+        ? this.mergeOnlineMeta(existingOnline, {
+            workflowStatus: nextOnlineWorkflowStatus,
+            readyAt: nextOnlineWorkflowStatus === 'ready' ? now : existingOnline.readyAt,
+            dispatchedAt: nextOnlineWorkflowStatus === 'dispatched' ? now : existingOnline.dispatchedAt,
+          }, {
+            orderType: existingOnline.fulfillmentType || (rawOrder.table_id ? 'dine-in' : 'takeaway'),
+            paymentStatus: rawOrder.payment_status,
+          })
+        : existingOnline;
 
       const { error: updateError } = await supabase
         .from('orders')
@@ -1702,6 +1994,7 @@ export class OrderService {
           status: derivedOrderStatus,
           notes: composeNotesWithKotMeta(publicNotes, {
             ...kotMeta,
+            online: nextOnline,
             kitchen: {
               ...kotMeta.kitchen,
               tickets: nextTickets,
@@ -1825,6 +2118,19 @@ export class OrderService {
       });
       const nextTickets = [...existingTickets, nextTicket];
       const nextStatus = this.deriveOrderStatusFromTickets(nextTickets, rawOrder.status);
+      const refireItems = (nextTicket.items || []).map((item) => ({
+        menuItemId: item.menuItemId,
+        quantity: item.quantity,
+        name: item.name,
+      }));
+
+      if (refireItems.length > 0) {
+        await InventoryService.consumeMenuItems(restaurantId, refireItems, {
+          source: 'refire_ticket',
+          referenceId: `${orderId}:${nextTicket.id}`,
+          reason: 'Recipe-based auto deduction on kitchen refire',
+        });
+      }
 
       const { error: updateError } = await supabase
         .from('orders')

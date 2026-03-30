@@ -1,4 +1,4 @@
-import { LayoutGrid, Receipt, TableProperties } from 'lucide-react';
+import { LayoutGrid, ListOrdered, Receipt, TableProperties } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
 import PortalLogoutButton from '../common/PortalLogoutButton';
 import ThemeToggle from '../common/ThemeToggle';
@@ -8,6 +8,11 @@ const POS_NAV_ITEMS = [
     href: '/pos',
     label: 'Billing',
     icon: Receipt,
+  },
+  {
+    href: '/pos/orders',
+    label: 'Orders',
+    icon: ListOrdered,
   },
   {
     href: '/pos/tables',

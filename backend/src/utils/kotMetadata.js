@@ -5,6 +5,21 @@ export function createEmptyKotMeta() {
   return {
     version: 1,
     lineDetails: {},
+    online: {
+      source: null,
+      fulfillmentType: null,
+      workflowStatus: null,
+      promisedAt: null,
+      paymentState: null,
+      customerName: '',
+      customerPhone: '',
+      customerAddress: '',
+      channelOrderId: '',
+      acceptedAt: null,
+      rejectedAt: null,
+      readyAt: null,
+      dispatchedAt: null,
+    },
     kitchen: {
       lastSentSnapshot: [],
       tickets: [],
@@ -16,6 +31,21 @@ export function normalizeKotMeta(meta = {}) {
   return {
     version: Number(meta?.version || 1),
     lineDetails: meta?.lineDetails && typeof meta.lineDetails === 'object' ? meta.lineDetails : {},
+    online: {
+      source: meta?.online?.source || null,
+      fulfillmentType: meta?.online?.fulfillmentType || null,
+      workflowStatus: meta?.online?.workflowStatus || null,
+      promisedAt: meta?.online?.promisedAt || null,
+      paymentState: meta?.online?.paymentState || null,
+      customerName: meta?.online?.customerName || '',
+      customerPhone: meta?.online?.customerPhone || '',
+      customerAddress: meta?.online?.customerAddress || '',
+      channelOrderId: meta?.online?.channelOrderId || '',
+      acceptedAt: meta?.online?.acceptedAt || null,
+      rejectedAt: meta?.online?.rejectedAt || null,
+      readyAt: meta?.online?.readyAt || null,
+      dispatchedAt: meta?.online?.dispatchedAt || null,
+    },
     kitchen: {
       lastSentSnapshot: Array.isArray(meta?.kitchen?.lastSentSnapshot) ? meta.kitchen.lastSentSnapshot : [],
       tickets: Array.isArray(meta?.kitchen?.tickets) ? meta.kitchen.tickets : [],
@@ -66,6 +96,13 @@ function hasKotPayload(kotMeta = {}) {
   const normalized = normalizeKotMeta(kotMeta);
   return (
     Object.keys(normalized.lineDetails).length > 0 ||
+    Object.values(normalized.online).some((value) => {
+      if (typeof value === 'string') {
+        return Boolean(value.trim());
+      }
+
+      return value !== null && value !== undefined;
+    }) ||
     normalized.kitchen.lastSentSnapshot.length > 0 ||
     normalized.kitchen.tickets.length > 0
   );

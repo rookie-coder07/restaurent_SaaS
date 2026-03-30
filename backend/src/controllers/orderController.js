@@ -67,6 +67,98 @@ function getOptionalPaymentNote(body = {}) {
   return undefined;
 }
 
+function getOptionalSource(body = {}) {
+  if (Object.prototype.hasOwnProperty.call(body, 'source')) {
+    return body.source;
+  }
+
+  return undefined;
+}
+
+function getOptionalPromisedAt(body = {}) {
+  if (Object.prototype.hasOwnProperty.call(body, 'promisedAt')) {
+    return body.promisedAt;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'promised_at')) {
+    return body.promised_at;
+  }
+
+  return undefined;
+}
+
+function getOptionalPaymentState(body = {}) {
+  if (Object.prototype.hasOwnProperty.call(body, 'paymentState')) {
+    return body.paymentState;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'payment_state')) {
+    return body.payment_state;
+  }
+
+  return undefined;
+}
+
+function getOptionalCustomerName(body = {}) {
+  if (Object.prototype.hasOwnProperty.call(body, 'customerName')) {
+    return body.customerName;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'customer_name')) {
+    return body.customer_name;
+  }
+
+  return undefined;
+}
+
+function getOptionalCustomerPhone(body = {}) {
+  if (Object.prototype.hasOwnProperty.call(body, 'customerPhone')) {
+    return body.customerPhone;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'customer_phone')) {
+    return body.customer_phone;
+  }
+
+  return undefined;
+}
+
+function getOptionalCustomerAddress(body = {}) {
+  if (Object.prototype.hasOwnProperty.call(body, 'customerAddress')) {
+    return body.customerAddress;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'customer_address')) {
+    return body.customer_address;
+  }
+
+  return undefined;
+}
+
+function getOptionalChannelOrderId(body = {}) {
+  if (Object.prototype.hasOwnProperty.call(body, 'channelOrderId')) {
+    return body.channelOrderId;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'channel_order_id')) {
+    return body.channel_order_id;
+  }
+
+  return undefined;
+}
+
+function extractOnlineOrderFields(body = {}) {
+  return {
+    source: getOptionalSource(body),
+    promisedAt: getOptionalPromisedAt(body),
+    paymentState: getOptionalPaymentState(body),
+    customerName: getOptionalCustomerName(body),
+    customerPhone: getOptionalCustomerPhone(body),
+    customerAddress: getOptionalCustomerAddress(body),
+    channelOrderId: getOptionalChannelOrderId(body),
+  };
+}
+
 export const createOrder = asyncHandler(async (req, res) => {
   const normalizedOrder = {
     tableId: getTableIdFromBody(req.body) ?? null,
@@ -84,6 +176,7 @@ export const createOrder = asyncHandler(async (req, res) => {
     paymentMethod: getOptionalPaymentMethod(req.body),
     notes: getOptionalNotes(req.body) ?? '',
     requiresWaiterApproval: !req.user,
+    online: extractOnlineOrderFields(req.body),
   };
 
   if (normalizedOrder.orderType === 'dine-in' && !normalizedOrder.tableId) {
@@ -165,6 +258,7 @@ export const updateOrder = asyncHandler(async (req, res) => {
     orderType: req.body.orderType || req.body.order_type || undefined,
     paymentMethod: getOptionalPaymentMethod(req.body),
     notes: getOptionalNotes(req.body),
+    online: extractOnlineOrderFields(req.body),
   };
 
   if (normalizedOrder.orderType === 'dine-in' && normalizedOrder.tableId === null) {
@@ -205,6 +299,25 @@ export const settleOrder = asyncHandler(async (req, res) => {
   });
 
   return sendSuccess(res, 200, settlement, 'Order settled successfully');
+});
+
+export const getOnlineOrderInbox = asyncHandler(async (req, res) => {
+  const orders = await OrderService.getOnlineOrderInbox(req.restaurantId, {
+    status: req.query.status,
+    source: req.query.source,
+  });
+
+  return sendSuccess(res, 200, orders, 'Online order inbox fetched successfully');
+});
+
+export const updateOnlineOrder = asyncHandler(async (req, res) => {
+  const { orderId } = req.params;
+  const onlineOrder = await OrderService.updateOnlineOrder(req.restaurantId, orderId, {
+    workflowStatus: req.body.workflowStatus || req.body.workflow_status,
+    ...extractOnlineOrderFields(req.body),
+  });
+
+  return sendSuccess(res, 200, onlineOrder, 'Online order updated successfully');
 });
 
 export const getDailyRevenue = asyncHandler(async (req, res) => {

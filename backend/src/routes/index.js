@@ -7,6 +7,7 @@ import kitchenRoutes from './kitchen.js';
 import tableRoutes from './table.js';
 import analyticsRoutes from './analytics.js';
 import customerRoutes from './customer.js';
+import inventoryRoutes from './inventory.js';
 
 const router = express.Router();
 
@@ -25,6 +26,7 @@ router.use(`/${apiVersion}/orders`, orderRoutes);
 router.use(`/${apiVersion}/kitchen`, kitchenRoutes);
 router.use(`/${apiVersion}/tables`, tableRoutes);
 router.use(`/${apiVersion}/analytics`, analyticsRoutes);
+router.use(`/${apiVersion}/inventory`, inventoryRoutes);
 
 // Health check
 router.get('/health', (req, res) => {

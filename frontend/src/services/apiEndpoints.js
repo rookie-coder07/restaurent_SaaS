@@ -45,10 +45,12 @@ export const orderAPI = {
   getOrders: (filters) => api.get('/v1/orders', { params: filters }),
   getActiveOrders: () => api.get('/v1/orders/active'),
   getOpenBills: () => api.get('/v1/orders/open'),
+  getOnlineInbox: (filters) => api.get('/v1/orders/inbox/online', { params: filters }),
   cancelPendingBills: (data) => api.post('/v1/orders/cancel-pending', data),
   getActiveOrderForTable: (tableId) => api.get(`/v1/orders/table/${tableId}/active`),
   getOrder: (orderId) => api.get(`/v1/orders/${orderId}`),
   updateOrder: (orderId, data) => api.put(`/v1/orders/${orderId}`, data),
+  updateOnlineOrder: (orderId, data) => api.patch(`/v1/orders/${orderId}/online`, data),
   sendToKitchen: (orderId) => api.post(`/v1/orders/${orderId}/send-to-kitchen`),
   settleOrder: (orderId, data) => api.post(`/v1/orders/${orderId}/settle`, data),
   updateStatus: (orderId, data) => api.put(`/v1/orders/${orderId}/status`, data),
@@ -80,6 +82,16 @@ export const analyticsAPI = {
   getMonthlySalesReport: (filters) => api.get('/v1/analytics/monthly-sales', { params: filters }),
   getTopItems: (filters) => api.get('/v1/analytics/top-items', { params: filters }),
   getPeakHours: (date) => api.get('/v1/analytics/peak-hours', { params: { date } }),
+};
+
+export const inventoryAPI = {
+  getItems: () => api.get('/v1/inventory/items'),
+  getSummary: () => api.get('/v1/inventory/summary'),
+  getHistory: (filters) => api.get('/v1/inventory/history', { params: filters }),
+  createItem: (data) => api.post('/v1/inventory/items', data),
+  updateItem: (itemId, data) => api.put(`/v1/inventory/items/${itemId}`, data),
+  addStock: (itemId, data) => api.post(`/v1/inventory/items/${itemId}/add-stock`, data),
+  adjustStock: (itemId, data) => api.post(`/v1/inventory/items/${itemId}/adjust`, data),
 };
 
 export const customerAPI = {

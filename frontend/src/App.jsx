@@ -15,6 +15,7 @@ import Orders from './pages/Orders';
 import KOT from './pages/KOT';
 import Analytics from './pages/Analytics';
 import POS from './pages/POS';
+import POSOrders from './pages/POSOrders';
 import CustomerMenu from './pages/CustomerMenu';
 import OrderStatus from './pages/OrderStatus';
 import Tables from './pages/Tables';
@@ -22,6 +23,7 @@ import Staff from './pages/Staff';
 import QRTest from './pages/QRTest';
 import NotFound from './pages/NotFound';
 import Settings from './pages/Settings';
+import Inventory from './pages/Inventory';
 import StaffAccess from './pages/StaffAccess';
 import { useAuthStore } from './context/authStore';
 import { readPortalSession } from './utils/authStorage';
@@ -78,6 +80,7 @@ function App() {
             <Route path="/admin" element={<Dashboard />} />
             <Route path="/admin/menu" element={<MenuManagement />} />
             <Route path="/admin/orders" element={<Orders />} />
+            <Route path="/admin/inventory" element={<Inventory />} />
             <Route path="/admin/staff" element={<Staff />} />
             <Route path="/admin/analytics" element={<Analytics />} />
             <Route path="/admin/tables" element={<Tables />} />
@@ -87,6 +90,7 @@ function App() {
 
           <Route element={<ProtectedRoute layout={PosLayout} allowedRoles={['staff']} portal="pos" />}>
             <Route path="/pos" element={<POS />} />
+            <Route path="/pos/orders" element={<POSOrders />} />
             <Route path="/pos/tables" element={<Tables />} />
           </Route>
 

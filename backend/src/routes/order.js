@@ -7,6 +7,7 @@ import {
   cancelPendingBillsSchema,
   createOrderSchema,
   settleOrderSchema,
+  updateOnlineOrderSchema,
   updateOrderSchema,
   updateOrderStatusSchema,
 } from '../schemas/order.schema.js';
@@ -24,11 +25,13 @@ router.use(authMiddleware, tenantIsolation);
 router.get('/table/:tableId/active', checkPermission(['view_orders', 'manage_orders']), orderController.getActiveOrderByTable);
 router.get('/active', checkPermission(['view_orders', 'update_order_status']), orderController.getActiveOrders);
 router.get('/open', checkPermission(['manage_orders', 'view_orders']), orderController.getOpenBills);
+router.get('/inbox/online', checkPermission(['manage_orders', 'view_orders']), orderController.getOnlineOrderInbox);
 router.post('/cancel-pending', checkPermission(['manage_orders']), validateRequest(cancelPendingBillsSchema), orderController.cancelPendingBills);
 router.post('/:orderId/send-to-kitchen', checkPermission(['manage_orders']), orderController.sendOrderToKitchen);
 router.get('/', checkPermission(['manage_orders', 'view_orders']), orderController.getOrders);
 router.get('/:orderId', orderController.getOrderById);
 router.put('/:orderId', checkPermission(['manage_orders']), validateRequest(updateOrderSchema), orderController.updateOrder);
+router.patch('/:orderId/online', checkPermission(['manage_orders', 'update_order_status']), validateRequest(updateOnlineOrderSchema), orderController.updateOnlineOrder);
 router.post('/:orderId/settle', checkPermission(['manage_orders']), validateRequest(settleOrderSchema), orderController.settleOrder);
 
 // Update order status

@@ -1,5 +1,11 @@
 import Joi from 'joi';
 
+const ingredientSchema = Joi.object({
+  itemId: Joi.string().uuid().required(),
+  quantity: Joi.number().positive().precision(4).required(),
+  unit: Joi.string().trim().lowercase().valid('kg', 'g', 'litre', 'ml', 'pieces').required(),
+});
+
 export const createMenuItemSchema = Joi.object({
   categoryId: Joi.string().uuid().required(),
   name: Joi.string().trim().min(2).max(100).required(),
@@ -10,6 +16,7 @@ export const createMenuItemSchema = Joi.object({
     .items(Joi.string())
     .optional()
     .default([]),
+  ingredients: Joi.array().items(ingredientSchema).max(50).optional().default([]),
 }).unknown(true);
 
 export const updateMenuItemSchema = Joi.object({
@@ -22,6 +29,7 @@ export const updateMenuItemSchema = Joi.object({
   tags: Joi.array()
     .items(Joi.string())
     .optional(),
+  ingredients: Joi.array().items(ingredientSchema).max(50).optional(),
 }).unknown(true);
 
 export const createCategorySchema = Joi.object({

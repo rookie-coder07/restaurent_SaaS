@@ -16,6 +16,10 @@ const PAGE_META = {
     section: 'Orders',
     title: 'Order Management',
   },
+  '/admin/inventory': {
+    section: 'Inventory',
+    title: 'Kitchen Stock Control',
+  },
   '/admin/staff': {
     section: 'Staff Access',
     title: 'POS & KOT Staff Access',

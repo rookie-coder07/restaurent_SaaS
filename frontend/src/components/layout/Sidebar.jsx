@@ -2,6 +2,7 @@ import { Link, useLocation } from 'react-router-dom';
 import {
   BarChart3,
   ClipboardList,
+  PackageSearch,
   MenuSquare,
   Sparkles,
   Users,
@@ -17,6 +18,7 @@ const adminMenuItems = [
   { icon: BarChart3, label: 'Dashboard', href: '/admin', roles: ['owner'] },
   { icon: MenuSquare, label: 'Menu', href: '/admin/menu', roles: ['owner'] },
   { icon: ClipboardList, label: 'Orders', href: '/admin/orders', roles: ['owner'] },
+  { icon: PackageSearch, label: 'Inventory', href: '/admin/inventory', roles: ['owner'] },
   { icon: TableProperties, label: 'Tables', href: '/admin/tables', roles: ['owner'] },
   { icon: Users, label: 'Staff Access', href: '/admin/staff', roles: ['owner'] },
   { icon: Sparkles, label: 'Analytics', href: '/admin/analytics', roles: ['owner'] },

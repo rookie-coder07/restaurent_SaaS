@@ -1,6 +1,6 @@
-import { BarChart3, Calendar, Loader, TrendingUp, Users } from 'lucide-react';
+import { AlertTriangle, BarChart3, Calendar, Loader, TrendingUp, Users } from 'lucide-react';
 import { useApi } from '../hooks/useApi';
-import { restaurantAPI, orderAPI, tableAPI } from '../services/apiEndpoints';
+import { restaurantAPI, orderAPI, tableAPI, inventoryAPI } from '../services/apiEndpoints';
 import { formatCurrency, formatDate, formatDisplayOrderNumber } from '../utils/formatters';
 import Card from '../components/common/Card';
 import StatCard from '../components/common/StatCard';
@@ -13,6 +13,7 @@ export default function Dashboard() {
   const { data: ordersData = {} } = useApi(() => orderAPI.getOrders({ limit: 20 }));
   const { data: staffData = {} } = useApi(() => restaurantAPI.getStaff({ limit: 100, skip: 0, isActive: true }));
   const { data: tablesData = {} } = useApi(() => tableAPI.getTables({}));
+  const { data: inventorySummary = {} } = useApi(inventoryAPI.getSummary);
 
   const orders = ordersData?.items || [];
   const staff = staffData?.staff || [];
@@ -24,6 +25,8 @@ export default function Dashboard() {
   const avgOrderValue = todayOrders.length > 0 ? todayRevenue / todayOrders.length : 0;
   const activeUsers = staff.filter((member) => member.status === 'active').length;
   const availableTables = tables.filter((table) => table.status === 'available').length;
+  const lowStockCount = inventorySummary?.lowStockCount || 0;
+  const lowStockItems = inventorySummary?.lowStockItems || [];
 
   if (loading) {
     return (
@@ -84,6 +87,13 @@ export default function Dashboard() {
           value={activeUsers}
           subtitle={`${availableTables} tables available`}
           iconTone="bg-cyan-500/15 text-cyan-400"
+        />
+        <StatCard
+          icon={AlertTriangle}
+          label="Low Stock Alerts"
+          value={lowStockCount}
+          subtitle={lowStockCount > 0 ? 'Needs restock attention' : 'Stock levels look healthy'}
+          iconTone="bg-red-500/15 text-red-400"
         />
       </ResponsiveGrid>
 
@@ -152,6 +162,18 @@ export default function Dashboard() {
               </p>
               <p className="mt-1 text-sm text-[var(--text-secondary)]">
                 Average order value is {formatCurrency(avgOrderValue)} today.
+              </p>
+            </div>
+
+            <div className="rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card-muted)] p-5">
+              <p className="text-sm text-[var(--text-secondary)]">Inventory Alerts</p>
+              <p className="mt-2 text-xl font-semibold text-[var(--text-primary)]">
+                {lowStockCount > 0 ? `${lowStockCount} item${lowStockCount === 1 ? '' : 's'} low` : 'No urgent stock issues'}
+              </p>
+              <p className="mt-1 text-sm text-[var(--text-secondary)]">
+                {lowStockItems.length > 0
+                  ? lowStockItems.slice(0, 2).map((item) => item.name).join(', ')
+                  : 'All tracked items are above their alert threshold.'}
               </p>
             </div>
           </div>

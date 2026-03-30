@@ -1,6 +1,9 @@
 import Joi from 'joi';
 
 const PAYMENT_METHOD_VALUES = ['cash', 'upi'];
+const ONLINE_SOURCE_VALUES = ['direct', 'phone', 'website', 'swiggy', 'zomato'];
+const ONLINE_WORKFLOW_VALUES = ['new', 'accepted', 'rejected', 'preparing', 'ready', 'dispatched'];
+const ONLINE_PAYMENT_STATE_VALUES = ['pending', 'paid', 'cash_on_delivery', 'failed', 'refunded'];
 
 const orderItemSchema = Joi.object({
   menuItemId: Joi.string().uuid().optional(),
@@ -35,6 +38,19 @@ export const createOrderSchema = Joi.object({
   paymentMethod: paymentMethodSchema.optional(),
   payment_method: paymentMethodSchema.optional(),
   notes: Joi.string().trim().max(500).optional().allow(''),
+  source: Joi.string().trim().lowercase().valid(...ONLINE_SOURCE_VALUES).optional().allow(null),
+  promisedAt: Joi.date().iso().optional().allow(null),
+  promised_at: Joi.date().iso().optional().allow(null),
+  paymentState: Joi.string().trim().lowercase().valid(...ONLINE_PAYMENT_STATE_VALUES).optional().allow(null),
+  payment_state: Joi.string().trim().lowercase().valid(...ONLINE_PAYMENT_STATE_VALUES).optional().allow(null),
+  customerName: Joi.string().trim().max(120).optional().allow(''),
+  customer_name: Joi.string().trim().max(120).optional().allow(''),
+  customerPhone: Joi.string().trim().max(30).optional().allow(''),
+  customer_phone: Joi.string().trim().max(30).optional().allow(''),
+  customerAddress: Joi.string().trim().max(300).optional().allow(''),
+  customer_address: Joi.string().trim().max(300).optional().allow(''),
+  channelOrderId: Joi.string().trim().max(120).optional().allow(''),
+  channel_order_id: Joi.string().trim().max(120).optional().allow(''),
 });
 
 export const updateOrderSchema = createOrderSchema;
@@ -57,6 +73,40 @@ export const settleOrderSchema = Joi.object({
   paymentNote: Joi.string().trim().max(200).optional().allow(''),
   payment_note: Joi.string().trim().max(200).optional().allow(''),
 }).or('paymentMethod', 'payment_method');
+
+export const updateOnlineOrderSchema = Joi.object({
+  workflowStatus: Joi.string().trim().lowercase().valid(...ONLINE_WORKFLOW_VALUES).optional(),
+  workflow_status: Joi.string().trim().lowercase().valid(...ONLINE_WORKFLOW_VALUES).optional(),
+  promisedAt: Joi.date().iso().optional().allow(null),
+  promised_at: Joi.date().iso().optional().allow(null),
+  paymentState: Joi.string().trim().lowercase().valid(...ONLINE_PAYMENT_STATE_VALUES).optional().allow(null),
+  payment_state: Joi.string().trim().lowercase().valid(...ONLINE_PAYMENT_STATE_VALUES).optional().allow(null),
+  source: Joi.string().trim().lowercase().valid(...ONLINE_SOURCE_VALUES).optional().allow(null),
+  customerName: Joi.string().trim().max(120).optional().allow(''),
+  customer_name: Joi.string().trim().max(120).optional().allow(''),
+  customerPhone: Joi.string().trim().max(30).optional().allow(''),
+  customer_phone: Joi.string().trim().max(30).optional().allow(''),
+  customerAddress: Joi.string().trim().max(300).optional().allow(''),
+  customer_address: Joi.string().trim().max(300).optional().allow(''),
+  channelOrderId: Joi.string().trim().max(120).optional().allow(''),
+  channel_order_id: Joi.string().trim().max(120).optional().allow(''),
+}).or(
+  'workflowStatus',
+  'workflow_status',
+  'promisedAt',
+  'promised_at',
+  'paymentState',
+  'payment_state',
+  'source',
+  'customerName',
+  'customer_name',
+  'customerPhone',
+  'customer_phone',
+  'customerAddress',
+  'customer_address',
+  'channelOrderId',
+  'channel_order_id'
+);
 
 export const updateKitchenTicketStatusSchema = Joi.object({
   status: Joi.string()

@@ -6,6 +6,8 @@ import { menuAPI, orderAPI, tableAPI } from '../services/apiEndpoints';
 import MenuPanel from '../components/pos/MenuPanel';
 import CartPanel from '../components/pos/CartPanel';
 import OrderControls from '../components/pos/OrderControls';
+import OnlineOrderInbox from '../components/pos/OnlineOrderInbox';
+import OnlineOrderDetailsPanel from '../components/pos/OnlineOrderDetailsPanel';
 import PaymentPanel from '../components/pos/PaymentPanel';
 import Modal from '../components/common/Modal';
 import { formatCurrency, formatDisplayOrderNumber } from '../utils/formatters';
@@ -117,6 +119,69 @@ function buildDraftFromOrder(order) {
   };
 }
 
+function formatDateTimeInputValue(value) {
+  if (!value) {
+    return '';
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return '';
+  }
+
+  const offsetDate = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+  return offsetDate.toISOString().slice(0, 16);
+}
+
+function normalizeOnlineDraft(order = null) {
+  const online = order?.online || {};
+
+  return {
+    source: online.source || 'direct',
+    promisedAt: formatDateTimeInputValue(online.promisedAt),
+    paymentState: online.paymentState || 'pending',
+    customerName: online.customerName || '',
+    customerPhone: online.customerPhone || '',
+    customerAddress: online.customerAddress || '',
+    channelOrderId: online.channelOrderId || '',
+  };
+}
+
+function createOnlineDraftSignature({
+  orderType = '',
+  source = '',
+  promisedAt = '',
+  paymentState = '',
+  customerName = '',
+  customerPhone = '',
+  customerAddress = '',
+  channelOrderId = '',
+} = {}) {
+  if (!orderType || orderType === 'dine-in') {
+    return 'dine-in';
+  }
+
+  return JSON.stringify({
+    orderType,
+    source,
+    promisedAt,
+    paymentState,
+    customerName: customerName.trim(),
+    customerPhone: customerPhone.trim(),
+    customerAddress: customerAddress.trim(),
+    channelOrderId: channelOrderId.trim(),
+  });
+}
+
+function serializePromisedAt(value) {
+  if (!value) {
+    return null;
+  }
+
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
 export default function POS() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { data: menuItemsData = {}, loading: menuLoading, error: menuError } = useApi(() => menuAPI.getItems({ limit: 300 }));
@@ -149,6 +214,17 @@ export default function POS() {
   const [showItemDetailsModal, setShowItemDetailsModal] = useState(false);
   const [itemNoteDraft, setItemNoteDraft] = useState('');
   const [itemModifiersDraft, setItemModifiersDraft] = useState('');
+  const [onlineSource, setOnlineSource] = useState('direct');
+  const [promisedAt, setPromisedAt] = useState('');
+  const [onlinePaymentState, setOnlinePaymentState] = useState('pending');
+  const [customerName, setCustomerName] = useState('');
+  const [customerPhone, setCustomerPhone] = useState('');
+  const [customerAddress, setCustomerAddress] = useState('');
+  const [channelOrderId, setChannelOrderId] = useState('');
+  const [onlineInbox, setOnlineInbox] = useState([]);
+  const [isLoadingOnlineInbox, setIsLoadingOnlineInbox] = useState(false);
+  const [onlineInboxError, setOnlineInboxError] = useState('');
+  const [updatingOnlineOrderId, setUpdatingOnlineOrderId] = useState('');
 
   const items = useMemo(
     () => (menuItemsData?.items || []).map(normalizeMenuItem).filter((item) => item.isAvailable),
@@ -214,10 +290,13 @@ export default function POS() {
 
   useEffect(() => {
     if (orderType !== 'dine-in') {
-      setActiveOrder(null);
       setIsLoadingTableOrder(false);
     }
   }, [orderType]);
+
+  useEffect(() => {
+    refreshOnlineInbox();
+  }, []);
 
   useEffect(() => {
     if (orderType !== 'dine-in') {
@@ -232,6 +311,7 @@ export default function POS() {
       setPaymentMethod('cash');
       setCashReceived('');
       setPaymentNote('');
+      resetOnlineDraft();
       setIsLoadingTableOrder(false);
       return undefined;
     }
@@ -254,22 +334,8 @@ export default function POS() {
           return;
         }
 
-        setActiveOrder(currentOrder);
-
         if (currentOrder) {
-          const restoredDraft = buildDraftFromOrder(currentOrder);
-          setPinnedOrderId(currentOrder.id || '');
-
-          if (currentOrder.tableId && currentOrder.tableId !== selectedTableId) {
-            setSelectedTableId(currentOrder.tableId);
-          }
-
-          setCartItems(restoredDraft.cartItems);
-          setDiscountType(restoredDraft.discountType);
-          setDiscountValue(restoredDraft.discountValue);
-          setPaymentMethod(restoredDraft.paymentMethod);
-          setCashReceived('');
-          setPaymentNote('');
+          applyOrderToWorkspace(currentOrder);
 
           if (requestedOrderId) {
             const nextSearchParams = new URLSearchParams(window.location.search);
@@ -284,6 +350,7 @@ export default function POS() {
           setCashReceived('');
           setPaymentNote('');
           setPinnedOrderId('');
+          resetOnlineDraft();
         }
       } catch (error) {
         if (!isCurrent) {
@@ -298,6 +365,7 @@ export default function POS() {
         setCashReceived('');
         setPaymentNote('');
         setPinnedOrderId('');
+        resetOnlineDraft();
         setSubmitError(error.response?.data?.message || 'Failed to load the current table bill.');
       } finally {
         if (isCurrent) {
@@ -312,6 +380,42 @@ export default function POS() {
       isCurrent = false;
     };
   }, [orderType, pinnedOrderId, requestedOrderId, selectedTableId, setSearchParams]);
+
+  useEffect(() => {
+    if (!requestedOrderId || orderType === 'dine-in') {
+      return undefined;
+    }
+
+    let isCurrent = true;
+
+    const loadRequestedOrder = async () => {
+      setSubmitError(null);
+      setSubmitSuccess(null);
+
+      try {
+        const response = await orderAPI.getOrder(requestedOrderId);
+        const requestedOrder = response.data?.data || null;
+
+        if (!isCurrent || !requestedOrder) {
+          return;
+        }
+
+        applyOrderToWorkspace(requestedOrder);
+      } catch (error) {
+        if (!isCurrent) {
+          return;
+        }
+
+        setSubmitError(error.response?.data?.message || 'Failed to load the requested order.');
+      }
+    };
+
+    loadRequestedOrder();
+
+    return () => {
+      isCurrent = false;
+    };
+  }, [orderType, requestedOrderId]);
 
   const subtotal = useMemo(
     () => cartItems.reduce((sum, item) => sum + item.price * item.qty, 0),
@@ -360,6 +464,34 @@ export default function POS() {
     () => createItemsSignature(activeOrder?.items || []),
     [activeOrder]
   );
+  const onlineDraftSignature = useMemo(
+    () =>
+      createOnlineDraftSignature({
+        orderType,
+        source: onlineSource,
+        promisedAt,
+        paymentState: onlinePaymentState,
+        customerName,
+        customerPhone,
+        customerAddress,
+        channelOrderId,
+      }),
+    [channelOrderId, customerAddress, customerName, customerPhone, onlinePaymentState, onlineSource, orderType, promisedAt]
+  );
+  const activeOrderOnlineSignature = useMemo(
+    () =>
+      createOnlineDraftSignature({
+        orderType: activeOrder?.orderType || (activeOrder?.tableId ? 'dine-in' : ''),
+        source: activeOrder?.online?.source || 'direct',
+        promisedAt: formatDateTimeInputValue(activeOrder?.online?.promisedAt),
+        paymentState: activeOrder?.online?.paymentState || 'pending',
+        customerName: activeOrder?.online?.customerName || '',
+        customerPhone: activeOrder?.online?.customerPhone || '',
+        customerAddress: activeOrder?.online?.customerAddress || '',
+        channelOrderId: activeOrder?.online?.channelOrderId || '',
+      }),
+    [activeOrder]
+  );
   const hasUnsavedChanges = useMemo(() => {
     if (!isEditingActiveBill) {
       return false;
@@ -367,11 +499,23 @@ export default function POS() {
 
     const savedTotal = Number(activeOrder?.totalAmount ?? activeOrder?.total ?? 0);
     return (
+      (activeOrder?.orderType || (activeOrder?.tableId ? 'dine-in' : '')) !== orderType ||
       cartSignature !== activeOrderSignature ||
+      onlineDraftSignature !== activeOrderOnlineSignature ||
       Math.abs(savedTotal - finalTotal) > 0.009 ||
       normalizePaymentMethod(activeOrder?.paymentMethod) !== paymentMethod
     );
-  }, [activeOrder, activeOrderSignature, cartSignature, finalTotal, isEditingActiveBill, paymentMethod]);
+  }, [
+    activeOrder,
+    activeOrderOnlineSignature,
+    activeOrderSignature,
+    cartSignature,
+    finalTotal,
+    isEditingActiveBill,
+    onlineDraftSignature,
+    orderType,
+    paymentMethod,
+  ]);
   const latestKitchenTicket = useMemo(() => getLatestKitchenTicket(activeOrder), [activeOrder]);
   const editingCartItem = useMemo(
     () => cartItems.find((item) => item.id === editingItemId) || null,
@@ -397,6 +541,62 @@ export default function POS() {
     setSearchParams(nextSearchParams, { replace: true });
   };
 
+  const resetOnlineDraft = () => {
+    setOnlineSource('direct');
+    setPromisedAt('');
+    setOnlinePaymentState('pending');
+    setCustomerName('');
+    setCustomerPhone('');
+    setCustomerAddress('');
+    setChannelOrderId('');
+  };
+
+  const applyOrderToWorkspace = (order) => {
+    if (!order) {
+      return;
+    }
+
+    const restoredDraft = buildDraftFromOrder(order);
+    const restoredOnlineDraft = normalizeOnlineDraft(order);
+
+    setActiveOrder(order);
+    setPinnedOrderId(order.id || '');
+    setOrderType(order.orderType || (order.tableId ? 'dine-in' : 'delivery'));
+    setSelectedTableId(order.tableId || '');
+    setCartItems(restoredDraft.cartItems);
+    setDiscountType(restoredDraft.discountType);
+    setDiscountValue(restoredDraft.discountValue);
+    setPaymentMethod(restoredDraft.paymentMethod);
+    setCashReceived('');
+    setPaymentNote('');
+    setOnlineSource(restoredOnlineDraft.source);
+    setPromisedAt(restoredOnlineDraft.promisedAt);
+    setOnlinePaymentState(restoredOnlineDraft.paymentState);
+    setCustomerName(restoredOnlineDraft.customerName);
+    setCustomerPhone(restoredOnlineDraft.customerPhone);
+    setCustomerAddress(restoredOnlineDraft.customerAddress);
+    setChannelOrderId(restoredOnlineDraft.channelOrderId);
+    syncBillingSearchParams({
+      tableId: order.tableId || '',
+      orderId: order.id || '',
+    });
+  };
+
+  const refreshOnlineInbox = async () => {
+    setIsLoadingOnlineInbox(true);
+    setOnlineInboxError('');
+
+    try {
+      const response = await orderAPI.getOnlineInbox();
+      setOnlineInbox(response.data?.data || []);
+    } catch (error) {
+      setOnlineInbox([]);
+      setOnlineInboxError(error.response?.data?.message || 'Failed to load online order inbox.');
+    } finally {
+      setIsLoadingOnlineInbox(false);
+    }
+  };
+
   const clearBillDraft = () => {
     setCartItems([]);
     setDiscountType('flat');
@@ -411,6 +611,7 @@ export default function POS() {
     setShowItemDetailsModal(false);
     setItemNoteDraft('');
     setItemModifiersDraft('');
+    resetOnlineDraft();
   };
 
   const handleOrderTypeChange = (nextOrderType) => {
@@ -537,6 +738,11 @@ export default function POS() {
       return false;
     }
 
+    if (orderType !== 'dine-in' && !onlineSource) {
+      setSubmitError('Choose the order source before saving this online order.');
+      return false;
+    }
+
     return true;
   };
 
@@ -573,6 +779,13 @@ export default function POS() {
     order_type: orderType,
     table_id: orderType === 'dine-in' ? selectedTableId : null,
     paymentMethod,
+    source: orderType === 'dine-in' ? null : onlineSource,
+    promisedAt: orderType === 'dine-in' ? null : serializePromisedAt(promisedAt),
+    paymentState: orderType === 'dine-in' ? null : onlinePaymentState,
+    customerName: orderType === 'dine-in' ? '' : customerName.trim(),
+    customerPhone: orderType === 'dine-in' ? '' : customerPhone.trim(),
+    customerAddress: orderType === 'dine-in' ? '' : customerAddress.trim(),
+    channelOrderId: orderType === 'dine-in' ? '' : channelOrderId.trim(),
   });
 
   const handleSubmit = async () => {
@@ -592,24 +805,8 @@ export default function POS() {
         : await orderAPI.createOrder(payload);
 
       const savedOrder = response.data?.data;
-      const restoredDraft = buildDraftFromOrder(savedOrder);
-
-      setActiveOrder(savedOrder || null);
-      setPinnedOrderId(savedOrder?.id || '');
-      setCartItems(restoredDraft.cartItems);
-      setDiscountType(restoredDraft.discountType);
-      setDiscountValue(restoredDraft.discountValue);
-      setPaymentMethod(restoredDraft.paymentMethod);
-      setCashReceived('');
-      setPaymentNote('');
-
-      if (savedOrder?.tableId) {
-        setOrderType('dine-in');
-        setSelectedTableId(savedOrder.tableId);
-        syncBillingSearchParams({ tableId: savedOrder.tableId });
-      } else {
-        syncBillingSearchParams();
-      }
+      applyOrderToWorkspace(savedOrder);
+      refreshOnlineInbox();
 
       setSubmitSuccess(
         `${formatDisplayOrderNumber(savedOrder)} saved successfully. Continue editing or settle when the guest is ready.`
@@ -648,16 +845,8 @@ export default function POS() {
       const result = sendResponse.data?.data || {};
       const updatedOrder = result.order || orderForKitchen;
       const kitchenTicket = result.ticket || null;
-      const restoredDraft = buildDraftFromOrder(updatedOrder);
-
-      setActiveOrder(updatedOrder || null);
-      setPinnedOrderId(updatedOrder?.id || '');
-      setCartItems(restoredDraft.cartItems);
-      setDiscountType(restoredDraft.discountType);
-      setDiscountValue(restoredDraft.discountValue);
-      setPaymentMethod(restoredDraft.paymentMethod);
-      setCashReceived('');
-      setPaymentNote('');
+      applyOrderToWorkspace(updatedOrder);
+      refreshOnlineInbox();
 
       const didOpenPrint = kitchenTicket ? printKitchenTicket(kitchenTicket, {
         title: `${kitchenTicket.displayOrderNumber || 'KOT'}${kitchenTicket.tableNumber ? ` - Table ${kitchenTicket.tableNumber}` : ''}`,
@@ -710,6 +899,7 @@ export default function POS() {
       setOrderType('');
       setSelectedTableId('');
       syncBillingSearchParams();
+      refreshOnlineInbox();
       setSubmitSuccess(
         settlementChangeDue > 0
           ? `${formattedOrderNumber} settled via ${paymentMethod.toUpperCase()}. Return ${formatCurrency(settlementChangeDue)} change.`
@@ -748,6 +938,7 @@ export default function POS() {
       setOrderType('');
       setSelectedTableId('');
       syncBillingSearchParams();
+      refreshOnlineInbox();
       setCancelReason('');
       setShowCancelModal(false);
       setSubmitSuccess(`${formatDisplayOrderNumber(activeOrder)} cancelled successfully.`);
@@ -755,6 +946,46 @@ export default function POS() {
       setSubmitError(error.response?.data?.message || 'Failed to cancel the bill.');
     } finally {
       setIsCancelling(false);
+    }
+  };
+
+  const handleCreateOnlineOrder = () => {
+    setPinnedOrderId('');
+    setSelectedTableId('');
+    clearBillDraft();
+    setOrderType('delivery');
+    setSubmitError(null);
+    setSubmitSuccess('Started a fresh online order. Add items, set source and promise time, then save or send to kitchen.');
+    syncBillingSearchParams();
+  };
+
+  const handleOpenOnlineOrder = (order) => {
+    applyOrderToWorkspace(order);
+    setSubmitError(null);
+    setSubmitSuccess(`${formatDisplayOrderNumber(order)} opened in the POS workspace.`);
+  };
+
+  const handleUpdateOnlineWorkflow = async (order, workflowStatus) => {
+    setUpdatingOnlineOrderId(order.id);
+    setSubmitError(null);
+    setSubmitSuccess(null);
+
+    try {
+      const response = await orderAPI.updateOnlineOrder(order.id, {
+        workflowStatus,
+      });
+      const updatedOrder = response.data?.data || order;
+
+      if (activeOrder?.id === updatedOrder.id) {
+        applyOrderToWorkspace(updatedOrder);
+      }
+
+      await refreshOnlineInbox();
+      setSubmitSuccess(`${formatDisplayOrderNumber(updatedOrder)} marked ${workflowStatus.replace(/_/g, ' ')}.`);
+    } catch (error) {
+      setSubmitError(error.response?.data?.message || 'Failed to update the online order workflow.');
+    } finally {
+      setUpdatingOnlineOrderId('');
     }
   };
 
@@ -827,6 +1058,23 @@ export default function POS() {
           </div>
         </div>
       </section>
+
+      <OnlineOrderInbox
+        orders={onlineInbox}
+        loading={isLoadingOnlineInbox}
+        selectedOrderId={activeOrder?.id || ''}
+        updatingOrderId={updatingOnlineOrderId}
+        onOpenOrder={handleOpenOnlineOrder}
+        onCreateOrder={handleCreateOnlineOrder}
+        onRefresh={refreshOnlineInbox}
+        onUpdateWorkflow={handleUpdateOnlineWorkflow}
+      />
+
+      {onlineInboxError ? (
+        <section className="rounded-[1.6rem] border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+          {onlineInboxError}
+        </section>
+      ) : null}
 
       {shouldChooseServiceModeFirst ? (
         <section className="rounded-[2rem] border border-[var(--border-color)] bg-[var(--bg-card)] p-5 shadow-[var(--shadow-card)]">
@@ -1003,12 +1251,38 @@ export default function POS() {
                 </div>
               </div>
             ) : orderType ? (
-              <div className="flex items-center justify-between gap-3 rounded-[1.6rem] border border-[var(--border-color)] bg-[var(--bg-card)] px-4 py-4 shadow-[var(--shadow-card)]">
+              <div className="flex flex-col gap-4 rounded-[1.6rem] border border-[var(--border-color)] bg-[var(--bg-card)] px-4 py-4 shadow-[var(--shadow-card)] lg:flex-row lg:items-center lg:justify-between">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--text-secondary)]">Service Type</p>
                   <p className="mt-1 text-xl font-bold text-[var(--text-primary)]">
                     {orderType === 'takeaway' ? 'Takeaway' : 'Delivery'}
                   </p>
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    {orderType !== 'dine-in' ? (
+                      <span className="rounded-full bg-[var(--bg-card-muted)] px-3 py-1 text-xs font-bold uppercase tracking-[0.16em] text-[var(--color-primary)]">
+                        {onlineSource || 'direct'}
+                      </span>
+                    ) : null}
+                    {activeOrder?.id ? (
+                      <span className="rounded-full bg-[var(--bg-card-muted)] px-3 py-1 text-xs font-bold uppercase tracking-[0.16em] text-[var(--text-primary)]">
+                        {formatDisplayOrderNumber(activeOrder)}
+                      </span>
+                    ) : null}
+                    {activeOrder?.online?.workflowStatus ? (
+                      <span className="rounded-full bg-amber-500/10 px-3 py-1 text-xs font-bold uppercase tracking-[0.16em] text-amber-300">
+                        {activeOrder.online.workflowStatus.replace(/_/g, ' ')}
+                      </span>
+                    ) : null}
+                  </div>
+                  {orderType !== 'dine-in' ? (
+                    <div className="mt-3 flex flex-wrap items-center gap-3 text-sm font-semibold text-[var(--text-secondary)]">
+                      <span>Promise: <span className="text-[var(--text-primary)]">{promisedAt ? promisedAt.replace('T', ' ') : 'Not set'}</span></span>
+                      <span>Channel payment: <span className="text-[var(--text-primary)]">{onlinePaymentState}</span></span>
+                      {customerName ? (
+                        <span>Customer: <span className="text-[var(--text-primary)]">{customerName}</span></span>
+                      ) : null}
+                    </div>
+                  ) : null}
                 </div>
                 <button
                   type="button"
@@ -1044,6 +1318,25 @@ export default function POS() {
               onDiscountTypeChange={setDiscountType}
               discountValue={discountValue}
               onDiscountValueChange={setDiscountValue}
+            />
+
+            <OnlineOrderDetailsPanel
+              orderType={orderType}
+              source={onlineSource}
+              promisedAt={promisedAt}
+              paymentState={onlinePaymentState}
+              customerName={customerName}
+              customerPhone={customerPhone}
+              customerAddress={customerAddress}
+              channelOrderId={channelOrderId}
+              onSourceChange={setOnlineSource}
+              onPromisedAtChange={setPromisedAt}
+              onPaymentStateChange={setOnlinePaymentState}
+              onCustomerNameChange={setCustomerName}
+              onCustomerPhoneChange={setCustomerPhone}
+              onCustomerAddressChange={setCustomerAddress}
+              onChannelOrderIdChange={setChannelOrderId}
+              disabled={isLoadingTableOrder || isSubmitting || isSettling || isSendingToKitchen}
             />
 
             <PaymentPanel

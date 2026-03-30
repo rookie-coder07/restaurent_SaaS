@@ -1,5 +1,6 @@
 import logger from '../utils/logger.js';
 import supabase from '../config/supabase.js';
+import InventoryService from './inventoryService.js';
 
 export class MenuService {
   static transformCategory(category) {
@@ -34,11 +35,28 @@ export class MenuService {
       cloudinaryImageUrl: item.image_url || '',
       preparationTime: item.preparation_time || 15,
       tags: item.tags ? item.tags.split(',').map((tag) => tag.trim()).filter(Boolean) : [],
+      ingredients: Array.isArray(item.ingredients) ? item.ingredients : [],
       isAvailable: item.status === 'active',
       status: item.status || 'active',
       createdAt: item.created_at,
       updatedAt: item.updated_at,
     };
+  }
+
+  static async attachRecipes(restaurantId, items = []) {
+    if (!Array.isArray(items) || items.length === 0) {
+      return [];
+    }
+
+    const recipeMap = await InventoryService.getRecipesByMenuItemIds(
+      restaurantId,
+      items.map((item) => item.id).filter(Boolean)
+    );
+
+    return items.map((item) => ({
+      ...item,
+      ingredients: recipeMap.get(item.id) || [],
+    }));
   }
 
   // ============ CATEGORIES ============
@@ -168,7 +186,10 @@ export class MenuService {
       if (error) throw error;
 
       logger.info(`✅ Menu item created: ${menuItem.id}`);
-      return this.transformMenuItem(menuItem);
+      await InventoryService.replaceMenuItemRecipe(restaurantId, menuItem.id, itemData.ingredients || []);
+      const transformedItem = this.transformMenuItem(menuItem);
+      const [itemWithRecipe] = await this.attachRecipes(restaurantId, [transformedItem]);
+      return itemWithRecipe;
     } catch (error) {
       logger.error('❌ Create menu item error:', error);
       throw error;
@@ -191,7 +212,8 @@ export class MenuService {
 
       if (error) throw error;
 
-      return (items || []).map((item) => this.transformMenuItem(item));
+      const transformedItems = (items || []).map((item) => this.transformMenuItem(item));
+      return await this.attachRecipes(restaurantId, transformedItems);
     } catch (error) {
       logger.error('❌ Get menu items error:', error);
       throw error;
@@ -209,7 +231,9 @@ export class MenuService {
 
       if (error || !item) throw error || new Error('Menu item not found');
 
-      return this.transformMenuItem(item);
+      const transformedItem = this.transformMenuItem(item);
+      const [itemWithRecipe] = await this.attachRecipes(restaurantId, [transformedItem]);
+      return itemWithRecipe;
     } catch (error) {
       logger.error('❌ Get menu item error:', error);
       throw error;
@@ -243,7 +267,10 @@ export class MenuService {
       if (error || !item) throw error || new Error('Menu item not found');
 
       logger.info(`✅ Menu item updated: ${itemId}`);
-      return this.transformMenuItem(item);
+      await InventoryService.replaceMenuItemRecipe(restaurantId, itemId, updateData.ingredients || []);
+      const transformedItem = this.transformMenuItem(item);
+      const [itemWithRecipe] = await this.attachRecipes(restaurantId, [transformedItem]);
+      return itemWithRecipe;
     } catch (error) {
       logger.error('❌ Update menu item error:', error);
       throw error;

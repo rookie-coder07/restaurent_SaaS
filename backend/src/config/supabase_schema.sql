@@ -118,6 +118,49 @@ CREATE TABLE IF NOT EXISTS sessions (
   created_at TIMESTAMP DEFAULT now()
 );
 
+-- Create Inventory Items Table
+CREATE TABLE IF NOT EXISTS inventory_items (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  restaurant_id UUID NOT NULL REFERENCES restaurants(id) ON DELETE CASCADE,
+  name VARCHAR(120) NOT NULL,
+  quantity DECIMAL(12, 4) DEFAULT 0,
+  unit VARCHAR(20) NOT NULL,
+  threshold DECIMAL(12, 4) DEFAULT 0,
+  last_updated TIMESTAMP DEFAULT now(),
+  status VARCHAR(50) DEFAULT 'active',
+  created_at TIMESTAMP DEFAULT now(),
+  updated_at TIMESTAMP DEFAULT now(),
+  UNIQUE(restaurant_id, name)
+);
+
+-- Create Menu Item Recipes Table
+CREATE TABLE IF NOT EXISTS menu_item_recipes (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  menu_item_id UUID NOT NULL REFERENCES menu_items(id) ON DELETE CASCADE,
+  inventory_item_id UUID NOT NULL REFERENCES inventory_items(id) ON DELETE CASCADE,
+  quantity DECIMAL(12, 4) NOT NULL,
+  unit VARCHAR(20) NOT NULL,
+  created_at TIMESTAMP DEFAULT now(),
+  updated_at TIMESTAMP DEFAULT now()
+);
+
+-- Create Inventory History Table
+CREATE TABLE IF NOT EXISTS inventory_history (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  restaurant_id UUID NOT NULL REFERENCES restaurants(id) ON DELETE CASCADE,
+  inventory_item_id UUID NOT NULL REFERENCES inventory_items(id) ON DELETE CASCADE,
+  type VARCHAR(50) NOT NULL,
+  quantity_before DECIMAL(12, 4) DEFAULT 0,
+  quantity_change DECIMAL(12, 4) DEFAULT 0,
+  quantity_after DECIMAL(12, 4) DEFAULT 0,
+  unit VARCHAR(20) NOT NULL,
+  reason TEXT,
+  source VARCHAR(100) DEFAULT 'manual',
+  reference_id VARCHAR(120),
+  created_by UUID,
+  created_at TIMESTAMP DEFAULT now()
+);
+
 -- Create Indexes for Performance
 CREATE INDEX idx_users_restaurant_id ON users(restaurant_id);
 CREATE INDEX idx_menu_items_restaurant_id ON menu_items(restaurant_id);
@@ -128,3 +171,7 @@ CREATE INDEX idx_order_items_order_id ON order_items(order_id);
 CREATE INDEX idx_tables_restaurant_id ON tables(restaurant_id);
 CREATE INDEX idx_daily_analytics_restaurant_id ON daily_analytics(restaurant_id);
 CREATE INDEX idx_daily_analytics_date ON daily_analytics(date);
+CREATE INDEX idx_inventory_items_restaurant_id ON inventory_items(restaurant_id);
+CREATE INDEX idx_menu_item_recipes_menu_item_id ON menu_item_recipes(menu_item_id);
+CREATE INDEX idx_inventory_history_restaurant_id ON inventory_history(restaurant_id);
+CREATE INDEX idx_inventory_history_item_id ON inventory_history(inventory_item_id);

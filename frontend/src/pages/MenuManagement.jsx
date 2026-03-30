@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { AlertCircle, Edit2, Loader, Plus, Trash2, Upload } from 'lucide-react';
 import { useApi } from '../hooks/useApi';
-import { menuAPI } from '../services/apiEndpoints';
+import { inventoryAPI, menuAPI } from '../services/apiEndpoints';
 import { formatCurrency } from '../utils/formatters';
 import { getMenuItemImageUrl } from '../utils/menuItemImage';
 import Card from '../components/common/Card';
@@ -22,12 +22,14 @@ function createEmptyFormData() {
     image: null,
     imagePreview: '',
     imageName: '',
+    ingredients: [],
   };
 }
 
 export default function MenuManagement() {
   const { data: itemsData = {}, loading, execute: refetchItems } = useApi(() => menuAPI.getItems({ limit: 100 }));
   const { data: categoriesData = {}, execute: refetchCategories } = useApi(() => menuAPI.getCategories());
+  const { data: inventoryData = {} } = useApi(inventoryAPI.getItems);
 
   const [activeTab, setActiveTab] = useState('items');
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState('all');
@@ -57,6 +59,10 @@ export default function MenuManagement() {
         id: category.id || category._id || '',
       })),
     [categoriesData]
+  );
+  const inventoryItems = useMemo(
+    () => (inventoryData?.items || []).map((item) => ({ ...item, id: item.id || item._id || '' })),
+    [inventoryData]
   );
 
   const categoryItemsMap = useMemo(() => {
@@ -119,8 +125,38 @@ export default function MenuManagement() {
       image: null,
       imagePreview: item.imageUrl || item.image_url || item.cloudinaryImageUrl || '',
       imageName: '',
+      ingredients: Array.isArray(item.ingredients)
+        ? item.ingredients.map((ingredient) => ({
+            itemId: ingredient.itemId || ingredient.inventoryItemId,
+            quantity: ingredient.quantity || '',
+            unit: ingredient.unit || 'g',
+          }))
+        : [],
     });
     setShowItemModal(true);
+  };
+
+  const handleAddIngredientRow = () => {
+    setFormData((current) => ({
+      ...current,
+      ingredients: [...current.ingredients, { itemId: '', quantity: '', unit: 'g' }],
+    }));
+  };
+
+  const handleIngredientChange = (index, field, value) => {
+    setFormData((current) => ({
+      ...current,
+      ingredients: current.ingredients.map((ingredient, ingredientIndex) =>
+        ingredientIndex === index ? { ...ingredient, [field]: value } : ingredient
+      ),
+    }));
+  };
+
+  const handleRemoveIngredient = (index) => {
+    setFormData((current) => ({
+      ...current,
+      ingredients: current.ingredients.filter((_, ingredientIndex) => ingredientIndex !== index),
+    }));
   };
 
   const handleImageChange = (event) => {
@@ -180,6 +216,13 @@ export default function MenuManagement() {
         categoryId: formData.categoryId || '',
         preparationTime: Number(formData.preparationTime),
         tags: formData.tags.split(',').map((tag) => tag.trim()).filter(Boolean),
+        ingredients: formData.ingredients
+          .filter((ingredient) => ingredient.itemId && Number(ingredient.quantity) > 0)
+          .map((ingredient) => ({
+            itemId: ingredient.itemId,
+            quantity: Number(ingredient.quantity),
+            unit: ingredient.unit,
+          })),
       };
 
       if (formData.image) {
@@ -422,6 +465,23 @@ export default function MenuManagement() {
                                   </span>
                                 )}
                               </div>
+
+                              <div className="mt-3 flex flex-wrap gap-2">
+                                {(item.ingredients || []).length > 0 ? (
+                                  item.ingredients.slice(0, 4).map((ingredient, index) => (
+                                    <span
+                                      key={`${item.id}-ingredient-${index}`}
+                                      className="rounded-full border border-amber-500/20 bg-amber-500/10 px-2.5 py-1 text-xs text-amber-300"
+                                    >
+                                      {ingredient.inventoryItemName || 'Ingredient'} • {ingredient.quantity} {ingredient.unit}
+                                    </span>
+                                  ))
+                                ) : (
+                                  <span className="rounded-full border border-[var(--border-color)] bg-[var(--bg-card-muted)] px-2.5 py-1 text-xs text-[var(--text-secondary)]">
+                                    No recipe linked
+                                  </span>
+                                )}
+                              </div>
                             </div>
                           </div>
 
@@ -579,6 +639,77 @@ export default function MenuManagement() {
             onChange={(event) => setFormData((current) => ({ ...current, tags: event.target.value }))}
             placeholder="Spicy, Bestseller, Vegan"
           />
+
+          <div className="space-y-3 rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card-muted)] p-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-sm font-semibold text-[var(--text-primary)]">Recipe Ingredients</p>
+                <p className="mt-1 text-xs text-[var(--text-secondary)]">
+                  Link stock items so the system can auto-deduct when this dish is fired to kitchen.
+                </p>
+              </div>
+              <Button type="button" variant="secondary" onClick={handleAddIngredientRow}>
+                <Plus className="h-4 w-4" />
+                Add Ingredient
+              </Button>
+            </div>
+
+            {formData.ingredients.length === 0 ? (
+              <p className="text-sm text-[var(--text-secondary)]">
+                No ingredients linked yet. You can save the item without a recipe, then add it later.
+              </p>
+            ) : (
+              <div className="space-y-3">
+                {formData.ingredients.map((ingredient, index) => (
+                  <div key={`ingredient-row-${index}`} className="grid grid-cols-1 gap-3 rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card)] p-3 sm:grid-cols-[minmax(0,1.6fr)_0.8fr_0.8fr_auto]">
+                    <label className="block space-y-2">
+                      <span className="text-xs font-medium text-[var(--text-secondary)]">Inventory Item</span>
+                      <select
+                        value={ingredient.itemId}
+                        onChange={(event) => handleIngredientChange(index, 'itemId', event.target.value)}
+                        className="input"
+                      >
+                        <option value="">Select item</option>
+                        {inventoryItems.map((stockItem) => (
+                          <option key={stockItem.id} value={stockItem.id}>
+                            {stockItem.name} ({stockItem.quantity} {stockItem.unit})
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <Input
+                      label="Qty"
+                      type="number"
+                      step="0.0001"
+                      min="0"
+                      value={ingredient.quantity}
+                      onChange={(event) => handleIngredientChange(index, 'quantity', event.target.value)}
+                    />
+
+                    <label className="block space-y-2">
+                      <span className="text-xs font-medium text-[var(--text-secondary)]">Unit</span>
+                      <select
+                        value={ingredient.unit}
+                        onChange={(event) => handleIngredientChange(index, 'unit', event.target.value)}
+                        className="input"
+                      >
+                        {['kg', 'g', 'litre', 'ml', 'pieces'].map((unit) => (
+                          <option key={unit} value={unit}>{unit}</option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <div className="flex items-end">
+                      <Button type="button" variant="danger" className="w-full sm:w-auto" onClick={() => handleRemoveIngredient(index)}>
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
 
           <div className="space-y-3">
             <label
