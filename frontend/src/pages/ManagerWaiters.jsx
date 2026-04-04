@@ -1,4 +1,4 @@
-import { Activity, ShieldCheck, UserRound, Users } from 'lucide-react';
+import { Activity, Pencil, PlusCircle, ShieldCheck, Trash2, UserRound, Users } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { useApi } from '../hooks/useApi';
 import { orderAPI, restaurantAPI, tableAPI } from '../services/apiEndpoints';
@@ -6,6 +6,7 @@ import { useManagerStore } from '../context/managerStore';
 import { formatDisplayOrderNumber } from '../utils/formatters';
 import Card from '../components/common/Card';
 import Button from '../components/common/Button';
+import Modal from '../components/common/Modal';
 import Toast from '../components/common/Toast';
 import PaginationControls from '../components/common/PaginationControls';
 import useResponsivePagination from '../hooks/useResponsivePagination';
@@ -18,9 +19,13 @@ export default function ManagerWaiters() {
   const overrideAccess = useManagerStore((state) => state.overrideAccess);
   const waiterActivity = useManagerStore((state) => state.waiterActivity);
   const assignTable = useManagerStore((state) => state.assignTable);
+  const unassignTable = useManagerStore((state) => state.unassignTable);
   const toggleOverrideAccess = useManagerStore((state) => state.toggleOverrideAccess);
   const logWaiterActivity = useManagerStore((state) => state.logWaiterActivity);
   const [success, setSuccess] = useState('');
+  const [editingAllocation, setEditingAllocation] = useState(null);
+  const [nextWaiterId, setNextWaiterId] = useState('');
+  const [assignmentDrafts, setAssignmentDrafts] = useState({});
 
   const waiters = useMemo(() => (staffData?.staff || []).filter((member) => member.role === 'staff'), [staffData]);
   const tables = tablesData?.tables || [];
@@ -42,6 +47,51 @@ export default function ManagerWaiters() {
     setSuccess('Table assignment updated.');
   };
 
+  const assignSelectedTable = (waiterId) => {
+    const tableId = assignmentDrafts[waiterId];
+    if (!tableId) {
+      return;
+    }
+
+    handleAssignment(tableId, waiterId);
+    setAssignmentDrafts((current) => ({
+      ...current,
+      [waiterId]: '',
+    }));
+  };
+
+  const openAllocationEditor = (table, waiterId) => {
+    setEditingAllocation({
+      tableId: table.id,
+      tableNumber: table.tableNumber,
+      currentWaiterId: waiterId,
+    });
+    setNextWaiterId(waiterId);
+  };
+
+  const saveAllocationChange = () => {
+    if (!editingAllocation?.tableId || !nextWaiterId || nextWaiterId === editingAllocation.currentWaiterId) {
+      setEditingAllocation(null);
+      return;
+    }
+
+    assignTable(editingAllocation.tableId, nextWaiterId);
+    logWaiterActivity({
+      waiterId: nextWaiterId,
+      action: 'reassigned_table',
+      tableId: editingAllocation.tableId,
+    });
+    setSuccess(`Table ${editingAllocation.tableNumber} reassigned.`);
+    setEditingAllocation(null);
+    setNextWaiterId('');
+  };
+
+  const removeAllocation = (tableId, waiterId, tableNumber) => {
+    unassignTable(tableId);
+    logWaiterActivity({ waiterId, action: 'unassigned_table', tableId });
+    setSuccess(`Table ${tableNumber} allocation removed.`);
+  };
+
   return (
     <div className="space-y-6">
       {success ? <Toast type="success" message={success} /> : null}
@@ -57,80 +107,132 @@ export default function ManagerWaiters() {
           const assignedTables = tables.filter((table) => tableAssignments[table.id] === waiter.id);
           const waiterOrders = orders.filter((order) => assignedTables.some((table) => table.id === order.tableId));
           const latestActivity = waiterActivity[waiter.id];
+          const availableTables = tables.filter((table) => !tableAssignments[table.id] || tableAssignments[table.id] === waiter.id);
 
           return (
-            <Card key={waiter.id} className="p-5">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <div className="inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-[var(--color-primary-soft)] text-[var(--color-primary)]">
-                    <UserRound className="h-5 w-5" />
+            <Card key={waiter.id} className="p-4">
+              <div className="flex flex-col gap-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-[var(--color-primary-soft)] text-[var(--color-primary)]">
+                      <UserRound className="h-5 w-5" />
+                    </div>
+                    <h2 className="mt-3 truncate text-lg font-bold text-[var(--color-text)]">{waiter.name}</h2>
+                    <p className="mt-1 truncate text-sm text-[var(--color-text-muted)]">{waiter.email}</p>
                   </div>
-                  <h2 className="mt-3 text-xl font-bold text-[var(--color-text)]">{waiter.name}</h2>
-                  <p className="mt-1 text-sm text-[var(--color-text-muted)]">{waiter.email}</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    toggleOverrideAccess(waiter.id);
-                    logWaiterActivity({ waiterId: waiter.id, action: overrideAccess[waiter.id] ? 'override_disabled' : 'override_enabled' });
-                    setSuccess('Waiter override access updated.');
-                  }}
-                  className={`rounded-full px-3 py-2 text-xs font-semibold ${overrideAccess[waiter.id] ? 'bg-emerald-500/15 text-emerald-400' : 'bg-[var(--color-surface-muted)] text-[var(--color-text-muted)]'}`}
-                >
-                  <ShieldCheck className="mr-1 inline h-4 w-4" />
-                  {overrideAccess[waiter.id] ? 'Override On' : 'Override Off'}
-                </button>
-              </div>
-
-              <div className="mt-4 grid gap-3 sm:grid-cols-3">
-                <div className="rounded-2xl bg-[var(--color-surface-muted)] p-4">
-                  <p className="text-sm text-[var(--text-secondary)]">Assigned tables</p>
-                  <p className="mt-2 text-2xl font-bold text-[var(--text-primary)]">{assignedTables.length}</p>
-                </div>
-                <div className="rounded-2xl bg-[var(--color-surface-muted)] p-4">
-                  <p className="text-sm text-[var(--text-secondary)]">Live orders</p>
-                  <p className="mt-2 text-2xl font-bold text-[var(--text-primary)]">{waiterOrders.length}</p>
-                </div>
-                <div className="rounded-2xl bg-[var(--color-surface-muted)] p-4">
-                  <p className="text-sm text-[var(--text-secondary)]">Access</p>
-                  <p className="mt-2 text-base font-bold text-[var(--text-primary)]">{overrideAccess[waiter.id] ? 'Override' : 'Standard'}</p>
-                </div>
-              </div>
-
-              <div className="mt-4 rounded-2xl bg-[var(--color-surface-muted)] p-4">
-                <p className="text-sm font-semibold text-[var(--color-text)]">Assigned tables</p>
-                <p className="mt-2 text-sm text-[var(--color-text-muted)]">
-                  {assignedTables.length > 0 ? assignedTables.map((table) => `T${table.tableNumber}`).join(', ') : 'No tables assigned yet.'}
-                </p>
-              </div>
-
-              <div className="mt-4 rounded-2xl bg-[var(--color-surface-muted)] p-4">
-                <div className="flex items-center gap-2">
-                  <Activity className="h-4 w-4 text-[var(--color-primary)]" />
-                  <p className="text-sm font-semibold text-[var(--color-text)]">Latest activity</p>
-                </div>
-                <p className="mt-2 text-sm text-[var(--color-text-muted)]">
-                  {latestActivity
-                    ? `${latestActivity.action.replaceAll('_', ' ')}${latestActivity.tableId ? ` on table ${tables.find((table) => table.id === latestActivity.tableId)?.tableNumber || ''}` : ''}`
-                    : 'No manager-tracked activity yet.'}
-                </p>
-                {latestActivity?.orderId ? (
-                  <p className="mt-1 text-xs uppercase tracking-[0.16em] text-[var(--text-secondary)]">
-                    {formatDisplayOrderNumber(orders.find((order) => order.id === latestActivity.orderId) || { id: latestActivity.orderId })}
-                  </p>
-                ) : null}
-              </div>
-
-              <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                {tables.slice(0, 12).map((table) => (
-                  <Button
-                    key={table.id}
-                    variant={tableAssignments[table.id] === waiter.id ? 'secondary' : 'primary'}
-                    onClick={() => handleAssignment(table.id, waiter.id)}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      toggleOverrideAccess(waiter.id);
+                      logWaiterActivity({ waiterId: waiter.id, action: overrideAccess[waiter.id] ? 'override_disabled' : 'override_enabled' });
+                      setSuccess('Waiter override access updated.');
+                    }}
+                    className={`shrink-0 rounded-full px-3 py-2 text-xs font-semibold ${overrideAccess[waiter.id] ? 'bg-emerald-500/15 text-emerald-400' : 'bg-[var(--color-surface-muted)] text-[var(--color-text-muted)]'}`}
                   >
-                    Table {table.tableNumber}
-                  </Button>
-                ))}
+                    <ShieldCheck className="mr-1 inline h-4 w-4" />
+                    {overrideAccess[waiter.id] ? 'Override On' : 'Override Off'}
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="rounded-2xl bg-[var(--color-surface-muted)] px-3 py-3 text-center">
+                    <p className="text-[11px] uppercase tracking-[0.16em] text-[var(--text-secondary)]">Tables</p>
+                    <p className="mt-1 text-xl font-bold text-[var(--text-primary)]">{assignedTables.length}</p>
+                  </div>
+                  <div className="rounded-2xl bg-[var(--color-surface-muted)] px-3 py-3 text-center">
+                    <p className="text-[11px] uppercase tracking-[0.16em] text-[var(--text-secondary)]">Orders</p>
+                    <p className="mt-1 text-xl font-bold text-[var(--text-primary)]">{waiterOrders.length}</p>
+                  </div>
+                  <div className="rounded-2xl bg-[var(--color-surface-muted)] px-3 py-3 text-center">
+                    <p className="text-[11px] uppercase tracking-[0.16em] text-[var(--text-secondary)]">Access</p>
+                    <p className="mt-1 text-sm font-bold text-[var(--text-primary)]">{overrideAccess[waiter.id] ? 'Override' : 'Standard'}</p>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl bg-[var(--color-surface-muted)] p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-sm font-semibold text-[var(--color-text)]">Assigned tables</p>
+                    <span className="text-xs text-[var(--text-secondary)]">{assignedTables.length === 0 ? 'None' : `${assignedTables.length} active`}</span>
+                  </div>
+                  {assignedTables.length === 0 ? (
+                    <p className="mt-2 text-sm text-[var(--color-text-muted)]">No tables assigned yet.</p>
+                  ) : (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {assignedTables.map((table) => (
+                        <div
+                          key={`${waiter.id}-${table.id}`}
+                          className="inline-flex items-center gap-1.5 rounded-full border border-[var(--border-color)] bg-[var(--color-panel)] px-3 py-1.5"
+                        >
+                          <span className="text-sm font-semibold text-[var(--text-primary)]">T{table.tableNumber}</span>
+                          <button
+                            type="button"
+                            onClick={() => openAllocationEditor(table, waiter.id)}
+                            className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-[var(--color-surface-muted)] text-[var(--text-secondary)] transition hover:text-[var(--color-primary)]"
+                            aria-label={`Edit allocation for table ${table.tableNumber}`}
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => removeAllocation(table.id, waiter.id, table.tableNumber)}
+                            className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-[var(--color-surface-muted)] text-[var(--text-secondary)] transition hover:text-red-400"
+                            aria-label={`Remove allocation for table ${table.tableNumber}`}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="rounded-2xl bg-[var(--color-surface-muted)] p-4">
+                  <div className="flex items-center gap-2">
+                    <Activity className="h-4 w-4 text-[var(--color-primary)]" />
+                    <p className="text-sm font-semibold text-[var(--color-text)]">Latest activity</p>
+                  </div>
+                  <p className="mt-2 line-clamp-2 text-sm text-[var(--color-text-muted)]">
+                    {latestActivity
+                      ? `${latestActivity.action.replaceAll('_', ' ')}${latestActivity.tableId ? ` on table ${tables.find((table) => table.id === latestActivity.tableId)?.tableNumber || ''}` : ''}`
+                      : 'No manager-tracked activity yet.'}
+                  </p>
+                  {latestActivity?.orderId ? (
+                    <p className="mt-1 text-xs uppercase tracking-[0.16em] text-[var(--text-secondary)]">
+                      {formatDisplayOrderNumber(orders.find((order) => order.id === latestActivity.orderId) || { id: latestActivity.orderId })}
+                    </p>
+                  ) : null}
+                </div>
+
+                <div className="rounded-2xl border border-[var(--border-color)] bg-[var(--color-panel)] p-4">
+                  <p className="text-sm font-semibold text-[var(--color-text)]">Quick assign</p>
+                  <div className="mt-3 flex flex-col gap-3 sm:flex-row">
+                    <select
+                      value={assignmentDrafts[waiter.id] || ''}
+                      onChange={(event) =>
+                        setAssignmentDrafts((current) => ({
+                          ...current,
+                          [waiter.id]: event.target.value,
+                        }))
+                      }
+                      className="input min-w-0 flex-1"
+                    >
+                      <option value="">Select a table</option>
+                      {availableTables.map((table) => (
+                        <option key={table.id} value={table.id}>
+                          Table {table.tableNumber}
+                        </option>
+                      ))}
+                    </select>
+                    <Button
+                      className="sm:shrink-0"
+                      onClick={() => assignSelectedTable(waiter.id)}
+                      disabled={!assignmentDrafts[waiter.id]}
+                    >
+                      <PlusCircle className="h-4 w-4" />
+                      Assign
+                    </Button>
+                  </div>
+                </div>
               </div>
             </Card>
           );
@@ -154,6 +256,56 @@ export default function ManagerWaiters() {
           <p className="mt-4 text-sm text-[var(--color-text-muted)]">No waiter accounts were found for this restaurant.</p>
         </Card>
       ) : null}
+
+      <Modal
+        title={editingAllocation ? `Edit table ${editingAllocation.tableNumber} allocation` : 'Edit allocation'}
+        isOpen={Boolean(editingAllocation)}
+        onClose={() => {
+          setEditingAllocation(null);
+          setNextWaiterId('');
+        }}
+        maxWidth="max-w-lg"
+      >
+        <div className="space-y-4">
+          <div className="rounded-2xl bg-[var(--color-surface-muted)] p-4">
+            <p className="text-sm text-[var(--text-secondary)]">Current assignment</p>
+            <p className="mt-2 text-lg font-bold text-[var(--text-primary)]">
+              {waiters.find((waiter) => waiter.id === editingAllocation?.currentWaiterId)?.name || 'Unassigned'}
+            </p>
+          </div>
+
+          <label className="block space-y-2">
+            <span className="text-sm font-medium text-[var(--text-primary)]">Reassign to waiter</span>
+            <select
+              value={nextWaiterId}
+              onChange={(event) => setNextWaiterId(event.target.value)}
+              className="input"
+            >
+              {waiters.map((waiter) => (
+                <option key={waiter.id} value={waiter.id}>
+                  {waiter.name}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <div className="flex flex-col-reverse gap-3 sm:flex-row">
+            <Button
+              variant="secondary"
+              className="w-full sm:flex-1"
+              onClick={() => {
+                setEditingAllocation(null);
+                setNextWaiterId('');
+              }}
+            >
+              Cancel
+            </Button>
+            <Button className="w-full sm:flex-1" onClick={saveAllocationChange}>
+              Save Allocation
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

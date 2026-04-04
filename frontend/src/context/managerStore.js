@@ -25,6 +25,16 @@ export const useManagerStore = create(
           },
         })),
 
+      unassignTable: (tableId) =>
+        set((state) => {
+          const nextAssignments = { ...state.tableAssignments };
+          delete nextAssignments[tableId];
+
+          return {
+            tableAssignments: nextAssignments,
+          };
+        }),
+
       toggleOverrideAccess: (waiterId) =>
         set((state) => ({
           overrideAccess: {
