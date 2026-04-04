@@ -8,17 +8,17 @@ export default function Button({
   ...props
 }) {
   const baseClassName =
-    'inline-flex items-center justify-center gap-2 rounded-xl font-semibold transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[var(--color-primary)] disabled:cursor-not-allowed disabled:opacity-60';
+    'inline-flex min-h-[2.75rem] items-center justify-center gap-2 rounded-xl font-semibold transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[var(--color-primary)] disabled:cursor-not-allowed disabled:opacity-60';
 
   const variantClassName = {
     primary:
-      'bg-[var(--color-primary)] text-white shadow-sm hover:scale-[1.02] hover:brightness-95 active:translate-y-px',
+      'bg-[var(--color-primary)] text-white shadow-sm hover:brightness-95',
     secondary:
-      'border border-[var(--border-color)] bg-[var(--bg-card)] text-[var(--text-primary)] backdrop-blur-md hover:scale-[1.02] hover:brightness-105',
+      'border border-[var(--border-color)] bg-[var(--bg-card)] text-[var(--text-primary)] backdrop-blur-md hover:bg-[var(--bg-card-muted)]',
     ghost:
-      'text-[var(--text-secondary)] hover:scale-[1.02] hover:bg-[var(--bg-card-muted)] hover:text-[var(--text-primary)]',
+      'text-[var(--text-secondary)] hover:bg-[var(--bg-card-muted)] hover:text-[var(--text-primary)]',
     danger:
-      'bg-[#dc2626] text-white shadow-sm hover:scale-[1.02] hover:brightness-95',
+      'bg-[#dc2626] text-white shadow-sm hover:brightness-95',
   }[variant];
 
   const sizeClassName = {

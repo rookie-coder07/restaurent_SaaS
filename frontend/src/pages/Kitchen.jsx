@@ -9,7 +9,7 @@ import {
   X,
 } from 'lucide-react';
 import { usePolling } from '../hooks/usePolling';
-import { kitchenAPI } from '../services/apiEndpoints';
+import { orderAPI } from '../services/apiEndpoints';
 import { formatCurrency, formatDate } from '../utils/formatters';
 
 const POLLING_INTERVAL_MS = 5000;
@@ -64,7 +64,7 @@ function getStatusIcon(status) {
 
 export default function Kitchen() {
   const { data: pollingData, loading, error } = usePolling(
-    kitchenAPI.getActiveOrders,
+    orderAPI.getActiveOrders,
     POLLING_INTERVAL_MS
   );
   const [selectedOrder, setSelectedOrder] = useState(null);
@@ -113,7 +113,7 @@ export default function Kitchen() {
     setActionError(null);
 
     try {
-      await kitchenAPI.updateStatus(orderId, { status: newStatus });
+      await orderAPI.updateKitchenStatus(orderId, { status: newStatus });
       setSuccess(`Order moved to ${newStatus}.`);
 
       if (selectedOrder?.id === orderId) {
@@ -246,6 +246,15 @@ function OrderCard({ order, onOpen, onStatusUpdate, updating }) {
   const nextStatus = STATUS_FLOW[order.status];
   const meta = STATUS_META[order.status] || STATUS_META.pending;
   const elapsedTime = getElapsedMinutes(order.createdAt);
+  const tableLabel = order.tableNumber ? `#${String(order.tableNumber).padStart(2, '0')}` : '#Walk-in';
+  const nextActionLabel =
+    nextStatus === 'preparing'
+      ? 'Start Preparing'
+      : nextStatus === 'ready'
+        ? 'Mark Ready'
+        : nextStatus === 'served'
+          ? 'Mark Served'
+          : `Move to ${STATUS_META[nextStatus]?.label || nextStatus}`;
 
   return (
     <div className="glass-panel overflow-hidden rounded-3xl transition hover:-translate-y-0.5">
@@ -255,7 +264,7 @@ function OrderCard({ order, onOpen, onStatusUpdate, updating }) {
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0">
             <p className="text-xs font-semibold uppercase tracking-[0.25em] text-[var(--text-tertiary)]">Table</p>
-            <h3 className="mt-2 text-2xl font-bold text-[var(--text-primary)]">#{order.tableNumber || 'Walk-in'}</h3>
+            <h3 className="mt-2 text-2xl font-bold text-[var(--text-primary)]">{tableLabel}</h3>
             <p className="mt-1 text-sm text-[var(--text-secondary)]">{formatDate(order.createdAt)}</p>
           </div>
 
@@ -306,7 +315,7 @@ function OrderCard({ order, onOpen, onStatusUpdate, updating }) {
                 className="inline-flex items-center justify-center gap-2 rounded-full bg-gradient-to-r from-[var(--color-primary)] to-[var(--color-accent)] px-4 py-2 text-sm font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {updating === order.id ? <Loader className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
-                {updating === order.id ? 'Updating...' : `Move to ${STATUS_META[nextStatus]?.label || nextStatus}`}
+                {updating === order.id ? 'Updating...' : nextActionLabel}
               </button>
             )}
           </div>
@@ -319,6 +328,15 @@ function OrderCard({ order, onOpen, onStatusUpdate, updating }) {
 function OrderDetailModal({ order, updating, onClose, onStatusUpdate }) {
   const nextStatus = STATUS_FLOW[order.status];
   const meta = STATUS_META[order.status] || STATUS_META.pending;
+  const tableLabel = order.tableNumber ? `#${String(order.tableNumber).padStart(2, '0')}` : '#Walk-in';
+  const nextActionLabel =
+    nextStatus === 'preparing'
+      ? 'Start Preparing'
+      : nextStatus === 'ready'
+        ? 'Mark Ready'
+        : nextStatus === 'served'
+          ? 'Mark Served'
+          : `Move to ${STATUS_META[nextStatus]?.label || nextStatus}`;
 
   return (
     <div className="fixed inset-0 z-50 flex items-end bg-black/50 p-3 sm:items-center sm:justify-center sm:p-4">
@@ -328,7 +346,7 @@ function OrderDetailModal({ order, updating, onClose, onStatusUpdate }) {
         <div className="sticky top-0 flex items-center justify-between border-b border-[var(--border-color)] bg-[linear-gradient(135deg,var(--bg-card),var(--bg-card-muted))] px-4 py-4 sm:px-6">
           <div className="min-w-0">
             <p className="text-xs font-semibold uppercase tracking-[0.25em] text-[var(--text-tertiary)]">Order detail</p>
-            <h2 className="mt-1 text-xl font-bold text-[var(--text-primary)]">Table #{order.tableNumber || 'Walk-in'}</h2>
+            <h2 className="mt-1 text-xl font-bold text-[var(--text-primary)]">Table {tableLabel}</h2>
           </div>
           <button
             type="button"
@@ -387,14 +405,14 @@ function OrderDetailModal({ order, updating, onClose, onStatusUpdate }) {
             <button
               type="button"
               onClick={() => onStatusUpdate(order.id, nextStatus)}
-              disabled={updating === order.id}
-              className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-[var(--color-primary)] to-[var(--color-accent)] px-4 py-3 text-sm font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {updating === order.id ? <Loader className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
-              {updating === order.id ? 'Updating...' : `Move to ${STATUS_META[nextStatus]?.label || nextStatus}`}
-            </button>
-          ) : null}
-        </div>
+            disabled={updating === order.id}
+            className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-[var(--color-primary)] to-[var(--color-accent)] px-4 py-3 text-sm font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {updating === order.id ? <Loader className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
+            {updating === order.id ? 'Updating...' : nextActionLabel}
+          </button>
+        ) : null}
+      </div>
       </div>
     </div>
   );

@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { Eye, EyeOff, Loader, ShieldCheck, Sparkles } from 'lucide-react';
+import { ArrowLeft, Eye, EyeOff, Loader, ShieldCheck, Sparkles } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
+import { useAuthStore } from '../context/authStore';
 import { validateEmail } from '../utils/validators';
-import { canAccessPortal, PORTAL_HOME } from '../utils/portalRouting';
-import { clearPortalSession, hasPortalSession, readPortalSession } from '../utils/authStorage';
+import { canAccessPortal, resolvePortalHome } from '../utils/portalRouting';
+import { clearPortalSession, getValidPortalSession } from '../utils/authStorage';
 import Card from '../components/common/Card';
 import Input from '../components/common/Input';
 import Button from '../components/common/Button';
@@ -15,14 +16,15 @@ const PORTAL_CONFIG = {
     badge: 'Admin Portal',
     title: 'Control business, menu, and reporting.',
     description:
-      'For owners handling business setup, menu control, staff, orders, analytics, and settings.',
+      'For owners and restaurant managers handling business control or daily operations with role-based access.',
     featureCards: [
       { label: 'Control', value: 'Business overview' },
-      { label: 'Menu', value: 'Item management' },
-      { label: 'Insights', value: 'Sales analytics' },
+      { label: 'Ops', value: 'Live service control' },
+      { label: 'Insights', value: 'Role-based reporting' },
     ],
     modes: [
       { key: 'owner', label: 'Owner', helper: 'Restaurant account login', isStaff: false },
+      { key: 'manager', label: 'Manager', helper: 'Operations account login', isStaff: true },
     ],
   },
   pos: {
@@ -39,31 +41,39 @@ const PORTAL_CONFIG = {
       { key: 'staff', label: 'Waiter / Cashier', helper: 'Staff account login', isStaff: true },
     ],
   },
-  kot: {
-    badge: 'KOT Portal',
-    title: 'Kitchen execution with zero distractions.',
-    description:
-      'For kitchen staff managing active tickets, ready queue, and preparation flow on the display screen.',
-    featureCards: [
-      { label: 'Queue', value: 'Active tickets only' },
-      { label: 'Prep', value: 'One-tap status updates' },
-      { label: 'Speed', value: 'Full-screen workflow' },
-    ],
-    modes: [
-      { key: 'kitchen_staff', label: 'Kitchen Staff', helper: 'Kitchen-only login', isStaff: true },
-    ],
-  },
 };
 
-export default function Login({ portal = 'admin' }) {
+export default function Login({ portal = 'admin', initialModeKey = '' }) {
   const navigate = useNavigate();
   const { login, isLoading, error: authError } = useAuth();
-  const config = PORTAL_CONFIG[portal] || PORTAL_CONFIG.admin;
+  const isHydrated = useAuthStore((state) => state.isHydrated);
+  const baseConfig = PORTAL_CONFIG[portal] || PORTAL_CONFIG.admin;
+  const filteredModes = initialModeKey
+    ? baseConfig.modes.filter((mode) => mode.key === initialModeKey)
+    : baseConfig.modes.filter((mode) => mode.key !== 'manager');
+  const config = {
+    ...baseConfig,
+    modes: filteredModes.length > 0 ? filteredModes : baseConfig.modes,
+  };
+  const effectiveConfig =
+    portal === 'admin' && initialModeKey === 'manager'
+      ? {
+          ...config,
+          badge: 'Manager Portal',
+          title: 'Control daily restaurant operations.',
+          description: 'For restaurant managers handling tables, orders, kitchen flow, billing, and floor execution.',
+          featureCards: [
+            { label: 'Floor', value: 'Live table control' },
+            { label: 'Kitchen', value: 'Service flow watch' },
+            { label: 'Billing', value: 'Daily bill handling' },
+          ],
+        }
+      : config;
 
   const [formData, setFormData] = useState({ email: '', password: '' });
   const [errors, setErrors] = useState({});
   const [showPassword, setShowPassword] = useState(false);
-  const [selectedModeKey, setSelectedModeKey] = useState(config.modes[0]?.key || 'owner');
+  const [selectedModeKey, setSelectedModeKey] = useState(initialModeKey || config.modes[0]?.key || 'owner');
 
   const selectedMode = useMemo(
     () => config.modes.find((mode) => mode.key === selectedModeKey) || config.modes[0],
@@ -71,20 +81,29 @@ export default function Login({ portal = 'admin' }) {
   );
 
   useEffect(() => {
-    setSelectedModeKey(config.modes[0]?.key || 'owner');
-  }, [config.modes, portal]);
+    setSelectedModeKey(initialModeKey || config.modes[0]?.key || 'owner');
+  }, [config.modes, initialModeKey, portal]);
 
   useEffect(() => {
-    if (hasPortalSession(portal)) {
-      const portalUser = readPortalSession(portal)?.user;
+    if (!isHydrated) {
+      return;
+    }
+
+    const portalSession = getValidPortalSession(portal);
+    if (portalSession) {
+      const portalUser = portalSession.user;
       if (canAccessPortal(portalUser?.role, portal)) {
-        navigate(PORTAL_HOME[portal], { replace: true });
+        navigate(resolvePortalHome(portal, portalUser?.role), { replace: true });
         return;
       }
 
       clearPortalSession(portal);
     }
-  }, [navigate, portal]);
+  }, [isHydrated, navigate, portal]);
+
+  if (!isHydrated) {
+    return null;
+  }
 
   const validateForm = () => {
     const newErrors = {};
@@ -101,9 +120,9 @@ export default function Login({ portal = 'admin' }) {
 
     const success = await login(formData.email, formData.password, selectedMode?.isStaff, portal);
     if (success) {
-      const loggedInRole = readPortalSession(portal)?.user?.role;
+      const loggedInRole = getValidPortalSession(portal)?.user?.role;
       if (canAccessPortal(loggedInRole, portal)) {
-        navigate(PORTAL_HOME[portal], { replace: true });
+        navigate(resolvePortalHome(portal, loggedInRole), { replace: true });
       }
     }
   };
@@ -113,20 +132,24 @@ export default function Login({ portal = 'admin' }) {
       <div className="mx-auto grid min-h-[calc(100vh-3rem)] w-full max-w-6xl grid-cols-1 gap-6 lg:grid-cols-[1.05fr,0.95fr]">
         <Card className="flex flex-col justify-between overflow-hidden bg-[radial-gradient(circle_at_top_left,_rgba(79,70,229,0.18),_transparent_35%),var(--color-surface)]">
           <div>
-            <div className="inline-flex items-center gap-2 rounded-full bg-[var(--color-primary-soft)] px-3 py-1 text-sm font-semibold text-[var(--color-primary)]">
+            <Link to="/" className="inline-flex items-center gap-2 text-sm font-semibold text-[var(--color-primary)]">
+              <ArrowLeft className="h-4 w-4" />
+              Back to Home
+            </Link>
+            <div className="mt-5 inline-flex items-center gap-2 rounded-full bg-[var(--color-primary-soft)] px-3 py-1 text-sm font-semibold text-[var(--color-primary)]">
               <Sparkles className="h-4 w-4" />
-              {config.badge}
+              {effectiveConfig.badge}
             </div>
             <h1 className="mt-6 text-4xl font-bold tracking-tight text-[var(--color-text)] sm:text-5xl">
-              {config.title}
+              {effectiveConfig.title}
             </h1>
             <p className="mt-5 max-w-xl text-base leading-7 text-[var(--color-text-muted)]">
-              {config.description}
+              {effectiveConfig.description}
             </p>
           </div>
 
           <div className="mt-8 grid gap-3 sm:grid-cols-3">
-            {config.featureCards.map((card) => (
+            {effectiveConfig.featureCards.map((card) => (
               <div key={card.label} className="rounded-[1.5rem] bg-[var(--color-surface-muted)] p-4">
                 <p className="text-xs uppercase tracking-[0.2em] text-[var(--color-text-subtle)]">{card.label}</p>
                 <p className="mt-2 text-lg font-semibold text-[var(--color-text)]">{card.value}</p>
@@ -144,7 +167,7 @@ export default function Login({ portal = 'admin' }) {
               </div>
               <h2 className="mt-4 text-3xl font-bold text-[var(--color-text)]">Welcome back</h2>
               <p className="mt-2 text-sm text-[var(--color-text-muted)]">
-                Sign in to continue inside the {config.badge.toLowerCase()}.
+                Sign in to continue inside the {effectiveConfig.badge.toLowerCase()}.
               </p>
             </div>
 
@@ -181,7 +204,13 @@ export default function Login({ portal = 'admin' }) {
                   autoComplete="username"
                   value={formData.email}
                   onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                  placeholder={selectedMode?.isStaff ? 'staff@restaurant.com' : 'owner@restaurant.com'}
+                  placeholder={
+                    selectedModeKey === 'manager'
+                      ? 'manager@restaurant.com'
+                      : selectedMode?.isStaff
+                        ? 'staff@restaurant.com'
+                        : 'owner@restaurant.com'
+                  }
                 />
                 {errors.email ? <p className="mt-2 text-sm text-red-500">{errors.email}</p> : null}
               </div>
@@ -213,7 +242,7 @@ export default function Login({ portal = 'admin' }) {
 
               <Button type="submit" fullWidth size="lg" disabled={isLoading}>
                 {isLoading ? <Loader className="h-4 w-4 animate-spin" /> : null}
-                {isLoading ? 'Logging in...' : `Open ${config.badge}`}
+                {isLoading ? 'Logging in...' : `Open ${selectedModeKey === 'manager' ? 'Manager Portal' : config.badge}`}
               </Button>
             </form>
 

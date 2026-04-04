@@ -8,6 +8,8 @@ import Input from '../components/common/Input';
 import Modal from '../components/common/Modal';
 import StatCard from '../components/common/StatCard';
 import EmptyState from '../components/common/EmptyState';
+import PaginationControls from '../components/common/PaginationControls';
+import useResponsivePagination from '../hooks/useResponsivePagination';
 
 function createItemForm() {
   return {
@@ -53,6 +55,16 @@ export default function Inventory() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const {
+    paginatedItems: paginatedItems,
+    currentPage,
+    totalPages,
+    canGoPrevious,
+    canGoNext,
+    goPrevious,
+    goNext,
+    hasPagination,
+  } = useResponsivePagination(items, { mobileItemsPerPage: 6, desktopItemsPerPage: 10 });
 
   const totalStockAlerts = summaryData?.lowStockCount || 0;
 
@@ -247,7 +259,7 @@ export default function Inventory() {
       ) : (
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1.5fr)_minmax(20rem,0.9fr)]">
           <div className="space-y-4">
-            {items.map((item) => (
+            {paginatedItems.map((item) => (
               <Card key={item.id} className="p-4 sm:p-5">
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                   <div className="min-w-0">
@@ -328,6 +340,17 @@ export default function Inventory() {
               </div>
             </Card>
           </div>
+
+          {hasPagination ? (
+            <PaginationControls
+              currentPage={currentPage}
+              totalPages={totalPages}
+              canGoPrevious={canGoPrevious}
+              canGoNext={canGoNext}
+              onPrevious={goPrevious}
+              onNext={goNext}
+            />
+          ) : null}
         </div>
       )}
 

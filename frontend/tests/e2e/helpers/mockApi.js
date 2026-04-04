@@ -11,6 +11,26 @@ export function jsonSuccess(data, message = 'OK', status = 200) {
   };
 }
 
+function encodeBase64Url(value) {
+  return Buffer.from(JSON.stringify(value))
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '');
+}
+
+export function createTestJwt(payload = {}) {
+  const header = { alg: 'HS256', typ: 'JWT' };
+  const nowInSeconds = Math.floor(Date.now() / 1000);
+  const body = {
+    exp: nowInSeconds + 60 * 60,
+    iat: nowInSeconds,
+    ...payload,
+  };
+
+  return `${encodeBase64Url(header)}.${encodeBase64Url(body)}.test-signature`;
+}
+
 export function jsonError(message = 'Request failed', status = 500, details) {
   return {
     status,

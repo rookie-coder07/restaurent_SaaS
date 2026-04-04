@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, Bike, Loader, Receipt, ShoppingBag, Store, TableProperties, Utensils } from 'lucide-react';
-import { useApi } from '../hooks/useApi';
-import { menuAPI, orderAPI, tableAPI } from '../services/apiEndpoints';
+import { orderAPI, restaurantAPI } from '../services/apiEndpoints';
 import MenuPanel from '../components/pos/MenuPanel';
 import CartPanel from '../components/pos/CartPanel';
 import OrderControls from '../components/pos/OrderControls';
@@ -11,7 +10,10 @@ import OnlineOrderDetailsPanel from '../components/pos/OnlineOrderDetailsPanel';
 import PaymentPanel from '../components/pos/PaymentPanel';
 import Modal from '../components/common/Modal';
 import { formatCurrency, formatDisplayOrderNumber } from '../utils/formatters';
-import { printKitchenTicket } from '../utils/kotPrint';
+import { getPosWorkspaceDraftKey, usePosStore } from '../context/posStore';
+import { useAuthStore } from '../context/authStore';
+import { useApi } from '../hooks/useApi';
+import { buildInvoiceData, calculateInvoiceSummary, getRestaurantBillingSettings } from '../utils/invoice';
 
 function formatOrderStatusLabel(status) {
   if (!status) {
@@ -183,30 +185,67 @@ function serializePromisedAt(value) {
 }
 
 export default function POS() {
+  const navigate = useNavigate();
+  const user = useAuthStore((state) => state.user);
+  const { data: restaurantProfile = {} } = useApi(restaurantAPI.getProfile);
   const [searchParams, setSearchParams] = useSearchParams();
-  const { data: menuItemsData = {}, loading: menuLoading, error: menuError } = useApi(() => menuAPI.getItems({ limit: 300 }));
-  const { data: categoryData = {} } = useApi(() => menuAPI.getCategories());
-  const { data: tableData = {} } = useApi(() => tableAPI.getTables({ limit: 200 }));
+  const menuItemsData = usePosStore((state) => state.menuItemsData);
+  const categoryData = usePosStore((state) => state.categoryData);
+  const tableData = usePosStore((state) => state.tableData);
+  const menuLoading = usePosStore((state) => state.menuLoading);
+  const categoryLoading = usePosStore((state) => state.categoryLoading);
+  const tableLoading = usePosStore((state) => state.tableLoading);
+  const menuError = usePosStore((state) => state.menuError);
+  const categoryError = usePosStore((state) => state.categoryError);
+  const tableError = usePosStore((state) => state.tableError);
+  const cachedOnlineInbox = usePosStore((state) => state.onlineInbox);
+  const cachedOnlineInboxError = usePosStore((state) => state.onlineInboxError);
+  const onlineInboxLoading = usePosStore((state) => state.onlineInboxLoading);
+  const currentWorkspace = usePosStore((state) => state.currentWorkspace);
+  const preloadCoreData = usePosStore((state) => state.preloadCoreData);
+  const refreshTableOverview = usePosStore((state) => state.refreshTableOverview);
+  const refreshCachedOnlineInbox = usePosStore((state) => state.refreshOnlineInbox);
+  const setCurrentWorkspace = usePosStore((state) => state.setCurrentWorkspace);
+  const resetCurrentWorkspace = usePosStore((state) => state.resetCurrentWorkspace);
+  const saveWorkspaceDraft = usePosStore((state) => state.saveWorkspaceDraft);
+  const clearWorkspaceDraft = usePosStore((state) => state.clearWorkspaceDraft);
+  const cacheTableOrder = usePosStore((state) => state.cacheTableOrder);
+  const clearTableOrderCache = usePosStore((state) => state.clearTableOrderCache);
+  const clearPendingBillingTarget = usePosStore((state) => state.clearPendingBillingTarget);
   const requestedTableId = searchParams.get('tableId') || '';
   const requestedOrderId = searchParams.get('orderId') || '';
+  const [pendingBillingTarget] = useState(() => usePosStore.getState().pendingBillingTarget);
+  const incomingTableId = requestedTableId || pendingBillingTarget?.tableId || currentWorkspace.selectedTableId || '';
+  const incomingOrderId = requestedOrderId || pendingBillingTarget?.orderId || currentWorkspace.pinnedOrderId || '';
+  const initialWorkspace = {
+    ...currentWorkspace,
+    orderType:
+      currentWorkspace.orderType ||
+      (incomingTableId ? 'dine-in' : ''),
+    selectedTableId: incomingTableId || currentWorkspace.selectedTableId || '',
+    pinnedOrderId: incomingOrderId || currentWorkspace.pinnedOrderId || '',
+  };
 
-  const [cartItems, setCartItems] = useState([]);
-  const [orderType, setOrderType] = useState('');
-  const [selectedTableId, setSelectedTableId] = useState('');
-  const [discountType, setDiscountType] = useState('flat');
-  const [discountValue, setDiscountValue] = useState('');
+  const [cartItems, setCartItems] = useState(initialWorkspace.cartItems || []);
+  const [orderType, setOrderType] = useState(initialWorkspace.orderType || '');
+  const [selectedTableId, setSelectedTableId] = useState(initialWorkspace.selectedTableId || '');
+  const [discountType, setDiscountType] = useState(initialWorkspace.discountType || 'flat');
+  const [discountValue, setDiscountValue] = useState(initialWorkspace.discountValue || '');
   const [activeCategoryId, setActiveCategoryId] = useState('all');
   const [submitError, setSubmitError] = useState(null);
   const [submitSuccess, setSubmitSuccess] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSendingToKitchen, setIsSendingToKitchen] = useState(false);
   const [isSettling, setIsSettling] = useState(false);
-  const [activeOrder, setActiveOrder] = useState(null);
+  const [activeOrder, setActiveOrder] = useState(initialWorkspace.activeOrder || null);
   const [isLoadingTableOrder, setIsLoadingTableOrder] = useState(false);
-  const [paymentMethod, setPaymentMethod] = useState('cash');
-  const [cashReceived, setCashReceived] = useState('');
-  const [paymentNote, setPaymentNote] = useState('');
-  const [pinnedOrderId, setPinnedOrderId] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState(initialWorkspace.paymentMethod || 'cash');
+  const [cashReceived, setCashReceived] = useState(initialWorkspace.cashReceived || '');
+  const [paymentNote, setPaymentNote] = useState(initialWorkspace.paymentNote || '');
+  const [packingCharge, setPackingCharge] = useState(initialWorkspace.packingCharge || '');
+  const [serviceCharge, setServiceCharge] = useState(initialWorkspace.serviceCharge || '');
+  const [deliveryCharge, setDeliveryCharge] = useState(initialWorkspace.deliveryCharge || '');
+  const [pinnedOrderId, setPinnedOrderId] = useState(initialWorkspace.pinnedOrderId || '');
   const [isCancelling, setIsCancelling] = useState(false);
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
@@ -214,17 +253,21 @@ export default function POS() {
   const [showItemDetailsModal, setShowItemDetailsModal] = useState(false);
   const [itemNoteDraft, setItemNoteDraft] = useState('');
   const [itemModifiersDraft, setItemModifiersDraft] = useState('');
-  const [onlineSource, setOnlineSource] = useState('direct');
-  const [promisedAt, setPromisedAt] = useState('');
-  const [onlinePaymentState, setOnlinePaymentState] = useState('pending');
-  const [customerName, setCustomerName] = useState('');
-  const [customerPhone, setCustomerPhone] = useState('');
-  const [customerAddress, setCustomerAddress] = useState('');
-  const [channelOrderId, setChannelOrderId] = useState('');
-  const [onlineInbox, setOnlineInbox] = useState([]);
-  const [isLoadingOnlineInbox, setIsLoadingOnlineInbox] = useState(false);
-  const [onlineInboxError, setOnlineInboxError] = useState('');
+  const [onlineSource, setOnlineSource] = useState(initialWorkspace.onlineSource || 'direct');
+  const [promisedAt, setPromisedAt] = useState(initialWorkspace.promisedAt || '');
+  const [onlinePaymentState, setOnlinePaymentState] = useState(initialWorkspace.onlinePaymentState || 'pending');
+  const [customerName, setCustomerName] = useState(initialWorkspace.customerName || '');
+  const [customerPhone, setCustomerPhone] = useState(initialWorkspace.customerPhone || '');
+  const [customerAddress, setCustomerAddress] = useState(initialWorkspace.customerAddress || '');
+  const [channelOrderId, setChannelOrderId] = useState(initialWorkspace.channelOrderId || '');
+  const [loyaltyPhone, setLoyaltyPhone] = useState(initialWorkspace.customerPhone || '');
+  const [loyaltyProfile, setLoyaltyProfile] = useState(null);
+  const [redeemPoints, setRedeemPoints] = useState('');
+  const [isCheckingLoyalty, setIsCheckingLoyalty] = useState(false);
+  const [onlineInbox, setOnlineInbox] = useState(cachedOnlineInbox || []);
+  const [onlineInboxError, setOnlineInboxError] = useState(cachedOnlineInboxError || '');
   const [updatingOnlineOrderId, setUpdatingOnlineOrderId] = useState('');
+  const [isSwitchingTable, setIsSwitchingTable] = useState(false);
 
   const items = useMemo(
     () => (menuItemsData?.items || []).map(normalizeMenuItem).filter((item) => item.isAvailable),
@@ -245,13 +288,37 @@ export default function POS() {
   );
 
   useEffect(() => {
-    if (!requestedTableId) {
+    if (pendingBillingTarget) {
+      clearPendingBillingTarget();
+    }
+  }, [clearPendingBillingTarget, pendingBillingTarget]);
+
+  useEffect(() => {
+    preloadCoreData().catch(() => {
+      // Individual store error states handle the UI.
+    });
+    refreshTableOverview().catch(() => {
+      // Shared store error state handles the UI.
+    });
+    refreshCachedOnlineInbox().catch(() => {
+      // Shared store error state handles the UI.
+    });
+  }, [preloadCoreData, refreshCachedOnlineInbox, refreshTableOverview]);
+
+  useEffect(() => {
+    setOnlineInbox(cachedOnlineInbox || []);
+    setOnlineInboxError(cachedOnlineInboxError || '');
+  }, [cachedOnlineInbox, cachedOnlineInboxError]);
+
+  useEffect(() => {
+    if (!incomingTableId) {
       return;
     }
 
     setOrderType((current) => current || 'dine-in');
-    setSelectedTableId((current) => current || requestedTableId);
-  }, [requestedTableId]);
+    setSelectedTableId((current) => current || incomingTableId);
+    setPinnedOrderId((current) => current || incomingOrderId);
+  }, [incomingOrderId, incomingTableId]);
 
   const categories = useMemo(() => {
     const normalizedCategories = (categoryData?.categories || []).map(normalizeCategory);
@@ -291,12 +358,9 @@ export default function POS() {
   useEffect(() => {
     if (orderType !== 'dine-in') {
       setIsLoadingTableOrder(false);
+      setIsSwitchingTable(false);
     }
   }, [orderType]);
-
-  useEffect(() => {
-    refreshOnlineInbox();
-  }, []);
 
   useEffect(() => {
     if (orderType !== 'dine-in') {
@@ -313,6 +377,7 @@ export default function POS() {
       setPaymentNote('');
       resetOnlineDraft();
       setIsLoadingTableOrder(false);
+      setIsSwitchingTable(false);
       return undefined;
     }
 
@@ -320,8 +385,25 @@ export default function POS() {
 
     const loadActiveOrder = async () => {
       setIsLoadingTableOrder(true);
+      setIsSwitchingTable(true);
       setSubmitError(null);
       setSubmitSuccess(null);
+
+      const { workspaceDrafts: latestWorkspaceDrafts, tableOrderCache: latestTableOrderCache } = usePosStore.getState();
+      const cachedDraft = latestWorkspaceDrafts[getPosWorkspaceDraftKey('dine-in', selectedTableId)];
+      const cachedTableEntry = latestTableOrderCache[selectedTableId];
+
+      if (cachedDraft) {
+        applyWorkspaceSnapshot(cachedDraft);
+      } else if (cachedTableEntry) {
+        if (cachedTableEntry.order) {
+          applyOrderToWorkspace(cachedTableEntry.order, { syncUrl: false });
+        } else {
+          clearBillDraft();
+          setOrderType('dine-in');
+          setSelectedTableId(selectedTableId);
+        }
+      }
 
       try {
         const targetOrderId = pinnedOrderId || requestedOrderId;
@@ -335,7 +417,10 @@ export default function POS() {
         }
 
         if (currentOrder) {
-          applyOrderToWorkspace(currentOrder);
+          cacheTableOrder(selectedTableId, currentOrder);
+          // Don't rewrite the URL during table hydration or we can bounce
+          // between adding/removing orderId and trigger a loader loop.
+          applyOrderToWorkspace(currentOrder, { syncUrl: false });
 
           if (requestedOrderId) {
             const nextSearchParams = new URLSearchParams(window.location.search);
@@ -351,6 +436,8 @@ export default function POS() {
           setPaymentNote('');
           setPinnedOrderId('');
           resetOnlineDraft();
+          cacheTableOrder(selectedTableId, null);
+          clearWorkspaceDraft(getPosWorkspaceDraftKey('dine-in', selectedTableId));
         }
       } catch (error) {
         if (!isCurrent) {
@@ -370,6 +457,7 @@ export default function POS() {
       } finally {
         if (isCurrent) {
           setIsLoadingTableOrder(false);
+          setIsSwitchingTable(false);
         }
       }
     };
@@ -379,7 +467,15 @@ export default function POS() {
     return () => {
       isCurrent = false;
     };
-  }, [orderType, pinnedOrderId, requestedOrderId, selectedTableId, setSearchParams]);
+  }, [
+    cacheTableOrder,
+    clearWorkspaceDraft,
+    orderType,
+    pinnedOrderId,
+    requestedOrderId,
+    selectedTableId,
+    setSearchParams,
+  ]);
 
   useEffect(() => {
     if (!requestedOrderId || orderType === 'dine-in') {
@@ -400,6 +496,9 @@ export default function POS() {
           return;
         }
 
+        if (requestedOrder.tableId) {
+          cacheTableOrder(requestedOrder.tableId, requestedOrder);
+        }
         applyOrderToWorkspace(requestedOrder);
       } catch (error) {
         if (!isCurrent) {
@@ -415,7 +514,7 @@ export default function POS() {
     return () => {
       isCurrent = false;
     };
-  }, [orderType, requestedOrderId]);
+  }, [cacheTableOrder, orderType, requestedOrderId]);
 
   const subtotal = useMemo(
     () => cartItems.reduce((sum, item) => sum + item.price * item.qty, 0),
@@ -439,6 +538,37 @@ export default function POS() {
     () => Math.max(0, Number((subtotal - discountAmount).toFixed(2))),
     [discountAmount, subtotal]
   );
+  const loyaltyDiscountPreview = useMemo(() => {
+    const requestedPoints = Math.max(0, Math.floor(Number(redeemPoints || 0)));
+    const availablePoints = Math.max(0, Number(loyaltyProfile?.pointsBalance || 0));
+    return Math.min(requestedPoints, availablePoints, Math.floor(finalTotal));
+  }, [finalTotal, loyaltyProfile?.pointsBalance, redeemPoints]);
+  const payableTotal = useMemo(
+    () =>
+      calculateInvoiceSummary({
+        subtotal,
+        orderDiscountAmount: discountAmount,
+        loyaltyRedeemedAmount: loyaltyDiscountPreview,
+        packingCharge,
+        serviceCharge,
+        deliveryCharge,
+        gstPercent: getRestaurantBillingSettings(restaurantProfile).gstPercent,
+      }).grandTotal,
+    [deliveryCharge, discountAmount, loyaltyDiscountPreview, packingCharge, restaurantProfile, serviceCharge, subtotal]
+  );
+  const invoicePreview = useMemo(
+    () =>
+      calculateInvoiceSummary({
+        subtotal,
+        orderDiscountAmount: discountAmount,
+        loyaltyRedeemedAmount: loyaltyDiscountPreview,
+        packingCharge,
+        serviceCharge,
+        deliveryCharge,
+        gstPercent: getRestaurantBillingSettings(restaurantProfile).gstPercent,
+      }),
+    [deliveryCharge, discountAmount, loyaltyDiscountPreview, packingCharge, restaurantProfile, serviceCharge, subtotal]
+  );
 
   const isEditingActiveBill = Boolean(activeOrder?.id);
   const cashReceivedAmount = useMemo(
@@ -448,16 +578,16 @@ export default function POS() {
   const changeDue = useMemo(
     () =>
       paymentMethod === 'cash' && Number.isFinite(cashReceivedAmount)
-        ? Math.max(0, Number((cashReceivedAmount - finalTotal).toFixed(2)))
+        ? Math.max(0, Number((cashReceivedAmount - payableTotal).toFixed(2)))
         : 0,
-    [cashReceivedAmount, finalTotal, paymentMethod]
+    [cashReceivedAmount, payableTotal, paymentMethod]
   );
   const shortfallAmount = useMemo(
     () =>
       paymentMethod === 'cash' && Number.isFinite(cashReceivedAmount)
-        ? Math.max(0, Number((finalTotal - cashReceivedAmount).toFixed(2)))
-        : finalTotal,
-    [cashReceivedAmount, finalTotal, paymentMethod]
+        ? Math.max(0, Number((payableTotal - cashReceivedAmount).toFixed(2)))
+        : payableTotal,
+    [cashReceivedAmount, payableTotal, paymentMethod]
   );
   const cartSignature = useMemo(() => createItemsSignature(cartItems), [cartItems]);
   const activeOrderSignature = useMemo(
@@ -522,6 +652,7 @@ export default function POS() {
     [cartItems, editingItemId]
   );
   const shouldShowBlockingTableLoader = isLoadingTableOrder && !activeOrder && cartItems.length === 0;
+  const posDataError = menuError || categoryError || tableError || '';
 
   const syncBillingSearchParams = ({ tableId = '', orderId = '' } = {}) => {
     const nextSearchParams = new URLSearchParams(window.location.search);
@@ -549,9 +680,42 @@ export default function POS() {
     setCustomerPhone('');
     setCustomerAddress('');
     setChannelOrderId('');
+    setLoyaltyPhone('');
+    setLoyaltyProfile(null);
+    setRedeemPoints('');
   };
 
-  const applyOrderToWorkspace = (order) => {
+  const applyWorkspaceSnapshot = (workspace) => {
+    if (!workspace) {
+      return;
+    }
+
+    setActiveOrder(workspace.activeOrder || null);
+    setPinnedOrderId(workspace.pinnedOrderId || '');
+    setOrderType(workspace.orderType || '');
+    setSelectedTableId(workspace.selectedTableId || '');
+    setCartItems(workspace.cartItems || []);
+    setDiscountType(workspace.discountType || 'flat');
+    setDiscountValue(workspace.discountValue || '');
+    setPaymentMethod(workspace.paymentMethod || 'cash');
+    setCashReceived(workspace.cashReceived || '');
+    setPaymentNote(workspace.paymentNote || '');
+    setPackingCharge(workspace.packingCharge || '');
+    setServiceCharge(workspace.serviceCharge || '');
+    setDeliveryCharge(workspace.deliveryCharge || '');
+    setOnlineSource(workspace.onlineSource || 'direct');
+    setPromisedAt(workspace.promisedAt || '');
+    setOnlinePaymentState(workspace.onlinePaymentState || 'pending');
+    setCustomerName(workspace.customerName || '');
+    setCustomerPhone(workspace.customerPhone || '');
+    setCustomerAddress(workspace.customerAddress || '');
+    setChannelOrderId(workspace.channelOrderId || '');
+    setLoyaltyPhone(workspace.customerPhone || '');
+    setLoyaltyProfile(null);
+    setRedeemPoints('');
+  };
+
+  const applyOrderToWorkspace = (order, { syncUrl = true } = {}) => {
     if (!order) {
       return;
     }
@@ -569,6 +733,9 @@ export default function POS() {
     setPaymentMethod(restoredDraft.paymentMethod);
     setCashReceived('');
     setPaymentNote('');
+    setPackingCharge(order?.billing?.packingCharge ? String(order.billing.packingCharge) : '');
+    setServiceCharge(order?.billing?.serviceCharge ? String(order.billing.serviceCharge) : '');
+    setDeliveryCharge(order?.billing?.deliveryCharge ? String(order.billing.deliveryCharge) : '');
     setOnlineSource(restoredOnlineDraft.source);
     setPromisedAt(restoredOnlineDraft.promisedAt);
     setOnlinePaymentState(restoredOnlineDraft.paymentState);
@@ -576,25 +743,44 @@ export default function POS() {
     setCustomerPhone(restoredOnlineDraft.customerPhone);
     setCustomerAddress(restoredOnlineDraft.customerAddress);
     setChannelOrderId(restoredOnlineDraft.channelOrderId);
-    syncBillingSearchParams({
-      tableId: order.tableId || '',
-      orderId: order.id || '',
+    setLoyaltyPhone(restoredOnlineDraft.customerPhone);
+    setLoyaltyProfile(order.loyalty?.customerPhone ? {
+      customerPhone: order.loyalty.customerPhone,
+      pointsBalance: order.loyalty.availablePointsAfter || 0,
+      visitCount: 0,
+      totalEarnedPoints: order.loyalty.earnedPoints || 0,
+      totalRedeemedPoints: order.loyalty.redeemedPoints || 0,
+    } : null);
+    setRedeemPoints('');
+    saveWorkspaceDraft(getPosWorkspaceDraftKey(order.orderType || (order.tableId ? 'dine-in' : 'delivery'), order.tableId || ''), {
+      orderType: order.orderType || (order.tableId ? 'dine-in' : 'delivery'),
+      selectedTableId: order.tableId || '',
+      pinnedOrderId: order.id || '',
+      cartItems: restoredDraft.cartItems,
+      discountType: restoredDraft.discountType,
+      discountValue: restoredDraft.discountValue,
+      activeOrder: order,
+      paymentMethod: restoredDraft.paymentMethod,
+      cashReceived: '',
+      paymentNote: '',
+      onlineSource: restoredOnlineDraft.source,
+      promisedAt: restoredOnlineDraft.promisedAt,
+      onlinePaymentState: restoredOnlineDraft.paymentState,
+      customerName: restoredOnlineDraft.customerName,
+      customerPhone: restoredOnlineDraft.customerPhone,
+      customerAddress: restoredOnlineDraft.customerAddress,
+      channelOrderId: restoredOnlineDraft.channelOrderId,
     });
+    if (syncUrl) {
+      syncBillingSearchParams({
+        tableId: order.tableId || '',
+        orderId: order.id || '',
+      });
+    }
   };
 
   const refreshOnlineInbox = async () => {
-    setIsLoadingOnlineInbox(true);
-    setOnlineInboxError('');
-
-    try {
-      const response = await orderAPI.getOnlineInbox();
-      setOnlineInbox(response.data?.data || []);
-    } catch (error) {
-      setOnlineInbox([]);
-      setOnlineInboxError(error.response?.data?.message || 'Failed to load online order inbox.');
-    } finally {
-      setIsLoadingOnlineInbox(false);
-    }
+    await refreshCachedOnlineInbox({ force: true });
   };
 
   const clearBillDraft = () => {
@@ -605,6 +791,9 @@ export default function POS() {
     setPaymentMethod('cash');
     setCashReceived('');
     setPaymentNote('');
+    setPackingCharge('');
+    setServiceCharge('');
+    setDeliveryCharge('');
     setShowCancelModal(false);
     setCancelReason('');
     setEditingItemId('');
@@ -612,7 +801,103 @@ export default function POS() {
     setItemNoteDraft('');
     setItemModifiersDraft('');
     resetOnlineDraft();
+    resetCurrentWorkspace();
   };
+
+  const handleCheckLoyalty = async () => {
+    const phoneToCheck = String(loyaltyPhone || customerPhone || '').trim();
+    if (phoneToCheck.length < 10) {
+      setSubmitError('Enter a valid customer phone number to check loyalty points.');
+      return;
+    }
+
+    setIsCheckingLoyalty(true);
+    setSubmitError(null);
+
+    try {
+      const response = await orderAPI.getLoyaltyProfile(phoneToCheck);
+      const profile = response.data?.data || null;
+      setLoyaltyProfile(profile);
+      setRedeemPoints('');
+      setSubmitSuccess(
+        profile?.customerPhone
+          ? `Loyalty balance loaded for ${profile.customerPhone}.`
+          : 'No loyalty history found for this number yet.'
+      );
+    } catch (error) {
+      setSubmitError(error.response?.data?.message || 'Failed to load loyalty points.');
+    } finally {
+      setIsCheckingLoyalty(false);
+    }
+  };
+
+  useEffect(() => {
+    const workspace = {
+      orderType,
+      selectedTableId,
+      pinnedOrderId,
+      cartItems,
+      discountType,
+      discountValue,
+      activeOrder,
+      paymentMethod,
+      cashReceived,
+      paymentNote,
+      packingCharge,
+      serviceCharge,
+      deliveryCharge,
+      onlineSource,
+      promisedAt,
+      onlinePaymentState,
+      customerName,
+      customerPhone,
+      customerAddress,
+      channelOrderId,
+    };
+
+    setCurrentWorkspace(workspace);
+
+    if (orderType) {
+      saveWorkspaceDraft(getPosWorkspaceDraftKey(orderType, selectedTableId), workspace);
+    }
+  }, [
+    activeOrder,
+    cartItems,
+    cashReceived,
+    channelOrderId,
+    customerAddress,
+    customerName,
+    customerPhone,
+    discountType,
+    discountValue,
+    onlinePaymentState,
+    onlineSource,
+    orderType,
+    paymentMethod,
+    paymentNote,
+    packingCharge,
+    promisedAt,
+    serviceCharge,
+    pinnedOrderId,
+    deliveryCharge,
+    saveWorkspaceDraft,
+    selectedTableId,
+    setCurrentWorkspace,
+  ]);
+
+  useEffect(() => {
+    if (customerPhone && !loyaltyPhone) {
+      setLoyaltyPhone(customerPhone);
+    }
+  }, [customerPhone, loyaltyPhone]);
+
+  useEffect(() => {
+    const normalizedPhone = String(loyaltyPhone || '').replace(/[^\d]/g, '').slice(-10);
+    if (loyaltyProfile?.customerPhone && loyaltyProfile.customerPhone !== normalizedPhone) {
+      setLoyaltyProfile(null);
+      setRedeemPoints('');
+    }
+  }, [loyaltyPhone, loyaltyProfile]);
 
   const handleOrderTypeChange = (nextOrderType) => {
     if (nextOrderType === orderType) {
@@ -637,6 +922,7 @@ export default function POS() {
     syncBillingSearchParams({ tableId });
     setSubmitError(null);
     setSubmitSuccess(null);
+    setIsSwitchingTable(true);
   };
 
   const handleChangeTable = () => {
@@ -757,7 +1043,7 @@ export default function POS() {
         return false;
       }
 
-      if (cashReceivedAmount < finalTotal) {
+      if (cashReceivedAmount < payableTotal) {
         setSubmitError('Cash received must be at least the bill total before settlement.');
         return false;
       }
@@ -806,6 +1092,12 @@ export default function POS() {
 
       const savedOrder = response.data?.data;
       applyOrderToWorkspace(savedOrder);
+      if (savedOrder?.tableId) {
+        cacheTableOrder(savedOrder.tableId, savedOrder);
+      }
+      refreshTableOverview({ force: true }).catch(() => {
+        // Shared store state updates in the background.
+      });
       refreshOnlineInbox();
 
       setSubmitSuccess(
@@ -846,17 +1138,23 @@ export default function POS() {
       const updatedOrder = result.order || orderForKitchen;
       const kitchenTicket = result.ticket || null;
       applyOrderToWorkspace(updatedOrder);
+      if (updatedOrder?.tableId) {
+        cacheTableOrder(updatedOrder.tableId, updatedOrder);
+      }
+      refreshTableOverview({ force: true }).catch(() => {
+        // Shared store state updates in the background.
+      });
       refreshOnlineInbox();
 
-      const didOpenPrint = kitchenTicket ? printKitchenTicket(kitchenTicket, {
-        title: `${kitchenTicket.displayOrderNumber || 'KOT'}${kitchenTicket.tableNumber ? ` - Table ${kitchenTicket.tableNumber}` : ''}`,
-      }) : false;
-
-      setSubmitSuccess(
-        didOpenPrint
-          ? `${formatDisplayOrderNumber(updatedOrder)} sent to kitchen. Print slip opened for KOT ${kitchenTicket?.sequence || ''}.`
-          : `${formatDisplayOrderNumber(updatedOrder)} sent to kitchen successfully.`
-      );
+      setSubmitSuccess(`${formatDisplayOrderNumber(updatedOrder)} sent to kitchen successfully.`);
+      navigate(`/pos/kot/${updatedOrder.id}`, {
+        state: {
+          order: updatedOrder,
+          ticket: kitchenTicket,
+          restaurant: restaurantProfile,
+          returnTo: '/pos',
+        },
+      });
     } catch (error) {
       setSubmitError(error.response?.data?.message || 'Failed to send this bill to kitchen.');
     } finally {
@@ -889,22 +1187,49 @@ export default function POS() {
         paymentMethod,
         amountReceived: paymentMethod === 'cash' ? cashReceivedAmount : undefined,
         paymentNote: paymentNote.trim(),
+        loyaltyPhone: loyaltyPhone.trim(),
+        redeemPoints: loyaltyDiscountPreview,
+        packingCharge: Number(packingCharge || 0),
+        serviceCharge: Number(serviceCharge || 0),
+        deliveryCharge: Number(deliveryCharge || 0),
       });
       const settledOrder = settleResponse.data?.data;
       const formattedOrderNumber = formatDisplayOrderNumber(settledOrder || orderToSettle);
       const settlementChangeDue = Number(settledOrder?.settlement?.changeDue || 0);
+      const settledTableId = settledOrder?.tableId || orderToSettle?.tableId || '';
+      const invoiceData = buildInvoiceData({
+        order: settledOrder,
+        restaurant: restaurantProfile,
+        cashierName: user?.name || user?.email || 'Cashier',
+      });
 
       clearBillDraft();
       setPinnedOrderId('');
       setOrderType('');
       setSelectedTableId('');
       syncBillingSearchParams();
+      if (settledTableId) {
+        clearWorkspaceDraft(getPosWorkspaceDraftKey('dine-in', settledTableId));
+        clearTableOrderCache(settledTableId);
+      }
+      refreshTableOverview({ force: true }).catch(() => {
+        // Shared store state updates in the background.
+      });
       refreshOnlineInbox();
       setSubmitSuccess(
         settlementChangeDue > 0
           ? `${formattedOrderNumber} settled via ${paymentMethod.toUpperCase()}. Return ${formatCurrency(settlementChangeDue)} change.`
-          : `${formattedOrderNumber} settled successfully via ${paymentMethod.toUpperCase()}.`
+          : `${formattedOrderNumber} settled successfully via ${paymentMethod.toUpperCase()}${settledOrder?.settlement?.loyalty?.earnedPoints ? ` and earned ${settledOrder.settlement.loyalty.earnedPoints} loyalty points` : '.'}`
       );
+      navigate(`/pos/bill/${settledOrder?.id || orderToSettle?.id}`, {
+        state: {
+          order: settledOrder,
+          restaurant: restaurantProfile,
+          invoice: invoiceData,
+          returnTo: '/pos',
+          cashierName: user?.name || user?.email || 'Cashier',
+        },
+      });
     } catch (error) {
       setSubmitError(error.response?.data?.message || 'Failed to settle the bill.');
     } finally {
@@ -932,12 +1257,20 @@ export default function POS() {
         status: 'cancelled',
         cancelReason: trimmedReason,
       });
+      const cancelledTableId = activeOrder.tableId || '';
 
       clearBillDraft();
       setPinnedOrderId('');
       setOrderType('');
       setSelectedTableId('');
       syncBillingSearchParams();
+      if (cancelledTableId) {
+        clearWorkspaceDraft(getPosWorkspaceDraftKey('dine-in', cancelledTableId));
+        clearTableOrderCache(cancelledTableId);
+      }
+      refreshTableOverview({ force: true }).catch(() => {
+        // Shared store state updates in the background.
+      });
       refreshOnlineInbox();
       setCancelReason('');
       setShowCancelModal(false);
@@ -980,6 +1313,9 @@ export default function POS() {
         applyOrderToWorkspace(updatedOrder);
       }
 
+      refreshTableOverview({ force: true }).catch(() => {
+        // Shared store state updates in the background.
+      });
       await refreshOnlineInbox();
       setSubmitSuccess(`${formatDisplayOrderNumber(updatedOrder)} marked ${workflowStatus.replace(/_/g, ' ')}.`);
     } catch (error) {
@@ -1061,7 +1397,7 @@ export default function POS() {
 
       <OnlineOrderInbox
         orders={onlineInbox}
-        loading={isLoadingOnlineInbox}
+        loading={onlineInboxLoading}
         selectedOrderId={activeOrder?.id || ''}
         updatingOrderId={updatingOnlineOrderId}
         onOpenOrder={handleOpenOnlineOrder}
@@ -1175,7 +1511,16 @@ export default function POS() {
           </div>
         </section>
       ) : (
-        <div className="grid gap-5 xl:grid-cols-[minmax(0,1.55fr)_minmax(24rem,0.95fr)]">
+        <div className="relative">
+          {isSwitchingTable ? (
+            <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex justify-center">
+              <div className="inline-flex items-center gap-2 rounded-full border border-[var(--border-color)] bg-[rgba(15,23,42,0.88)] px-4 py-2 text-sm font-semibold text-white shadow-[var(--shadow-card)] backdrop-blur">
+                <Loader className="h-4 w-4 animate-spin" />
+                Syncing table workspace...
+              </div>
+            </div>
+          ) : null}
+        <div className={`grid gap-5 transition-opacity duration-200 xl:grid-cols-[minmax(0,1.55fr)_minmax(24rem,0.95fr)] ${isSwitchingTable ? 'opacity-80' : 'opacity-100'}`}>
           <div className="space-y-5">
             {orderType === 'dine-in' && selectedTable ? (
               <div className="flex flex-col gap-4 rounded-[1.6rem] border border-[var(--border-color)] bg-[var(--bg-card)] px-4 py-4 shadow-[var(--shadow-card)] lg:flex-row lg:items-center lg:justify-between">
@@ -1302,8 +1647,8 @@ export default function POS() {
               onIncreaseItem={handleIncreaseQty}
               onDecreaseItem={handleDecreaseQty}
               getItemQuantity={getItemQuantity}
-              loading={menuLoading}
-              error={menuError}
+              loading={menuLoading || categoryLoading || tableLoading}
+              error={posDataError}
             />
           </div>
 
@@ -1342,14 +1687,29 @@ export default function POS() {
             <PaymentPanel
               paymentMethod={paymentMethod}
               onPaymentMethodChange={setPaymentMethod}
-              totalAmount={finalTotal}
+              totalAmount={payableTotal}
+              orderType={orderType}
               cashReceived={cashReceived}
               onCashReceivedChange={setCashReceived}
               changeDue={changeDue}
               shortfallAmount={shortfallAmount}
               paymentNote={paymentNote}
               onPaymentNoteChange={setPaymentNote}
+              packingCharge={packingCharge}
+              onPackingChargeChange={setPackingCharge}
+              serviceCharge={serviceCharge}
+              onServiceChargeChange={setServiceCharge}
+              deliveryCharge={deliveryCharge}
+              onDeliveryChargeChange={setDeliveryCharge}
+              invoicePreview={invoicePreview}
               activeOrder={activeOrder}
+              loyaltyPhone={loyaltyPhone}
+              onLoyaltyPhoneChange={setLoyaltyPhone}
+              loyaltyProfile={loyaltyProfile}
+              redeemPoints={redeemPoints}
+              onRedeemPointsChange={setRedeemPoints}
+              onCheckLoyalty={handleCheckLoyalty}
+              checkingLoyalty={isCheckingLoyalty}
               disabled={isLoadingTableOrder || isSubmitting || isSettling}
             />
 
@@ -1359,6 +1719,7 @@ export default function POS() {
                 subtotal={subtotal}
                 discountAmount={discountAmount}
                 finalTotal={finalTotal}
+                invoicePreview={invoicePreview}
                 onIncrease={handleIncreaseQty}
                 onDecrease={handleDecreaseQty}
                 onRemove={handleRemoveItem}
@@ -1400,6 +1761,7 @@ export default function POS() {
               />
             </div>
           </div>
+        </div>
         </div>
       )}
 

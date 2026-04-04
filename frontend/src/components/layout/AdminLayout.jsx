@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useLocation } from 'react-router-dom';
+import { useAuthStore } from '../../context/authStore';
 import Navbar from './Navbar';
 import Sidebar from './Sidebar';
 
@@ -7,6 +8,10 @@ const PAGE_META = {
   '/admin': {
     section: 'Admin',
     title: 'Restaurant Overview',
+  },
+  '/admin/notifications': {
+    section: 'Notifications',
+    title: 'Owner Notification Center',
   },
   '/admin/menu': {
     section: 'Menu',
@@ -40,34 +45,73 @@ const PAGE_META = {
     section: 'QR Tools',
     title: 'QR Tools',
   },
+  '/manager': {
+    section: 'Manager',
+    title: 'Operations Dashboard',
+  },
+  '/manager/orders': {
+    section: 'Orders',
+    title: 'Order Operations',
+  },
+  '/manager/tables': {
+    section: 'Tables',
+    title: 'Floor Control',
+  },
+  '/manager/kitchen': {
+    section: 'Kitchen',
+    title: 'KOT Operations',
+  },
+  '/manager/waiters': {
+    section: 'Waiters',
+    title: 'Waiter Control',
+  },
+  '/manager/inventory': {
+    section: 'Inventory',
+    title: 'Stock Visibility',
+  },
+  '/manager/bills': {
+    section: 'Bills',
+    title: 'Billing Control',
+  },
 };
 
 export default function AdminLayout({ children }) {
+  return <AdminLayoutInner>{children}</AdminLayoutInner>;
+}
+
+export function AdminLayoutInner({ children, portal = 'admin' }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const location = useLocation();
+  const userRole = useAuthStore((state) => state.user?.role);
 
   const pageMeta = useMemo(
     () =>
       PAGE_META[location.pathname] || {
-        section: 'Admin',
-        title: 'Restaurant Control Center',
+        section: portal === 'kot' ? 'Kitchen' : userRole === 'manager' ? 'Manager' : 'Admin',
+        title:
+          portal === 'kot'
+            ? 'Kitchen Operations'
+            : userRole === 'manager'
+              ? 'Restaurant Operations Center'
+              : 'Restaurant Control Center',
       },
-    [location.pathname]
+    [location.pathname, portal, userRole]
   );
 
   return (
-    <div className="min-h-screen bg-[var(--bg-main)] text-[var(--text-primary)]">
+    <div className="h-screen overflow-hidden bg-[var(--bg-main)] text-[var(--text-primary)]">
       <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
 
-      <div className="min-h-screen lg:pl-72">
+      <div className="flex h-screen min-h-0 flex-col lg:pl-72">
         <Navbar
           sectionLabel={pageMeta.section}
           pageTitle={pageMeta.title}
           onMenuClick={() => setSidebarOpen(true)}
+          portal={portal}
         />
 
-        <main className="overflow-x-hidden">
-          <div className="mx-auto max-w-7xl px-4 py-4 sm:px-6 sm:py-6 lg:px-8">{children}</div>
+        <main className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
+          <div className="mx-auto flex max-w-7xl flex-col gap-4 p-4 sm:p-6 lg:p-6">{children}</div>
         </main>
       </div>
     </div>

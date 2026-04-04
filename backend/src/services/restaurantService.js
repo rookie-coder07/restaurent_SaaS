@@ -372,7 +372,7 @@ export class RestaurantService {
         .from('users')
         .select('*')
         .eq('restaurant_id', restaurantId)
-        .in('role', ['staff', 'kitchen_staff']);
+        .in('role', ['manager', 'staff', 'kitchen_staff']);
 
       if (filters.role) {
         query = query.eq('role', filters.role);

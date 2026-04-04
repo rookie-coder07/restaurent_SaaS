@@ -9,8 +9,15 @@ import Modal from '../components/common/Modal';
 import Toast from '../components/common/Toast';
 import EmptyState from '../components/common/EmptyState';
 import StatCard from '../components/common/StatCard';
+import PaginationControls from '../components/common/PaginationControls';
+import useResponsivePagination from '../hooks/useResponsivePagination';
 
 const ROLE_META = {
+  manager: {
+    label: 'Manager',
+    color: 'bg-violet-100 text-violet-700',
+    icon: Users,
+  },
   staff: {
     label: 'POS Staff',
     color: 'bg-sky-100 text-sky-700',
@@ -24,7 +31,8 @@ const ROLE_META = {
 };
 
 const STAFF_FILTERS = [
-  { id: 'all', label: 'All Access', description: 'POS staff and KOT staff' },
+  { id: 'all', label: 'All Access', description: 'Manager, POS staff, and KOT staff' },
+  { id: 'manager', label: 'Manager', description: 'Operations workspace with live service controls' },
   { id: 'staff', label: 'POS Staff', description: 'Waiters and cashiers using the POS portal' },
   { id: 'kitchen_staff', label: 'KOT Staff', description: 'Kitchen team using the KOT portal' },
 ];
@@ -42,30 +50,41 @@ export default function StaffManagement() {
     name: '',
     email: '',
     phone: '',
-    role: 'staff',
+    role: 'manager',
     password: '',
   });
 
   const staff = staffData?.staff || [];
+  const managerCount = staff.filter((member) => member.role === 'manager').length;
   const staffCount = staff.filter((member) => member.role === 'staff').length;
   const kitchenCount = staff.filter((member) => member.role === 'kitchen_staff').length;
   const filteredStaff = useMemo(
     () => (activeFilter === 'all' ? staff : staff.filter((member) => member.role === activeFilter)),
     [activeFilter, staff]
   );
+  const {
+    paginatedItems: paginatedStaff,
+    currentPage,
+    totalPages,
+    canGoPrevious,
+    canGoNext,
+    goPrevious,
+    goNext,
+    hasPagination,
+  } = useResponsivePagination(filteredStaff, { mobileItemsPerPage: 6, desktopItemsPerPage: 8 });
 
   const resetForm = () => {
     setFormData({
       name: '',
       email: '',
       phone: '',
-      role: 'staff',
+      role: 'manager',
       password: '',
     });
     setShowForm(false);
   };
 
-  const openCreateForm = (role = 'staff') => {
+  const openCreateForm = (role = 'manager') => {
     setError(null);
     setFormData({
       name: '',
@@ -170,10 +189,14 @@ export default function StaffManagement() {
             <p className="text-xs font-semibold uppercase tracking-[0.25em] text-[var(--color-text-subtle)]">Staff</p>
             <h1 className="mt-3 text-3xl font-bold text-[var(--color-text)]">Create POS and KOT staff access</h1>
             <p className="mt-2 text-sm text-[var(--color-text-muted)]">
-              Create logins for POS staff and KOT staff from one clean admin screen.
+              Create role-based logins for managers, POS staff, and kitchen staff from one clean admin screen.
             </p>
           </div>
           <div className="flex flex-col gap-3 sm:flex-row">
+            <Button variant="secondary" onClick={() => openCreateForm('manager')}>
+              <Plus className="h-4 w-4" />
+              Add Manager
+            </Button>
             <Button variant="secondary" onClick={() => openCreateForm('staff')}>
               <Plus className="h-4 w-4" />
               Add POS Staff
@@ -186,9 +209,10 @@ export default function StaffManagement() {
         </div>
       </Card>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <StatCard icon={User} label="POS Staff" value={staffCount} subtitle="Front-of-house members" tone="neutral" />
-        <StatCard icon={ChefHat} label="KOT Staff" value={kitchenCount} subtitle="Kitchen team members" tone="warning" />
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <StatCard icon={Users} label="Managers" value={managerCount} subtitle="Operations leaders" iconTone="bg-violet-100 text-violet-700" />
+        <StatCard icon={User} label="POS Staff" value={staffCount} subtitle="Front-of-house members" iconTone="bg-sky-100 text-sky-700" />
+        <StatCard icon={ChefHat} label="KOT Staff" value={kitchenCount} subtitle="Kitchen team members" iconTone="bg-amber-100 text-amber-700" />
       </div>
 
       <div className="grid gap-3 lg:grid-cols-3">
@@ -222,55 +246,73 @@ export default function StaffManagement() {
           }
         />
       ) : (
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-          {filteredStaff.map((member) => {
-            const meta = ROLE_META[member.role] || ROLE_META.staff;
-            const Icon = meta.icon;
+        <>
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+            {paginatedStaff.map((member) => {
+              const meta = ROLE_META[member.role] || ROLE_META.staff;
+              const Icon = meta.icon;
 
-            return (
-              <Card key={member.id} className="p-4 sm:p-5">
-                <div className="flex flex-col gap-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <h3 className="break-words text-lg font-bold text-[var(--color-text)]">{member.name}</h3>
-                      <p className="mt-1 break-all text-sm text-[var(--color-text-muted)]">{member.email}</p>
-                    </div>
-                    <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold ${meta.color}`}>
-                      <Icon className="h-4 w-4" />
-                      {meta.label}
-                    </span>
-                  </div>
-
-                  <div className="rounded-2xl bg-[var(--color-surface-muted)] p-4">
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                      <div>
-                        <p className="text-xs uppercase tracking-[0.2em] text-[var(--color-text-subtle)]">Phone</p>
-                        <p className="mt-2 text-sm font-medium text-[var(--color-text)]">{member.phone || 'Not provided'}</p>
+              return (
+                <Card key={member.id} className="p-4 sm:p-5">
+                  <div className="flex flex-col gap-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <h3 className="break-words text-lg font-bold text-[var(--color-text)]">{member.name}</h3>
+                        <p className="mt-1 break-all text-sm text-[var(--color-text-muted)]">{member.email}</p>
                       </div>
-                      <div>
-                        <p className="text-xs uppercase tracking-[0.2em] text-[var(--color-text-subtle)]">Status</p>
-                        <span className="mt-2 inline-flex rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-700">
-                          Active
-                        </span>
+                      <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold ${meta.color}`}>
+                        <Icon className="h-4 w-4" />
+                        {meta.label}
+                      </span>
+                    </div>
+
+                    <div className="rounded-2xl bg-[var(--color-surface-muted)] p-4">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                          <p className="text-xs uppercase tracking-[0.2em] text-[var(--color-text-subtle)]">Phone</p>
+                          <p className="mt-2 text-sm font-medium text-[var(--color-text)]">{member.phone || 'Not provided'}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs uppercase tracking-[0.2em] text-[var(--color-text-subtle)]">Status</p>
+                          <span className="mt-2 inline-flex rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-700">
+                            Active
+                          </span>
+                        </div>
                       </div>
                     </div>
-                  </div>
 
-                  <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
-                    <Button variant="danger" onClick={() => handleDeleteStaff(member.id)} className="w-full sm:w-auto">
-                      <Trash2 className="h-4 w-4" />
-                      Remove
-                    </Button>
+                    <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
+                      <Button variant="danger" onClick={() => handleDeleteStaff(member.id)} className="w-full sm:w-auto">
+                        <Trash2 className="h-4 w-4" />
+                        Remove
+                      </Button>
+                    </div>
                   </div>
-                </div>
-              </Card>
-            );
-          })}
-        </div>
+                </Card>
+              );
+            })}
+          </div>
+          {hasPagination ? (
+            <PaginationControls
+              currentPage={currentPage}
+              totalPages={totalPages}
+              canGoPrevious={canGoPrevious}
+              canGoNext={canGoNext}
+              onPrevious={goPrevious}
+              onNext={goNext}
+            />
+          ) : null}
+        </>
       )}
 
       <Modal
-        title={formData.role === 'kitchen_staff' ? 'Create KOT Staff Login' : 'Create POS Staff Login'}
+        title={
+          formData.role === 'manager'
+            ? 'Create Manager Login'
+            : formData.role === 'kitchen_staff'
+              ? 'Create KOT Staff Login'
+              : 'Create POS Staff Login'
+        }
         isOpen={showForm}
         onClose={() => { resetForm(); setError(null); }}
         maxWidth="max-w-lg"
@@ -311,6 +353,7 @@ export default function StaffManagement() {
           <label className="space-y-2">
             <span className="text-sm font-medium text-[var(--color-text)]">Role</span>
             <select value={formData.role} onChange={(e) => setFormData({ ...formData, role: e.target.value })} className="input" required>
+              <option value="manager">Manager</option>
               <option value="staff">POS Staff</option>
               <option value="kitchen_staff">KOT Staff</option>
             </select>

@@ -12,9 +12,9 @@ import {
   Users,
 } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { useApi } from '../hooks/useApi';
 import { orderAPI, tableAPI } from '../services/apiEndpoints';
 import { useAuthStore } from '../context/authStore';
+import { usePosStore } from '../context/posStore';
 import QRCodeModal from '../components/QRCodeModal';
 import { generateBulkQRCodes } from '../utils/qrCodeGenerator';
 import { formatCurrency, formatDate } from '../utils/formatters';
@@ -26,6 +26,8 @@ import Modal from '../components/common/Modal';
 import Toast from '../components/common/Toast';
 import EmptyState from '../components/common/EmptyState';
 import StatCard from '../components/common/StatCard';
+import PaginationControls from '../components/common/PaginationControls';
+import useResponsivePagination from '../hooks/useResponsivePagination';
 
 const ACTIVE_ORDER_STATUSES = new Set(['awaiting_waiter_approval', 'pending', 'preparing', 'ready', 'served']);
 
@@ -37,7 +39,7 @@ const TABLE_STATUS_META = {
     dot: 'bg-emerald-500',
   },
   occupied: {
-    label: 'Order Going On',
+    label: 'In Use',
     card: 'border-rose-500/20 bg-rose-500/8',
     badge: 'border-rose-500/25 bg-rose-500/10 text-rose-700 dark:text-rose-300',
     dot: 'bg-rose-500',
@@ -69,18 +71,15 @@ export default function Tables() {
   const currentPortal = location.pathname.startsWith('/admin') ? 'admin' : 'pos';
   const canManageTableConfig = userRole === 'owner';
   const canOpenBilling = currentPortal === 'pos';
-  const {
-    data: tablesData = {},
-    loading: tablesLoading,
-    error: tablesError,
-    refetch: refetchTables,
-  } = useApi(() => tableAPI.getTables({ limit: 200 }));
-  const {
-    data: openBillsData = [],
-    loading: openBillsLoading,
-    error: openBillsError,
-    refetch: refetchOrders,
-  } = useApi(() => orderAPI.getOpenBills());
+  const tablesData = usePosStore((state) => state.tableData);
+  const openBillsData = usePosStore((state) => state.openBillsData);
+  const tablesLoading = usePosStore((state) => state.tableLoading);
+  const openBillsLoading = usePosStore((state) => state.openBillsLoading);
+  const tablesError = usePosStore((state) => state.tableError);
+  const openBillsError = usePosStore((state) => state.openBillsError);
+  const preloadCoreData = usePosStore((state) => state.preloadCoreData);
+  const refreshTableOverview = usePosStore((state) => state.refreshTableOverview);
+  const setPendingBillingTarget = usePosStore((state) => state.setPendingBillingTarget);
 
   const [showForm, setShowForm] = useState(false);
   const [editingTable, setEditingTable] = useState(null);
@@ -155,12 +154,22 @@ export default function Tables() {
   const occupiedCount = enrichedTables.filter((table) => table.effectiveStatus === 'occupied').length;
   const reservedCount = enrichedTables.filter((table) => table.effectiveStatus === 'reserved').length;
   const loadError = tablesError || openBillsError || null;
+  const {
+    paginatedItems: paginatedTables,
+    currentPage,
+    totalPages,
+    canGoPrevious,
+    canGoNext,
+    goPrevious,
+    goNext,
+    hasPagination,
+  } = useResponsivePagination(enrichedTables, { mobileItemsPerPage: 8, desktopItemsPerPage: 18 });
 
   const resetTableForm = () => {
     setFormData({
       tableNumber: '',
       seatCapacity: '',
-      location: '',
+      location: editingTable?.location || '',
     });
     setEditingTable(null);
     setShowForm(false);
@@ -189,8 +198,20 @@ export default function Tables() {
   };
 
   const syncData = async () => {
-    await Promise.all([refetchTables(), refetchOrders()]);
+    await Promise.all([
+      preloadCoreData({ force: true }),
+      refreshTableOverview({ force: true }),
+    ]);
   };
+
+  useEffect(() => {
+    preloadCoreData().catch(() => {
+      // Shared store errors are already exposed in UI state.
+    });
+    refreshTableOverview().catch(() => {
+      // Shared store errors are already exposed in UI state.
+    });
+  }, [preloadCoreData, refreshTableOverview]);
 
   useEffect(() => {
     const intervalId = window.setInterval(() => {
@@ -200,7 +221,7 @@ export default function Tables() {
     }, 8000);
 
     return () => window.clearInterval(intervalId);
-  }, [refetchOrders, refetchTables]);
+  }, [preloadCoreData, refreshTableOverview]);
 
   const openBilling = (table, order = null) => {
     if (!canOpenBilling) {
@@ -216,6 +237,10 @@ export default function Tables() {
       searchParams.set('orderId', order.id);
     }
 
+    setPendingBillingTarget({
+      tableId: table.id,
+      orderId: order?.id || '',
+    });
     setSelectedTable(null);
     navigate(`/pos?${searchParams.toString()}`);
   };
@@ -229,7 +254,7 @@ export default function Tables() {
       const payload = {
         tableNumber: Number(formData.tableNumber),
         seatCapacity: Number(formData.seatCapacity),
-        location: formData.location.trim(),
+        location: (editingTable?.location || formData.location || '').trim(),
       };
 
       if (editingTable) {
@@ -327,7 +352,12 @@ export default function Tables() {
     }
   };
 
-  if (tablesLoading || openBillsLoading) {
+  const shouldShowInitialLoader =
+    (tablesLoading || openBillsLoading) &&
+    !(tablesData?.tables || []).length &&
+    !orders.length;
+
+  if (shouldShowInitialLoader) {
     return (
       <div className="flex h-full items-center justify-center">
         <Loader className="h-8 w-8 animate-spin text-[var(--color-primary)]" />
@@ -394,7 +424,7 @@ export default function Tables() {
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <StatCard label="Available" value={availableCount} subtitle="Ready for guests" tone="success" />
-        <StatCard label="Order Going On" value={occupiedCount} subtitle="Tables with active KOT/orders" tone="neutral" />
+        <StatCard label="In Use" value={occupiedCount} subtitle="Tables with active bills" tone="neutral" />
         <StatCard label="Reserved" value={reservedCount} subtitle="Booked for later" tone="primary" />
       </div>
 
@@ -430,56 +460,58 @@ export default function Tables() {
           />
         )
       ) : (
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
-          {enrichedTables.map((table) => {
-            const meta = TABLE_STATUS_META[table.effectiveStatus] || TABLE_STATUS_META.available;
-            const duplicateBillCount = Math.max(0, table.activeOrders.length - 1);
+        <>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
+            {paginatedTables.map((table) => {
+              const meta = TABLE_STATUS_META[table.effectiveStatus] || TABLE_STATUS_META.available;
+              const duplicateBillCount = Math.max(0, table.activeOrders.length - 1);
 
-            return (
-              <button
-                key={table.id}
-                type="button"
-                onClick={() => setSelectedTable(table)}
-                className={`rounded-[1.8rem] border p-4 text-left shadow-[var(--shadow-card)] transition hover:-translate-y-0.5 hover:shadow-[var(--shadow-floating)] ${meta.card} ${
-                  selectedTableData?.id === table.id ? 'ring-2 ring-[var(--color-primary)]' : 'border-[var(--border-color)]'
-                }`}
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--text-secondary)]">Table</p>
-                    <h2 className="mt-2 text-3xl font-black text-[var(--text-primary)]">{table.tableNumber}</h2>
-                  </div>
-                  <span className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[11px] font-bold uppercase tracking-[0.18em] ${meta.badge}`}>
-                    <span className={`h-2.5 w-2.5 rounded-full ${meta.dot}`} />
-                    {meta.label}
-                  </span>
-                </div>
-
-                <div className="mt-5 space-y-3">
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-[var(--text-secondary)]">Seats</span>
-                    <span className="font-semibold text-[var(--text-primary)]">{table.seatCapacity}</span>
-                  </div>
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-[var(--text-secondary)]">Location</span>
-                    <span className="truncate pl-3 font-semibold text-[var(--text-primary)]">{table.location || 'Floor'}</span>
-                  </div>
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-[var(--text-secondary)]">Running Bill</span>
-                    <span className="truncate pl-3 font-semibold text-[var(--text-primary)]">
-                      {table.currentOrder ? formatDisplayOrderNumber(table.currentOrder) : 'None'}
+              return (
+                <button
+                  key={table.id}
+                  type="button"
+                  onClick={() => setSelectedTable(table)}
+                  className={`rounded-[1.4rem] border p-3 text-left shadow-[var(--shadow-card)] transition hover:-translate-y-0.5 hover:shadow-[var(--shadow-floating)] ${meta.card} ${
+                    selectedTableData?.id === table.id ? 'ring-2 ring-[var(--color-primary)]' : 'border-[var(--border-color)]'
+                  }`}
+                >
+                  <div className="flex flex-col gap-3">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--text-secondary)]">Table</p>
+                      <h2 className="mt-1.5 text-2xl font-black text-[var(--text-primary)]">{table.tableNumber}</h2>
+                    </div>
+                    <span className={`inline-flex w-fit max-w-full items-center gap-2 self-start whitespace-normal break-words rounded-full border px-3 py-1 text-[11px] font-bold uppercase tracking-[0.12em] ${meta.badge}`}>
+                      <span className={`h-2.5 w-2.5 rounded-full ${meta.dot}`} />
+                      {meta.label}
                     </span>
                   </div>
-                  {duplicateBillCount > 0 ? (
-                    <p className="text-xs font-medium text-amber-600 dark:text-amber-300">
-                      {duplicateBillCount} more open bill{duplicateBillCount > 1 ? 's' : ''} need review
-                    </p>
-                  ) : null}
-                </div>
-              </button>
-            );
-          })}
-        </div>
+
+                  <div className="mt-4 space-y-2">
+                    <div className="rounded-2xl bg-[var(--color-panel)]/70 px-3 py-3">
+                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--text-secondary)]">Seats</p>
+                      <p className="mt-2 text-lg font-bold text-[var(--text-primary)]">{table.seatCapacity || '-'}</p>
+                    </div>
+                    {duplicateBillCount > 0 ? (
+                      <p className="text-xs font-medium text-amber-600 dark:text-amber-300">
+                        {duplicateBillCount} more open bill{duplicateBillCount > 1 ? 's' : ''} need review
+                      </p>
+                    ) : null}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+          {hasPagination ? (
+            <PaginationControls
+              currentPage={currentPage}
+              totalPages={totalPages}
+              canGoPrevious={canGoPrevious}
+              canGoNext={canGoNext}
+              onPrevious={goPrevious}
+              onNext={goNext}
+            />
+          ) : null}
+        </>
       )}
 
       <Modal
@@ -548,13 +580,6 @@ export default function Tables() {
               max="20"
               required
             />
-            <Input
-              label="Location"
-              value={formData.location}
-              onChange={(event) => setFormData({ ...formData, location: event.target.value })}
-              placeholder="Window, patio, private room..."
-            />
-
             <div className="flex flex-col-reverse gap-3 sm:flex-row">
               <Button type="button" variant="secondary" className="w-full sm:flex-1" onClick={resetTableForm}>
                 Cancel
@@ -649,8 +674,8 @@ function TableDetails({
         </div>
 
         <div className="rounded-[1.6rem] border border-[var(--border-color)] bg-[var(--color-panel)] p-4">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--text-secondary)]">Location</p>
-          <p className="mt-3 text-lg font-bold text-[var(--text-primary)]">{table.location || 'Floor'}</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--text-secondary)]">Open Bills</p>
+          <p className="mt-3 text-2xl font-black text-[var(--text-primary)]">{activeOrders.length}</p>
         </div>
       </div>
 

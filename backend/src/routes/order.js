@@ -6,6 +6,7 @@ import { orderLimiter } from '../middleware/rateLimit.js';
 import {
   cancelPendingBillsSchema,
   createOrderSchema,
+  softDeleteOrderSchema,
   settleOrderSchema,
   updateOnlineOrderSchema,
   updateOrderSchema,
@@ -26,10 +27,12 @@ router.get('/table/:tableId/active', checkPermission(['view_orders', 'manage_ord
 router.get('/active', checkPermission(['view_orders', 'update_order_status']), orderController.getActiveOrders);
 router.get('/open', checkPermission(['manage_orders', 'view_orders']), orderController.getOpenBills);
 router.get('/inbox/online', checkPermission(['manage_orders', 'view_orders']), orderController.getOnlineOrderInbox);
+router.get('/loyalty/profile', checkPermission(['manage_orders', 'view_orders']), orderController.getLoyaltyProfile);
 router.post('/cancel-pending', checkPermission(['manage_orders']), validateRequest(cancelPendingBillsSchema), orderController.cancelPendingBills);
+router.post('/:orderId/delete', checkPermission(['manage_orders']), validateRequest(softDeleteOrderSchema), orderController.softDeleteOrder);
 router.post('/:orderId/send-to-kitchen', checkPermission(['manage_orders']), orderController.sendOrderToKitchen);
 router.get('/', checkPermission(['manage_orders', 'view_orders']), orderController.getOrders);
-router.get('/:orderId', orderController.getOrderById);
+router.get('/:orderId', checkPermission(['manage_orders', 'view_orders']), orderController.getOrderById);
 router.put('/:orderId', checkPermission(['manage_orders']), validateRequest(updateOrderSchema), orderController.updateOrder);
 router.patch('/:orderId/online', checkPermission(['manage_orders', 'update_order_status']), validateRequest(updateOnlineOrderSchema), orderController.updateOnlineOrder);
 router.post('/:orderId/settle', checkPermission(['manage_orders']), validateRequest(settleOrderSchema), orderController.settleOrder);

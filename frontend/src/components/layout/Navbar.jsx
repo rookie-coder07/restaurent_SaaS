@@ -3,17 +3,19 @@ import { useAuth } from '../../hooks/useAuth';
 import ThemeToggle from '../common/ThemeToggle';
 import PortalLogoutButton from '../common/PortalLogoutButton';
 
-export default function Navbar({ sectionLabel, pageTitle, onMenuClick }) {
+export default function Navbar({ sectionLabel, pageTitle, onMenuClick, portal = 'admin' }) {
   const { user } = useAuth();
+  const isManager = user?.role === 'manager';
+  const isPos = portal === 'pos';
 
   return (
-    <header className="sticky top-0 z-30 mb-4 border-b border-[var(--border-color)] bg-[linear-gradient(135deg,rgba(255,255,255,0.07),rgba(255,255,255,0.03))] shadow-[var(--shadow-card)] backdrop-blur-xl">
+    <header className="sticky top-0 z-30 border-b border-[var(--border-color)] bg-[linear-gradient(135deg,rgba(255,255,255,0.07),rgba(255,255,255,0.03))] shadow-[var(--shadow-card)] backdrop-blur-xl">
       <div className="mx-auto flex max-w-7xl flex-col gap-3 px-4 py-4 sm:px-6 lg:px-8 md:flex-row md:items-center md:justify-between">
         <div className="flex min-w-0 items-start gap-3">
           <button
             type="button"
             onClick={onMenuClick}
-            className="inline-flex rounded-xl border border-[var(--border-color)] bg-[var(--bg-card-muted)] px-3 py-2 text-[var(--text-secondary)] transition hover:scale-[1.02] hover:bg-[var(--color-primary-soft)] hover:text-[var(--text-primary)] lg:hidden"
+            className="inline-flex min-h-[2.75rem] rounded-xl border border-[var(--border-color)] bg-[var(--bg-card-muted)] px-3 py-2 text-[var(--text-secondary)] transition hover:bg-[var(--color-primary-soft)] hover:text-[var(--text-primary)] lg:hidden"
           >
             <Menu className="h-5 w-5" />
           </button>
@@ -27,10 +29,10 @@ export default function Navbar({ sectionLabel, pageTitle, onMenuClick }) {
 
         <div className="flex flex-wrap items-center gap-2">
           <div className="hidden rounded-full border border-cyan-400/20 bg-cyan-400/10 px-3 py-1 text-xs font-medium text-cyan-300 sm:inline-flex">
-            Live workspace
+            {isPos ? 'Fast billing' : isManager ? 'Live operations' : 'Live workspace'}
           </div>
 
-          <PortalLogoutButton portal="admin" />
+          <PortalLogoutButton portal={portal} />
 
           <ThemeToggle className="px-3 py-2 text-sm md:text-base" />
 

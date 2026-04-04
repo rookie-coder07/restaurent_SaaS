@@ -19,7 +19,7 @@ export default function Layout({ children }) {
         <div className="flex min-w-0 flex-1 flex-col overflow-x-hidden">
           <Navbar onMenuClick={() => setSidebarOpen(true)} />
           <main className="flex-1 overflow-x-hidden overflow-y-auto">
-            <div className="w-full max-w-full px-4 py-4 sm:px-4 sm:py-5">{children}</div>
+            <div className="w-full max-w-full px-4 py-4 sm:px-6 sm:py-6">{children}</div>
           </main>
         </div>
       </div>

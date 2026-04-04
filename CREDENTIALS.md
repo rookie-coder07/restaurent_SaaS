@@ -7,6 +7,13 @@ Email:    test@example.com
 Password: Test123@456
 ```
 
+## SAMPLE MANAGER CREDENTIALS (DEMO 2)
+
+```
+Email:    manager@restaurant.com
+Password: Manager123@456
+```
+
 ### Account Info:
 - **Restaurant Name**: Test Restaurant
 - **Phone**: 9876543210

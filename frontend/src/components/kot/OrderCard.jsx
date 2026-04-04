@@ -62,6 +62,7 @@ function OrderCard({
 }) {
   const style = STATUS_STYLES[ticket.status] || STATUS_STYLES.pending;
   const ageStyle = AGE_STYLES[ageTone] || AGE_STYLES.fresh;
+  const compactTableLabel = ticket.tableNumber ? `#${String(ticket.tableNumber).padStart(2, '0')}` : '';
 
   return (
     <article className={`overflow-hidden rounded-[1.9rem] border bg-[var(--color-surface)] shadow-[var(--shadow-card)] ${style.border} ${ageStyle.card}`}>
@@ -83,7 +84,7 @@ function OrderCard({
           </div>
           <h2 className="mt-2 truncate text-xl font-black text-[var(--text-primary)] sm:text-2xl">{formatShortDisplayOrderNumber(ticket)}</h2>
           <p className="mt-2 text-lg font-bold text-[var(--text-primary)]">
-            {ticket.tableNumber ? `Table ${ticket.tableNumber}` : 'Walk-in / No Table'}
+            {ticket.tableNumber ? `Table ${ticket.tableNumber} ${compactTableLabel}` : 'Walk-in / No Table'}
           </p>
           <p className="mt-2 text-sm font-semibold text-[var(--text-secondary)]">{ticket.summary || 'Kitchen action'}</p>
         </div>

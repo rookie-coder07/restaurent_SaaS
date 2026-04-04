@@ -164,11 +164,6 @@ export default function QRCodeModal({ table, restaurantName, onClose }) {
                 <p className="text-sm text-gray-600">
                   <strong>Seat Capacity:</strong> {table.seatCapacity} persons
                 </p>
-                {table.location && (
-                  <p className="mt-2 text-sm text-gray-600">
-                    <strong>Location:</strong> {table.location}
-                  </p>
-                )}
                 <p className="mt-3 text-xs text-gray-500">
                   Link: <code className="rounded bg-white px-2 py-1 text-xs">{qrLink}</code>
                 </p>

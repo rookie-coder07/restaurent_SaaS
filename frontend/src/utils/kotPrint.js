@@ -39,25 +39,22 @@ export function printKitchenTicket(ticket, options = {}) {
   const tableLabel = ticket.tableNumber ? `Table ${escapeHtml(ticket.tableNumber)}` : 'Walk-in';
   const summary = escapeHtml(ticket.summary || '');
   const typeLabel = escapeHtml(String(ticket.type || 'send').toUpperCase());
+  const createdAtLabel = new Date(ticket.createdAt || Date.now()).toLocaleString('en-IN');
 
   const stationMarkup = groupedStations
     .map(
       (group) => `
         <section class="station">
-          <div class="station-header">
-            <h2>${escapeHtml(group.station)}</h2>
-            <span>${group.items.length} lines</span>
-          </div>
+          <div class="station-header">${escapeHtml(group.station)}</div>
           ${group.items
             .map(
               (item) => `
                 <div class="item">
                   <div class="item-main">
-                    <span class="qty">${escapeHtml(item.quantity)}x</span>
                     <span class="name">${escapeHtml(item.name)}</span>
-                    <span class="action action-${escapeHtml(item.action || 'add')}">${escapeHtml(item.action || 'add')}</span>
+                    <span class="qty">${escapeHtml(item.quantity)} x</span>
                   </div>
-                  ${item.modifiers?.length ? `<div class="meta">Modifiers: ${escapeHtml(item.modifiers.join(', '))}</div>` : ''}
+                  ${item.modifiers?.length ? `<div class="meta">Mods: ${escapeHtml(item.modifiers.join(', '))}</div>` : ''}
                   ${item.note ? `<div class="meta">Note: ${escapeHtml(item.note)}</div>` : ''}
                 </div>
               `
@@ -75,99 +72,120 @@ export function printKitchenTicket(ticket, options = {}) {
         <title>${title}</title>
         <style>
           body {
-            font-family: "Courier New", monospace;
+            font-family: Arial, Helvetica, sans-serif;
             margin: 0;
-            padding: 24px;
-            color: #111827;
+            padding: 0;
+            color: #000000;
             background: #ffffff;
           }
+          .kot {
+            width: 80mm;
+            margin: 0 auto;
+            padding: 4mm;
+            box-sizing: border-box;
+          }
           .header {
-            border-bottom: 2px dashed #111827;
-            padding-bottom: 12px;
-            margin-bottom: 16px;
+            border-bottom: 1px dashed #000;
+            padding-bottom: 8px;
+            margin-bottom: 8px;
+            text-align: center;
           }
           .title {
-            font-size: 26px;
-            font-weight: 700;
-            margin: 0 0 6px;
+            font-size: 20px;
+            font-weight: 800;
+            letter-spacing: 0.08em;
+            margin: 0;
           }
-          .meta-row {
-            display: flex;
-            justify-content: space-between;
-            gap: 12px;
-            font-size: 14px;
+          .subline {
+            font-size: 11px;
             margin-top: 4px;
-          }
-          .chip {
-            display: inline-block;
-            border: 1px solid #111827;
-            padding: 3px 8px;
-            font-size: 12px;
             font-weight: 700;
+          }
+          .meta-grid {
+            display: grid;
+            grid-template-columns: 1fr auto;
+            gap: 3px 8px;
             margin-top: 8px;
+            font-size: 11px;
+            text-align: left;
+          }
+          .meta-grid span:last-child {
+            text-align: right;
+          }
+          .summary {
+            margin-top: 6px;
+            font-size: 11px;
+            text-align: center;
           }
           .station {
-            border: 1px dashed #6b7280;
-            padding: 12px;
-            margin-bottom: 16px;
+            border-bottom: 1px dashed #000;
+            padding: 8px 0;
             page-break-inside: avoid;
           }
-          .station-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 10px;
-            border-bottom: 1px dashed #9ca3af;
-            padding-bottom: 8px;
+          .station:last-child {
+            border-bottom: 0;
           }
-          .station-header h2 {
-            margin: 0;
-            font-size: 18px;
+          .station-header {
+            font-size: 12px;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            margin-bottom: 6px;
           }
           .item {
-            padding: 8px 0;
-            border-bottom: 1px dotted #d1d5db;
+            padding: 6px 0;
+            border-bottom: 1px dotted #999;
           }
           .item:last-child {
             border-bottom: 0;
           }
           .item-main {
             display: flex;
+            justify-content: space-between;
+            align-items: baseline;
             gap: 10px;
             font-size: 16px;
-            font-weight: 700;
-          }
-          .qty {
-            min-width: 44px;
+            font-weight: 800;
+            line-height: 1.3;
           }
           .name {
             flex: 1;
           }
-          .action {
-            text-transform: uppercase;
-            font-size: 12px;
-            padding: 2px 6px;
-            border: 1px solid #111827;
+          .qty {
+            min-width: 42px;
+            text-align: right;
           }
           .meta {
             margin-top: 4px;
-            font-size: 13px;
+            font-size: 11px;
+            line-height: 1.4;
           }
           @media print {
             body {
-              padding: 10px;
+              padding: 0;
+            }
+            .kot {
+              margin: 0;
             }
           }
         </style>
       </head>
       <body>
-        <header class="header">
-          <p class="title">${title}</p>
-          <div class="meta-row"><span>${displayOrderNumber}</span><span>${tableLabel}</span></div>
-          <div class="meta-row"><span>${summary}</span><span>${new Date(ticket.createdAt || Date.now()).toLocaleString('en-IN')}</span></div>
-          <span class="chip">${typeLabel}</span>
-        </header>
-        ${stationMarkup}
+        <div class="kot">
+          <header class="header">
+            <p class="title">KOT</p>
+            <div class="subline">${title}</div>
+            <div class="meta-grid">
+              <span>KOT No</span><span>${escapeHtml(ticket.sequence || '')}</span>
+              <span>Order</span><span>${displayOrderNumber || '-'}</span>
+              <span>Table</span><span>${tableLabel}</span>
+              <span>Time</span><span>${escapeHtml(createdAtLabel)}</span>
+              <span>Type</span><span>${typeLabel}</span>
+            </div>
+            ${summary ? `<div class="summary">${summary}</div>` : ''}
+          </header>
+          ${stationMarkup}
+        </div>
       </body>
     </html>
   `);

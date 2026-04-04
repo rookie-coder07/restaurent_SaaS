@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { jsonSuccess, mockApi } from './helpers/mockApi.js';
+import { createTestJwt, jsonSuccess, mockApi } from './helpers/mockApi.js';
 
 test.describe('Phase 0 Smoke', () => {
   test('kitchen staff can log in and advance a KOT ticket', async ({ page }) => {
@@ -24,8 +24,8 @@ test.describe('Phase 0 Smoke', () => {
 
       if (pathname.endsWith('/v1/auth/staff/login') && method === 'POST') {
         return jsonSuccess({
-          accessToken: 'kot-token',
-          refreshToken: 'kot-refresh',
+          accessToken: createTestJwt({ role: 'kitchen_staff', restaurantId: 'rest-1' }),
+          refreshToken: createTestJwt({ role: 'kitchen_staff', restaurantId: 'rest-1', type: 'refresh' }),
           user: {
             id: 'kitchen-1',
             name: 'Kitchen Staff',
@@ -71,8 +71,8 @@ test.describe('Phase 0 Smoke', () => {
 
       if (pathname.endsWith('/v1/auth/login') && method === 'POST') {
         return jsonSuccess({
-          accessToken: 'admin-token',
-          refreshToken: 'admin-refresh',
+          accessToken: createTestJwt({ role: 'owner', restaurantId: 'rest-1' }),
+          refreshToken: createTestJwt({ role: 'owner', restaurantId: 'rest-1', type: 'refresh' }),
           restaurant: {
             id: 'rest-1',
             restaurantId: 'rest-1',

@@ -1,6 +1,7 @@
 import { Link, useLocation } from 'react-router-dom';
 import {
   BarChart3,
+  BellRing,
   ClipboardList,
   PackageSearch,
   MenuSquare,
@@ -11,19 +12,46 @@ import {
   Palette,
   UtensilsCrossed,
   X,
+  ChefHat,
+  Receipt,
+  Gift,
+  LayoutGrid,
+  ListOrdered,
 } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
 
-const adminMenuItems = [
+const ownerMenuItems = [
   { icon: BarChart3, label: 'Dashboard', href: '/admin', roles: ['owner'] },
+  { icon: BellRing, label: 'Notifications', href: '/admin/notifications', roles: ['owner'] },
   { icon: MenuSquare, label: 'Menu', href: '/admin/menu', roles: ['owner'] },
   { icon: ClipboardList, label: 'Orders', href: '/admin/orders', roles: ['owner'] },
   { icon: PackageSearch, label: 'Inventory', href: '/admin/inventory', roles: ['owner'] },
   { icon: TableProperties, label: 'Tables', href: '/admin/tables', roles: ['owner'] },
   { icon: Users, label: 'Staff Access', href: '/admin/staff', roles: ['owner'] },
+  { icon: Gift, label: 'Loyalty', href: '/admin/loyalty', roles: ['owner'] },
   { icon: Sparkles, label: 'Analytics', href: '/admin/analytics', roles: ['owner'] },
   { icon: QrCode, label: 'QR Tools', href: '/admin/qr-tools', roles: ['owner'] },
   { icon: Palette, label: 'Settings', href: '/admin/settings', roles: ['owner'] },
+];
+
+const managerMenuItems = [
+  { icon: BarChart3, label: 'Dashboard', href: '/manager', roles: ['manager'] },
+  { icon: TableProperties, label: 'Tables', href: '/manager/tables', roles: ['manager'] },
+  { icon: ClipboardList, label: 'Orders', href: '/manager/orders', roles: ['manager'] },
+  { icon: ChefHat, label: 'Kitchen', href: '/manager/kitchen', roles: ['manager'] },
+  { icon: Users, label: 'Waiters', href: '/manager/waiters', roles: ['manager'] },
+  { icon: PackageSearch, label: 'Inventory', href: '/manager/inventory', roles: ['manager'] },
+  { icon: Receipt, label: 'Bills', href: '/manager/bills', roles: ['manager'] },
+];
+
+const posMenuItems = [
+  { icon: Receipt, label: 'Billing', href: '/pos', roles: ['staff'] },
+  { icon: ListOrdered, label: 'Orders', href: '/pos/orders', roles: ['staff'] },
+  { icon: LayoutGrid, label: 'Tables', href: '/pos/tables', roles: ['staff'] },
+];
+
+const kotMenuItems = [
+  { icon: ChefHat, label: 'Kitchen', href: '/kot', roles: ['kitchen_staff'] },
 ];
 
 export default function Sidebar({ isOpen, onClose }) {
@@ -31,8 +59,16 @@ export default function Sidebar({ isOpen, onClose }) {
   const { user } = useAuth();
 
   const activeRole = user?.role || 'owner';
-  const filteredMenuItems = adminMenuItems.filter((item) => item.roles.includes(activeRole));
+  const isPosPortal = location.pathname.startsWith('/pos');
+  const isKotPortal = location.pathname.startsWith('/kot') || location.pathname.startsWith('/kitchen');
+  const isManagerPortal = location.pathname.startsWith('/manager');
+  const workspaceItems = isKotPortal ? kotMenuItems : isPosPortal ? posMenuItems : isManagerPortal ? managerMenuItems : ownerMenuItems;
+  const filteredMenuItems = workspaceItems.filter((item) => item.roles.includes(activeRole));
   const isActivePath = (href) => location.pathname === href || location.pathname.startsWith(`${href}/`);
+  const homePath = isKotPortal ? '/kot' : isPosPortal ? '/pos' : isManagerPortal ? '/manager' : '/admin';
+  const workspaceLabel = isKotPortal ? 'KOT Portal' : isPosPortal ? 'POS Portal' : isManagerPortal ? 'Manager Portal' : 'Admin Portal';
+  const workspaceBadge = isKotPortal ? 'Kitchen Workspace' : isPosPortal ? 'POS Workspace' : isManagerPortal ? 'Manager Workspace' : 'Admin Workspace';
+  const navLabel = isKotPortal ? 'Kitchen' : isPosPortal ? 'POS Navigation' : isManagerPortal ? 'Operations' : 'Admin';
 
   return (
     <>
@@ -46,19 +82,19 @@ export default function Sidebar({ isOpen, onClose }) {
       ) : null}
 
       <aside
-        className={`fixed inset-y-0 left-0 z-50 w-72 border-r border-[var(--border-color)] bg-[linear-gradient(180deg,rgba(255,255,255,0.08),rgba(255,255,255,0.03))] shadow-[var(--shadow-floating)] backdrop-blur-xl transition-transform duration-300 ${
+        className={`fixed inset-y-0 left-0 z-50 h-screen w-72 overflow-hidden border-r border-[var(--border-color)] bg-[linear-gradient(180deg,rgba(255,255,255,0.08),rgba(255,255,255,0.03))] shadow-[var(--shadow-floating)] backdrop-blur-xl transition-transform duration-300 ${
           isOpen ? 'translate-x-0' : '-translate-x-full'
         } lg:translate-x-0`}
       >
-        <div className="flex h-full flex-col">
+        <div className="flex h-full min-h-0 flex-col">
           <div className="flex items-center justify-between border-b border-[var(--border-color)] px-5 py-5">
-            <Link to="/admin" className="flex items-center gap-3" onClick={onClose}>
+            <Link to={homePath} className="flex items-center gap-3" onClick={onClose}>
               <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-[var(--color-primary)] to-[var(--color-accent)] text-white shadow-lg">
                 <UtensilsCrossed className="h-5 w-5" />
               </div>
               <div>
                 <p className="text-base font-semibold text-[var(--text-primary)]">Restaurant SaaS</p>
-                <p className="text-xs text-[var(--text-secondary)]">Admin Portal</p>
+                <p className="text-xs text-[var(--text-secondary)]">{workspaceLabel}</p>
               </div>
             </Link>
 
@@ -73,17 +109,17 @@ export default function Sidebar({ isOpen, onClose }) {
 
           <div className="px-4 py-5">
             <div className="rounded-2xl border border-[var(--border-color)] bg-[linear-gradient(135deg,var(--color-primary-soft),rgba(255,255,255,0.03))] p-4">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-[var(--text-secondary)]">Admin Workspace</p>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-[var(--text-secondary)]">{workspaceBadge}</p>
               <p className="mt-2 text-sm font-semibold text-[var(--text-primary)]">{user?.restaurantName || 'Main branch'}</p>
               <p className="mt-1 text-xs text-[var(--text-secondary)]">Role: {user?.role || 'owner'}</p>
             </div>
           </div>
 
           <div className="px-4 pb-2">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-[var(--text-secondary)]">Admin</p>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-[var(--text-secondary)]">{navLabel}</p>
           </div>
 
-          <nav className="space-y-1 overflow-y-auto px-3">
+          <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto px-3 pb-6">
             {filteredMenuItems.map((item) => {
               const Icon = item.icon;
               const isActive = isActivePath(item.href);

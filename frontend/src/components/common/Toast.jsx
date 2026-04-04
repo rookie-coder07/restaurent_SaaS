@@ -15,9 +15,9 @@ export default function Toast({ type = 'success', message }) {
   const Icon = config.icon;
 
   return (
-    <div className={`flex items-center gap-3 rounded-2xl border p-4 shadow-sm ${config.className}`}>
+    <div className={`flex w-full items-start gap-3 rounded-2xl border p-4 shadow-sm ${config.className}`}>
       <Icon className="h-5 w-5 flex-shrink-0" />
-      <p className="text-sm font-medium">{message}</p>
+      <p className="min-w-0 break-words text-sm font-medium leading-6">{message}</p>
     </div>
   );
 }

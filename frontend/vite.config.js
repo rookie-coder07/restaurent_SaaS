@@ -19,6 +19,25 @@ export default defineConfig({
     sourcemap: false,
     minify: 'terser',
     chunkSizeWarningLimit: 1000,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes('node_modules')) {
+            return undefined;
+          }
+
+          if (id.includes('recharts') || id.includes('d3-')) {
+            return 'charts-vendor';
+          }
+
+          if (id.includes('axios') || id.includes('@supabase')) {
+            return 'data-vendor';
+          }
+
+          return undefined;
+        },
+      },
+    },
   },
   resolve: {
     alias: {

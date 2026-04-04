@@ -70,9 +70,24 @@ export const settleOrderSchema = Joi.object({
   payment_method: paymentMethodSchema.optional(),
   amountReceived: Joi.number().min(0).precision(2).optional(),
   amount_received: Joi.number().min(0).precision(2).optional(),
+  discountPercent: Joi.number().min(0).max(100).precision(2).optional(),
+  discount_percent: Joi.number().min(0).max(100).precision(2).optional(),
   paymentNote: Joi.string().trim().max(200).optional().allow(''),
   payment_note: Joi.string().trim().max(200).optional().allow(''),
-}).or('paymentMethod', 'payment_method');
+  loyaltyPhone: Joi.string().trim().max(30).optional().allow(''),
+  loyalty_phone: Joi.string().trim().max(30).optional().allow(''),
+  redeemPoints: Joi.number().integer().min(0).max(100000).optional(),
+  redeem_points: Joi.number().integer().min(0).max(100000).optional(),
+}).or(
+  'paymentMethod',
+  'payment_method',
+  'discountPercent',
+  'discount_percent',
+  'loyaltyPhone',
+  'loyalty_phone',
+  'redeemPoints',
+  'redeem_points'
+);
 
 export const updateOnlineOrderSchema = Joi.object({
   workflowStatus: Joi.string().trim().lowercase().valid(...ONLINE_WORKFLOW_VALUES).optional(),
@@ -116,6 +131,10 @@ export const updateKitchenTicketStatusSchema = Joi.object({
 
 export const cancelPendingBillsSchema = Joi.object({
   reason: Joi.string().trim().min(3).max(200).required(),
+});
+
+export const softDeleteOrderSchema = Joi.object({
+  reason: Joi.string().trim().max(200).optional().allow(''),
 });
 
 export const createTableSchema = Joi.object({

@@ -3,6 +3,7 @@ import logger from '../utils/logger.js';
 import supabase from '../config/supabase.js';
 import TableService from './tableService.js';
 import InventoryService from './inventoryService.js';
+import { MANAGER_MAX_DISCOUNT_PERCENT } from '../constants/index.js';
 import {
   appendPublicNote,
   composeNotesWithKotMeta,
@@ -15,12 +16,35 @@ export class OrderService {
   static OPEN_BILL_STATUSES = ['awaiting_waiter_approval', 'pending', 'preparing', 'ready', 'served', 'in_progress'];
 
   static CLOSED_ORDER_STATUSES = ['completed'];
+  static LOYALTY_EARN_RATE_RUPEES = 100;
+  static LOYALTY_POINT_VALUE = 1;
 
   static ONLINE_SOURCES = ['direct', 'phone', 'website', 'swiggy', 'zomato'];
 
   static ONLINE_WORKFLOW_STATUSES = ['new', 'accepted', 'rejected', 'preparing', 'ready', 'dispatched'];
 
   static ONLINE_PAYMENT_STATES = ['pending', 'paid', 'cash_on_delivery', 'failed', 'refunded'];
+
+  static toSchemaAlignmentError(error, context = 'orders') {
+    const message = String(error?.message || '');
+    const details = String(error?.details || '');
+    const hint = String(error?.hint || '');
+    const combined = `${message} ${details} ${hint}`.toLowerCase();
+
+    const hasOrdersSchemaMismatch =
+      combined.includes('payment_method') ||
+      combined.includes('order_type') ||
+      combined.includes('unit_price') ||
+      (combined.includes('column') && (combined.includes('orders') || combined.includes('order_items')));
+
+    if (!hasOrdersSchemaMismatch) {
+      return error;
+    }
+
+    return new Error(
+      `Database schema is missing required ${context} columns. Run backend/src/config/migrations/2026-04-05-align-orders-and-order-items-schema.sql and retry.`
+    );
+  }
 
   static normalizeOrderStatus(status) {
     if (!status) {
@@ -140,6 +164,13 @@ export class OrderService {
       orderType: order.order_type,
       paymentStatus: order.payment_status,
     });
+    const loyalty = this.normalizeLoyaltyMeta(kotMeta.loyalty, {
+      fallbackPhone: online.customerPhone,
+    });
+    const billing = this.normalizeBillingMeta(kotMeta.billing, {
+      paymentMethod: order.payment_method,
+      paymentStatus: order.payment_status,
+    });
     return {
       id: order.id,
       restaurantId: order.restaurant_id,
@@ -150,6 +181,7 @@ export class OrderService {
       total: Number(order.total_amount || 0),
       paymentMethod: order.payment_method,
       paymentStatus: order.payment_status || 'unpaid',
+      billing,
       notes: publicNotes,
       createdAt: this.normalizeTimestamp(order.created_at),
       updatedAt: this.normalizeTimestamp(order.updated_at),
@@ -186,6 +218,7 @@ export class OrderService {
       activeKitchenTickets: kitchenTickets.filter((ticket) => ['pending', 'preparing', 'ready'].includes(ticket.status)),
       kitchenLastSentAt: kitchenTickets.length > 0 ? kitchenTickets[kitchenTickets.length - 1].createdAt : null,
       online,
+      loyalty,
     };
   }
 
@@ -417,7 +450,7 @@ export class OrderService {
     return this.normalizeOrderStatus(fallbackStatus);
   }
 
-  static async validateOrderItems(restaurantId, items = []) {
+  static async validateOrderItems(restaurantId, items = [], options = {}) {
     if (!Array.isArray(items) || items.length === 0) {
       throw new Error('At least one order item is required');
     }
@@ -475,7 +508,9 @@ export class OrderService {
       return {
         menuItemId: item.menuItemId,
         quantity: Number(item.quantity || 0),
-        unitPrice: Number(item.unitPrice ?? menuItem?.price ?? 0),
+        unitPrice: options.enforceMenuPrice
+          ? Number(menuItem?.price ?? 0)
+          : Number(item.unitPrice ?? menuItem?.price ?? 0),
         name: item.name || menuItem?.name || '',
         itemNote: this.sanitizeLineNote(item.itemNote),
         modifiers: this.parseModifierList(item.modifiers),
@@ -497,6 +532,19 @@ export class OrderService {
 
     const normalizedMethod = String(method).trim().toLowerCase();
     return ['cash', 'upi'].includes(normalizedMethod) ? normalizedMethod : null;
+  }
+
+  static normalizeDiscountPercent(value) {
+    if (value === undefined || value === null || value === '') {
+      return 0;
+    }
+
+    const normalizedValue = Number(value);
+    if (!Number.isFinite(normalizedValue) || normalizedValue < 0) {
+      throw new Error('Discount percent must be a valid positive number');
+    }
+
+    return Number(normalizedValue.toFixed(2));
   }
 
   static normalizeOnlineSource(source) {
@@ -604,8 +652,202 @@ export class OrderService {
     return appendPublicNote(existingNotes, noteToAppend);
   }
 
-  static formatSettlementNote({ method, amountReceived, changeDue, paymentNote }) {
+  static normalizeLoyaltyPhone(value = '') {
+    const normalized = String(value || '').replace(/[^\d]/g, '');
+    if (normalized.length < 10) {
+      return '';
+    }
+
+    return normalized.slice(-10);
+  }
+
+  static normalizeRedeemPoints(value) {
+    if (value === undefined || value === null || value === '') {
+      return 0;
+    }
+
+    const parsedValue = Number(value);
+    if (!Number.isFinite(parsedValue) || parsedValue < 0) {
+      throw new Error('Redeem points must be a valid positive number');
+    }
+
+    return Math.floor(parsedValue);
+  }
+
+  static calculateEarnedLoyaltyPoints(amount = 0) {
+    const normalizedAmount = Number(amount || 0);
+    if (!Number.isFinite(normalizedAmount) || normalizedAmount <= 0) {
+      return 0;
+    }
+
+    return Math.floor(normalizedAmount / this.LOYALTY_EARN_RATE_RUPEES);
+  }
+
+  static normalizeLoyaltyMeta(loyalty = {}, { fallbackPhone = '' } = {}) {
+    return {
+      customerPhone: this.normalizeLoyaltyPhone(loyalty?.customerPhone || fallbackPhone || ''),
+      earnedPoints: Math.max(0, Number(loyalty?.earnedPoints || 0)),
+      redeemedPoints: Math.max(0, Number(loyalty?.redeemedPoints || 0)),
+      redeemedAmount: Math.max(0, Number(loyalty?.redeemedAmount || 0)),
+      availablePointsBefore: Math.max(0, Number(loyalty?.availablePointsBefore || 0)),
+      availablePointsAfter: Math.max(0, Number(loyalty?.availablePointsAfter || 0)),
+      finalPayableTotal: Math.max(0, Number(loyalty?.finalPayableTotal || 0)),
+      settledAt: this.normalizeTimestamp(loyalty?.settledAt || null),
+    };
+  }
+
+  static normalizeChargeValue(value) {
+    const numericValue = Number(value || 0);
+    if (!Number.isFinite(numericValue) || numericValue < 0) {
+      return 0;
+    }
+
+    return Number(numericValue.toFixed(2));
+  }
+
+  static roundCurrency(value) {
+    const numericValue = Number(value || 0);
+    if (!Number.isFinite(numericValue)) {
+      return 0;
+    }
+
+    return Number(numericValue.toFixed(2));
+  }
+
+  static generateInvoiceNumber(order) {
+    const createdAt = this.normalizeTimestamp(order?.created_at || order?.createdAt || new Date().toISOString()) || new Date().toISOString();
+    const datePart = createdAt.slice(0, 10).replace(/-/g, '');
+    const suffix = String(order?.display_order_number || order?.displayOrderNumber || order?.id || '')
+      .replace(/[^A-Za-z0-9]/g, '')
+      .slice(-6)
+      .toUpperCase();
+
+    return `INV-${datePart}-${suffix || '000001'}`;
+  }
+
+  static normalizeBillingMeta(billing = {}, context = {}) {
+    return {
+      invoiceNumber: billing?.invoiceNumber || '',
+      invoiceDate: this.normalizeTimestamp(billing?.invoiceDate || null),
+      subtotal: Math.max(0, Number(billing?.subtotal || 0)),
+      orderDiscountAmount: Math.max(0, Number(billing?.orderDiscountAmount || 0)),
+      managerDiscountPercent: Math.max(0, Number(billing?.managerDiscountPercent || 0)),
+      managerDiscountAmount: Math.max(0, Number(billing?.managerDiscountAmount || 0)),
+      taxableAmount: Math.max(0, Number(billing?.taxableAmount || 0)),
+      gstPercent: Math.max(0, Number(billing?.gstPercent || 0)),
+      cgstRate: Math.max(0, Number(billing?.cgstRate || 0)),
+      sgstRate: Math.max(0, Number(billing?.sgstRate || 0)),
+      cgstAmount: Math.max(0, Number(billing?.cgstAmount || 0)),
+      sgstAmount: Math.max(0, Number(billing?.sgstAmount || 0)),
+      packingCharge: this.normalizeChargeValue(billing?.packingCharge),
+      serviceCharge: this.normalizeChargeValue(billing?.serviceCharge),
+      deliveryCharge: this.normalizeChargeValue(billing?.deliveryCharge),
+      chargesTotal: Math.max(0, Number(billing?.chargesTotal || 0)),
+      loyaltyRedeemedAmount: Math.max(0, Number(billing?.loyaltyRedeemedAmount || 0)),
+      loyaltyRedeemedPoints: Math.max(0, Number(billing?.loyaltyRedeemedPoints || 0)),
+      roundOff: Number(billing?.roundOff || 0),
+      grandTotal: Math.max(0, Number(billing?.grandTotal || 0)),
+      paymentMode: billing?.paymentMode || context.paymentMethod || '',
+      paidAmount: Math.max(0, Number(billing?.paidAmount || 0)),
+      cashierName: billing?.cashierName || '',
+      paymentStatus: context.paymentStatus || '',
+    };
+  }
+
+  static async getLoyaltyProfile(restaurantId, phone, options = {}) {
+    const normalizedPhone = this.normalizeLoyaltyPhone(phone);
+
+    if (!normalizedPhone) {
+      return {
+        customerPhone: '',
+        pointsBalance: 0,
+        totalEarnedPoints: 0,
+        totalRedeemedPoints: 0,
+        totalRedeemedAmount: 0,
+        totalSpend: 0,
+        visitCount: 0,
+        lastVisitAt: null,
+        recentOrders: [],
+      };
+    }
+
+    const { excludeOrderId = '' } = options;
+    const { data: orders, error } = await supabase
+      .from('orders')
+      .select('id, created_at, total_amount, status, payment_status, notes')
+      .eq('restaurant_id', restaurantId)
+      .or('status.eq.completed,payment_status.eq.paid')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      throw error;
+    }
+
+    const matchingOrders = (orders || [])
+      .filter((order) => order.id !== excludeOrderId)
+      .map((order) => {
+        const { kotMeta } = splitNotesAndKotMeta(order.notes);
+        const loyalty = this.normalizeLoyaltyMeta(kotMeta.loyalty, {
+          fallbackPhone: kotMeta.online?.customerPhone,
+        });
+
+        if (loyalty.customerPhone !== normalizedPhone) {
+          return null;
+        }
+
+        return {
+          id: order.id,
+          createdAt: this.normalizeTimestamp(order.created_at),
+          totalAmount: Number(order.total_amount || 0),
+          loyalty,
+        };
+      })
+      .filter(Boolean);
+
+    const totalEarnedPoints = matchingOrders.reduce((sum, order) => sum + order.loyalty.earnedPoints, 0);
+    const totalRedeemedPoints = matchingOrders.reduce((sum, order) => sum + order.loyalty.redeemedPoints, 0);
+    const totalRedeemedAmount = matchingOrders.reduce((sum, order) => sum + order.loyalty.redeemedAmount, 0);
+    const totalSpend = matchingOrders.reduce((sum, order) => sum + order.totalAmount, 0);
+
+    return {
+      customerPhone: normalizedPhone,
+      pointsBalance: Math.max(0, totalEarnedPoints - totalRedeemedPoints),
+      totalEarnedPoints,
+      totalRedeemedPoints,
+      totalRedeemedAmount: Number(totalRedeemedAmount.toFixed(2)),
+      totalSpend: Number(totalSpend.toFixed(2)),
+      visitCount: matchingOrders.length,
+      lastVisitAt: matchingOrders[0]?.createdAt || null,
+      recentOrders: matchingOrders.slice(0, 5),
+    };
+  }
+
+  static formatSettlementNote({
+    method,
+    amountReceived,
+    changeDue,
+    paymentNote,
+    discountPercent = 0,
+    discountAmount = 0,
+    originalTotal = 0,
+    finalTotal = 0,
+    actorName = '',
+    loyaltyPhone = '',
+    redeemedPoints = 0,
+    redeemedAmount = 0,
+    earnedPoints = 0,
+  }) {
     const noteParts = [`[Settlement ${new Date().toISOString()}] ${String(method || '').toUpperCase()} marked paid`];
+
+    if (discountPercent > 0) {
+      noteParts.push(`discount ${Number(discountPercent).toFixed(2)}%`);
+      noteParts.push(`discount amount ${Number(discountAmount).toFixed(2)}`);
+      noteParts.push(`original total ${Number(originalTotal).toFixed(2)}`);
+      noteParts.push(`final total ${Number(finalTotal).toFixed(2)}`);
+      if (actorName) {
+        noteParts.push(`approved by ${actorName}`);
+      }
+    }
 
     if (method === 'cash' && Number.isFinite(amountReceived)) {
       noteParts.push(`received ${Number(amountReceived).toFixed(2)}`);
@@ -614,6 +856,19 @@ export class OrderService {
 
     if (paymentNote) {
       noteParts.push(`note: ${paymentNote}`);
+    }
+
+    if (loyaltyPhone) {
+      noteParts.push(`loyalty phone ${loyaltyPhone}`);
+    }
+
+    if (redeemedPoints > 0) {
+      noteParts.push(`redeemed ${redeemedPoints} points`);
+      noteParts.push(`loyalty discount ${Number(redeemedAmount).toFixed(2)}`);
+    }
+
+    if (earnedPoints > 0) {
+      noteParts.push(`earned ${earnedPoints} loyalty points`);
     }
 
     return noteParts.join(' | ');
@@ -632,7 +887,7 @@ export class OrderService {
 
   // ============ ORDERS ============
 
-  static async createOrder(restaurantId, orderData) {
+  static async createOrder(restaurantId, orderData, options = {}) {
     try {
       // If restaurantId is not provided, look it up from the table
       let finalRestaurantId = restaurantId;
@@ -654,7 +909,9 @@ export class OrderService {
         throw new Error('Restaurant ID is required or table ID must be provided');
       }
 
-      const normalizedItems = await this.validateOrderItems(finalRestaurantId, orderData.items);
+      const normalizedItems = await this.validateOrderItems(finalRestaurantId, orderData.items, {
+        enforceMenuPrice: options.actorRole === 'manager',
+      });
       const computedTotalAmount = this.computeOrderTotal(normalizedItems);
       const initialStatus = orderData.requiresWaiterApproval ? 'awaiting_waiter_approval' : 'pending';
       const initialOnlineMeta = this.normalizeOnlineMeta(orderData.online, {
@@ -918,16 +1175,7 @@ export class OrderService {
 
   static async settleOrder(restaurantId, orderId, paymentData = {}) {
     try {
-      const { data: existingOrder, error: existingOrderError } = await supabase
-        .from('orders')
-        .select('id, restaurant_id, table_id, status, total_amount, payment_status, payment_method, notes')
-        .eq('id', orderId)
-        .eq('restaurant_id', restaurantId)
-        .single();
-
-      if (existingOrderError || !existingOrder) {
-        throw existingOrderError || new Error('Order not found');
-      }
+      const existingOrder = await this.fetchOrderRecord(restaurantId, orderId);
 
       if (existingOrder.status === 'cancelled') {
         throw new Error('Cancelled orders cannot be settled');
@@ -937,10 +1185,74 @@ export class OrderService {
         throw new Error('Order is already settled');
       }
 
-      const totalAmount = Number(existingOrder.total_amount || 0);
-      if (totalAmount <= 0) {
+      const storedTotalAmount = Number(existingOrder.total_amount || 0);
+      if (storedTotalAmount <= 0) {
         throw new Error('Order total must be greater than zero before settlement');
       }
+
+      const { data: restaurantSettings, error: restaurantSettingsError } = await supabase
+        .from('restaurants')
+        .select('*')
+        .eq('id', restaurantId)
+        .single();
+
+      if (restaurantSettingsError || !restaurantSettings) {
+        throw restaurantSettingsError || new Error('Restaurant settings not found');
+      }
+
+      const discountPercent = this.normalizeDiscountPercent(paymentData.discountPercent);
+      if (paymentData.actorRole === 'manager' && discountPercent > MANAGER_MAX_DISCOUNT_PERCENT) {
+        throw new Error(`Manager discounts cannot exceed ${MANAGER_MAX_DISCOUNT_PERCENT}%`);
+      }
+
+      const subtotal = this.roundCurrency(
+        (existingOrder.order_items || []).reduce(
+          (sum, item) => sum + Number(item.quantity || 0) * Number(item.unit_price || 0),
+          0
+        )
+      );
+      const orderDiscountAmount = Math.max(0, this.roundCurrency(subtotal - storedTotalAmount));
+      const managerDiscountAmount = this.roundCurrency((storedTotalAmount * discountPercent) / 100);
+      const taxableAmount = this.roundCurrency(storedTotalAmount - managerDiscountAmount);
+      if (taxableAmount <= 0) {
+        throw new Error('Discount cannot reduce the bill total to zero or less');
+      }
+
+      const { publicNotes, kotMeta } = splitNotesAndKotMeta(existingOrder.notes);
+      const normalizedLoyaltyPhone = this.normalizeLoyaltyPhone(
+        paymentData.loyaltyPhone || kotMeta.online?.customerPhone || kotMeta.loyalty?.customerPhone || ''
+      );
+      const requestedRedeemPoints = this.normalizeRedeemPoints(paymentData.redeemPoints);
+      const loyaltyProfile = normalizedLoyaltyPhone
+        ? await this.getLoyaltyProfile(restaurantId, normalizedLoyaltyPhone, { excludeOrderId: orderId })
+        : null;
+      const availablePointsBefore = loyaltyProfile?.pointsBalance || 0;
+
+      if (requestedRedeemPoints > availablePointsBefore) {
+        throw new Error(`Only ${availablePointsBefore} loyalty points are available for this customer`);
+      }
+
+      const gstPercent = restaurantSettings.enable_gst === false ? 0 : Number(restaurantSettings.default_gst_percent ?? 5);
+      const cgstRate = this.roundCurrency(gstPercent / 2);
+      const sgstRate = this.roundCurrency(gstPercent / 2);
+      const cgstAmount = this.roundCurrency((taxableAmount * cgstRate) / 100);
+      const sgstAmount = this.roundCurrency((taxableAmount * sgstRate) / 100);
+      const packingCharge = this.normalizeChargeValue(paymentData.packingCharge);
+      const serviceCharge = this.normalizeChargeValue(paymentData.serviceCharge);
+      const deliveryCharge = this.normalizeChargeValue(paymentData.deliveryCharge);
+      const chargesTotal = this.roundCurrency(packingCharge + serviceCharge + deliveryCharge);
+      const grossTotal = this.roundCurrency(taxableAmount + cgstAmount + sgstAmount + chargesTotal);
+      const redeemedPoints = Math.min(
+        requestedRedeemPoints,
+        Math.floor(grossTotal / this.LOYALTY_POINT_VALUE)
+      );
+      const redeemedAmount = Number((redeemedPoints * this.LOYALTY_POINT_VALUE).toFixed(2));
+      const payableBeforeRound = this.roundCurrency(grossTotal - redeemedAmount);
+      const roundedTotal = Math.round(payableBeforeRound);
+      const roundOff = this.roundCurrency(roundedTotal - payableBeforeRound);
+      const finalTotal = this.roundCurrency(roundedTotal);
+      const earnedPoints = normalizedLoyaltyPhone ? this.calculateEarnedLoyaltyPoints(finalTotal) : 0;
+      const availablePointsAfter = Math.max(0, availablePointsBefore - redeemedPoints + earnedPoints);
 
       const method = this.normalizePaymentMethod(paymentData.method || existingOrder.payment_method || 'cash');
       if (!method) {
@@ -952,25 +1264,73 @@ export class OrderService {
         ? null
         : Number(rawAmountReceived);
 
-      if (method === 'cash') {
+      if (method === 'cash' && finalTotal > 0) {
         if (!Number.isFinite(amountReceived)) {
           throw new Error('Cash received amount is required for cash settlement');
         }
 
-        if (amountReceived < totalAmount) {
+        if (amountReceived < finalTotal) {
           throw new Error('Cash received must be at least the bill total');
         }
       }
 
       const changeDue = method === 'cash' && Number.isFinite(amountReceived)
-        ? Number((amountReceived - totalAmount).toFixed(2))
+        ? Number((amountReceived - finalTotal).toFixed(2))
         : 0;
 
-      const { publicNotes, kotMeta } = splitNotesAndKotMeta(existingOrder.notes);
+      const nextKotMeta = {
+        ...kotMeta,
+        billing: this.normalizeBillingMeta(
+          {
+            invoiceNumber: kotMeta.billing?.invoiceNumber || this.generateInvoiceNumber(existingOrder),
+            invoiceDate: new Date().toISOString(),
+            subtotal,
+            orderDiscountAmount,
+            managerDiscountPercent: discountPercent,
+            managerDiscountAmount,
+            taxableAmount,
+            gstPercent,
+            cgstRate,
+            sgstRate,
+            cgstAmount,
+            sgstAmount,
+            packingCharge,
+            serviceCharge,
+            deliveryCharge,
+            chargesTotal,
+            loyaltyRedeemedAmount: redeemedAmount,
+            loyaltyRedeemedPoints: redeemedPoints,
+            roundOff,
+            grandTotal: finalTotal,
+            paymentMode: method,
+            paidAmount: Number.isFinite(amountReceived) ? amountReceived : finalTotal,
+            cashierName: paymentData.actorName || '',
+          },
+          {
+            paymentMethod: method,
+            paymentStatus: 'paid',
+          }
+        ),
+        loyalty: this.normalizeLoyaltyMeta(
+          {
+            customerPhone: normalizedLoyaltyPhone,
+            earnedPoints,
+            redeemedPoints,
+            redeemedAmount,
+            availablePointsBefore,
+            availablePointsAfter,
+            finalPayableTotal: finalTotal,
+            settledAt: new Date().toISOString(),
+          },
+          {
+            fallbackPhone: normalizedLoyaltyPhone,
+          }
+        ),
+      };
       const nextNotes = this.appendOrderNote(
         composeNotesWithKotMeta(publicNotes, {
-          ...kotMeta,
-          online: this.mergeOnlineMeta(kotMeta.online, { paymentState: 'paid' }, {
+          ...nextKotMeta,
+          online: this.mergeOnlineMeta(kotMeta.online, { paymentState: 'paid', customerPhone: normalizedLoyaltyPhone || kotMeta.online?.customerPhone || '' }, {
             orderType: kotMeta.online?.fulfillmentType || (existingOrder.table_id ? 'dine-in' : 'takeaway'),
             paymentStatus: 'paid',
           }),
@@ -980,6 +1340,15 @@ export class OrderService {
           amountReceived,
           changeDue,
           paymentNote: paymentData.paymentNote,
+          discountPercent,
+          discountAmount: managerDiscountAmount,
+          originalTotal: storedTotalAmount,
+          finalTotal,
+          actorName: paymentData.actorName,
+          loyaltyPhone: normalizedLoyaltyPhone,
+          redeemedPoints,
+          redeemedAmount,
+          earnedPoints,
         })
       );
 
@@ -987,6 +1356,7 @@ export class OrderService {
         .from('orders')
         .update({
           status: 'completed',
+          total_amount: finalTotal,
           payment_method: method,
           payment_status: 'paid',
           notes: nextNotes,
@@ -1010,6 +1380,22 @@ export class OrderService {
           method,
           amountReceived,
           changeDue,
+          originalTotal: storedTotalAmount,
+          finalTotal,
+          discountPercent,
+          discountAmount: managerDiscountAmount,
+          billing: this.normalizeBillingMeta(nextKotMeta.billing, {
+            paymentMethod: method,
+            paymentStatus: 'paid',
+          }),
+          loyalty: {
+            customerPhone: normalizedLoyaltyPhone,
+            redeemedPoints,
+            redeemedAmount,
+            earnedPoints,
+            availablePointsBefore,
+            availablePointsAfter,
+          },
         },
       };
     } catch (error) {
@@ -1392,7 +1778,7 @@ export class OrderService {
     }
   }
 
-  static async updateOrder(restaurantId, orderId, orderData) {
+  static async updateOrder(restaurantId, orderId, orderData, options = {}) {
     try {
       const { data: existingOrder, error: existingOrderError } = await supabase
         .from('orders')
@@ -1409,7 +1795,9 @@ export class OrderService {
         throw new Error('Only active table orders can be updated');
       }
 
-      const normalizedItems = await this.validateOrderItems(restaurantId, orderData.items);
+      const normalizedItems = await this.validateOrderItems(restaurantId, orderData.items, {
+        enforceMenuPrice: options.actorRole === 'manager',
+      });
       const computedTotalAmount = this.computeOrderTotal(normalizedItems);
       const resolvedTableId =
         orderData.tableId !== undefined ? orderData.tableId : existingOrder.table_id;
@@ -1499,6 +1887,48 @@ export class OrderService {
     }
   }
 
+  static async softDeleteOrder(restaurantId, orderId, reason, options = {}) {
+    try {
+      const existingOrder = await this.fetchOrderRecord(restaurantId, orderId);
+      const trimmedReason = String(reason || '').trim();
+
+      const deletedAt = new Date().toISOString();
+      const auditNote = this.appendOrderNote(
+        existingOrder.notes,
+        `[order-delete] ${trimmedReason || 'no reason provided'} | actor=${options.actorRole || 'unknown'}:${options.actorName || 'Unknown user'} | at=${deletedAt}`
+      );
+
+      const { error: deleteItemsError } = await supabase
+        .from('order_items')
+        .delete()
+        .eq('order_id', orderId);
+
+      if (deleteItemsError) {
+        throw deleteItemsError;
+      }
+
+      const { error } = await supabase
+        .from('orders')
+        .delete()
+        .eq('id', orderId)
+        .eq('restaurant_id', restaurantId);
+
+      if (error) {
+        throw error;
+      }
+
+      if (existingOrder.table_id) {
+        await TableService.syncTableLifecycle(restaurantId, existingOrder.table_id);
+      }
+
+      logger.info(`Order permanently deleted: ${orderId} :: ${auditNote}`);
+      return { id: orderId, deletedAt };
+    } catch (error) {
+      logger.error('Soft delete order error:', error);
+      throw error;
+    }
+  }
+
   static async getOnlineOrderInbox(restaurantId, filters = {}) {
     try {
       const { data: orders, error } = await supabase
@@ -1521,6 +1951,7 @@ export class OrderService {
         `)
         .eq('restaurant_id', restaurantId)
         .neq('status', 'completed')
+        .neq('status', 'cancelled')
         .order('updated_at', { ascending: false })
         .order('created_at', { ascending: false });
 

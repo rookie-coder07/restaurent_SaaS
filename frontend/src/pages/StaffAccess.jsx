@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowRight, ChefHat, Receipt, Users } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Receipt, Users } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import Card from '../components/common/Card';
 
@@ -9,13 +9,6 @@ const STAFF_PORTALS = [
     href: '/pos/login',
     icon: Receipt,
     badge: 'POS',
-  },
-  {
-    title: 'KOT Login',
-    description: 'For kitchen staff handling active tickets, prep queue, and ready updates.',
-    href: '/kot/login',
-    icon: ChefHat,
-    badge: 'KOT',
   },
 ];
 
@@ -38,11 +31,11 @@ export default function StaffAccess() {
               Choose the staff portal
             </h1>
             <p className="mx-auto mt-4 max-w-2xl text-base leading-7 text-[var(--color-text-muted)]">
-              Staff logins are separated by work area so POS and KOT stay focused and clean.
+              Staff access is separated so POS and kitchen teams can enter the right workspace quickly.
             </p>
           </div>
 
-          <div className="mt-10 grid gap-5 lg:grid-cols-2">
+          <div className="mt-10 grid gap-5">
             {STAFF_PORTALS.map((portal) => {
               const Icon = portal.icon;
 

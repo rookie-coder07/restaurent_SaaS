@@ -10,7 +10,9 @@
     "test": "jest --coverage",
     "lint": "eslint src/",
     "seed": "node scripts/seed.js",
-    "seed:menu-images": "node scripts/seedMenuImages.js"
+    "seed:pos-staff": "node scripts/seedPosStaffAccount.js",
+    "seed:menu-images": "node scripts/seedMenuImages.js",
+    "seed:manager": "node scripts/seedManagerAccount.js"
   },
   "keywords": [
     "restaurant",

@@ -1,7 +1,7 @@
-import { useMemo, useState } from 'react';
-import { Download, Loader, Plus, ShoppingCart, X } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Loader, ShoppingCart, RotateCcw } from 'lucide-react';
 import { useApi } from '../hooks/useApi';
-import { orderAPI, menuAPI, tableAPI } from '../services/apiEndpoints';
+import { orderAPI, tableAPI } from '../services/apiEndpoints';
 import { formatCurrency, formatDate, formatDisplayOrderNumber } from '../utils/formatters';
 import Card from '../components/common/Card';
 import Button from '../components/common/Button';
@@ -10,7 +10,8 @@ import Modal from '../components/common/Modal';
 import Toast from '../components/common/Toast';
 import EmptyState from '../components/common/EmptyState';
 import StatCard from '../components/common/StatCard';
-import SortDropdown from '../components/common/SortDropdown';
+import PaginationControls from '../components/common/PaginationControls';
+import useResponsivePagination from '../hooks/useResponsivePagination';
 
 const STATUS_STYLES = {
   awaiting_waiter_approval: 'bg-sky-100 text-sky-700',
@@ -32,139 +33,124 @@ function formatPaymentMethodLabel(value) {
 
 export default function Orders() {
   const { data: ordersData = {}, loading, execute: refetchOrders } = useApi(() => orderAPI.getOrders({ limit: 100 }));
-  const { data: itemsData = {} } = useApi(() => menuAPI.getItems({ limit: 100 }));
   const { data: tablesData = {} } = useApi(() => tableAPI.getTables({}));
 
   const [filterStatus, setFilterStatus] = useState('all');
-  const [sort, setSort] = useState('recent');
+  const [datePreset, setDatePreset] = useState('all');
   const [dateRange, setDateRange] = useState({ start: '', end: '' });
-  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [timeRange, setTimeRange] = useState({ start: '', end: '' });
+  const [tableFilter, setTableFilter] = useState('all');
   const [selectedOrder, setSelectedOrder] = useState(null);
-  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
-  const [selectedItems, setSelectedItems] = useState([]);
-  const [selectedTable, setSelectedTable] = useState('');
-  const [showBulkCancelModal, setShowBulkCancelModal] = useState(false);
-  const [bulkCancelReason, setBulkCancelReason] = useState('');
-  const [isBulkCancelling, setIsBulkCancelling] = useState(false);
+  const [pendingDeleteOrder, setPendingDeleteOrder] = useState(null);
+  const [isDeletingOrder, setIsDeletingOrder] = useState(false);
+  const [selectedOrderIds, setSelectedOrderIds] = useState([]);
+  const [showBulkDeleteModal, setShowBulkDeleteModal] = useState(false);
+  const [isBulkDeletingOrders, setIsBulkDeletingOrders] = useState(false);
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+  const [pendingDeletionQueue, setPendingDeletionQueue] = useState([]);
+  const [deleteClock, setDeleteClock] = useState(Date.now());
+  const pendingDeletionQueueRef = useRef([]);
 
   const orders = ordersData?.items || [];
-  const items = itemsData?.items || [];
   const tables = tablesData?.tables || [];
+  const pendingDeletionIds = useMemo(
+    () => new Set(pendingDeletionQueue.flatMap((entry) => entry.orderIds)),
+    [pendingDeletionQueue]
+  );
 
-  const filteredOrders = useMemo(() => {
-    const sortedData = orders.filter((order) => {
-      const statusMatch = filterStatus === 'all' || order.status === filterStatus;
-      const createdAt = new Date(order.createdAt);
-      const startMatch = !dateRange.start || createdAt >= new Date(dateRange.start);
-      const endMatch = !dateRange.end || createdAt <= new Date(`${dateRange.end}T23:59:59`);
-      return statusMatch && startMatch && endMatch;
-    });
-
-    switch (sort) {
-      case 'priceLowHigh':
-        sortedData.sort((a, b) => (a.totalAmount || a.total || 0) - (b.totalAmount || b.total || 0));
-        break;
-      case 'priceHighLow':
-        sortedData.sort((a, b) => (b.totalAmount || b.total || 0) - (a.totalAmount || a.total || 0));
-        break;
-      case 'nameAsc':
-        sortedData.sort((a, b) => String(a.tableNumber || '').localeCompare(String(b.tableNumber || '')));
-        break;
-      case 'nameDesc':
-        sortedData.sort((a, b) => String(b.tableNumber || '').localeCompare(String(a.tableNumber || '')));
-        break;
-      case 'recent':
-      default:
-        sortedData.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
-        break;
+  const applyDatePreset = (preset) => {
+    const now = new Date();
+    if (preset === 'today') {
+      const today = now.toISOString().split('T')[0];
+      setDateRange({ start: today, end: today });
+      return;
     }
 
-    return sortedData;
-  }, [orders, filterStatus, dateRange, sort]);
+    if (preset === 'custom') {
+      return;
+    }
+
+    setDateRange({ start: '', end: '' });
+  };
+
+  const filteredOrders = useMemo(() => {
+    const visibleOrders = orders.filter((order) => {
+      if (pendingDeletionIds.has(order.id)) {
+        return false;
+      }
+
+      const statusMatch = filterStatus === 'all' || order.status === filterStatus;
+      const createdAt = new Date(order.createdAt);
+      const startMatch = !dateRange.start || createdAt >= new Date(`${dateRange.start}T00:00:00`);
+      const endMatch = !dateRange.end || createdAt <= new Date(`${dateRange.end}T23:59:59`);
+      const createdMinutes = createdAt.getHours() * 60 + createdAt.getMinutes();
+      const startTimeMinutes = timeRange.start
+        ? Number(timeRange.start.split(':')[0]) * 60 + Number(timeRange.start.split(':')[1])
+        : null;
+      const endTimeMinutes = timeRange.end
+        ? Number(timeRange.end.split(':')[0]) * 60 + Number(timeRange.end.split(':')[1])
+        : null;
+      const timeStartMatch = startTimeMinutes === null || createdMinutes >= startTimeMinutes;
+      const timeEndMatch = endTimeMinutes === null || createdMinutes <= endTimeMinutes;
+      const tableMatch = tableFilter === 'all' || String(order.tableNumber || '') === String(tableFilter);
+      return statusMatch && startMatch && endMatch && timeStartMatch && timeEndMatch && tableMatch;
+    });
+
+    return visibleOrders.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+  }, [orders, filterStatus, dateRange, timeRange, tableFilter, pendingDeletionIds]);
 
   const totalRevenue = filteredOrders
     .filter((order) => isSettledOrder(order))
     .reduce((sum, order) => sum + (order.totalAmount || order.total || 0), 0);
 
-  const handleAddItem = (item) => {
-    setSelectedItems((current) => {
-      const existing = current.find((candidate) => candidate.id === item.id);
-      if (existing) {
-        return current.map((candidate) =>
-          candidate.id === item.id ? { ...candidate, quantity: candidate.quantity + 1 } : candidate
-        );
-      }
-      return [...current, { ...item, quantity: 1 }];
-    });
-  };
+  const bulkDeletableOrders = filteredOrders;
+  const selectedBulkOrders = filteredOrders.filter((order) => selectedOrderIds.includes(order.id));
+  const activeOrdersCount = filteredOrders.filter((order) => !isSettledOrder(order) && order.status !== 'cancelled').length;
+  const paidOrdersCount = filteredOrders.filter((order) => isSettledOrder(order)).length;
+  const hasTimelineFilter = Boolean(dateRange.start || dateRange.end);
+  const timelineOrders = filteredOrders;
+  const {
+    paginatedItems: paginatedOrders,
+    currentPage,
+    totalPages,
+    canGoPrevious,
+    canGoNext,
+    goPrevious,
+    goNext,
+    pageStart,
+    hasPagination,
+  } = useResponsivePagination(filteredOrders, { mobileItemsPerPage: 6, desktopItemsPerPage: 12 });
 
-  const handleRemoveItem = (itemId) => setSelectedItems((current) => current.filter((item) => item.id !== itemId));
+  useEffect(() => {
+    pendingDeletionQueueRef.current = pendingDeletionQueue;
+  }, [pendingDeletionQueue]);
 
-  const handleQuantityChange = (itemId, quantity) => {
-    if (quantity <= 0) {
-      handleRemoveItem(itemId);
-      return;
+  useEffect(() => {
+    if (pendingDeletionQueue.length === 0) {
+      return undefined;
     }
 
-    setSelectedItems((current) =>
-      current.map((item) => (item.id === itemId ? { ...item, quantity } : item))
-    );
-  };
+    const intervalId = window.setInterval(() => {
+      setDeleteClock(Date.now());
+    }, 500);
 
-  const resetCreateState = () => {
-    setShowCreateForm(false);
-    setSelectedItems([]);
-    setSelectedTable('');
-  };
+    return () => window.clearInterval(intervalId);
+  }, [pendingDeletionQueue.length]);
 
-  const handleCreateOrder = async (e) => {
-    e.preventDefault();
-    setError(null);
-    setSubmitting(true);
-
-    try {
-      if (!selectedTable) {
-        setError('Please select a table');
-        return;
-      }
-
-      if (selectedItems.length === 0) {
-        setError('Please add at least one item');
-        return;
-      }
-
-      const specialRequests = (e.target.specialRequests?.value || '').trim();
-      const orderData = {
-        tableId: selectedTable,
-        items: selectedItems.map((item) => ({
-          menuItemId: item.id,
-          quantity: item.quantity,
-          unitPrice: item.price,
-        })),
-        totalAmount: selectedItems.reduce((sum, item) => sum + item.price * item.quantity, 0),
-      };
-
-      if (specialRequests) {
-        orderData.notes = specialRequests;
-      }
-
-      await orderAPI.createOrder(orderData);
-      setSuccess('Order created successfully');
-      resetCreateState();
-      await refetchOrders();
-      window.setTimeout(() => setSuccess(null), 3000);
-    } catch (err) {
-      setError(err.response?.data?.message || 'Failed to create order');
-    } finally {
-      setSubmitting(false);
-    }
-  };
+  useEffect(() => () => {
+    pendingDeletionQueueRef.current.forEach((entry) => window.clearTimeout(entry.timeoutId));
+  }, []);
 
   const handleStatusUpdate = async (orderId, newStatus) => {
     try {
-      await orderAPI.updateStatus(orderId, { status: newStatus });
+      await orderAPI.updateStatus(
+        orderId,
+        newStatus === 'cancelled'
+          ? { status: newStatus, cancelReason: 'Cancelled from admin order status control.' }
+          : { status: newStatus }
+      );
       setSuccess('Order status updated');
       await refetchOrders();
       window.setTimeout(() => setSuccess(null), 3000);
@@ -173,33 +159,140 @@ export default function Orders() {
     }
   };
 
-  const handleBulkCancelPendingBills = async () => {
-    const trimmedReason = bulkCancelReason.trim();
-    if (!trimmedReason) {
-      setError('Add a reason before cancelling pending bills.');
+  const removePendingDeletionEntry = (entryId) => {
+    setPendingDeletionQueue((current) => current.filter((entry) => entry.id !== entryId));
+  };
+
+  const finalizePendingDeletion = async (entry) => {
+    try {
+      await Promise.all(entry.orderIds.map((orderId) => orderAPI.softDeleteOrder(orderId, {})));
+      removePendingDeletionEntry(entry.id);
+      await refetchOrders();
+      setSuccess(
+        entry.orderIds.length === 1
+          ? `${entry.label} deleted permanently.`
+          : `${entry.orderIds.length} orders deleted permanently.`
+      );
+      window.setTimeout(() => setSuccess(null), 4000);
+    } catch (err) {
+      removePendingDeletionEntry(entry.id);
+      setError(err.response?.data?.message || 'Failed to delete orders.');
+      await refetchOrders();
+    }
+  };
+
+  const queueDeletion = (ordersToDelete) => {
+    const uniqueOrders = Array.from(new Map(ordersToDelete.map((order) => [order.id, order])).values());
+
+    if (uniqueOrders.length === 0) {
+      return;
+    }
+
+    const entry = {
+      id: `delete-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      orderIds: uniqueOrders.map((order) => order.id),
+      label: uniqueOrders.length === 1 ? formatDisplayOrderNumber(uniqueOrders[0]) : `${uniqueOrders.length} orders`,
+      expiresAt: Date.now() + 10000,
+      timeoutId: null,
+    };
+
+    entry.timeoutId = window.setTimeout(() => {
+      finalizePendingDeletion(entry);
+    }, 10000);
+
+    setPendingDeletionQueue((current) => [entry, ...current]);
+    setSelectedOrderIds((current) => current.filter((id) => !entry.orderIds.includes(id)));
+    setSuccess(
+      uniqueOrders.length === 1
+        ? `${entry.label} removed from the list. Undo available for 10 seconds.`
+        : `${uniqueOrders.length} orders removed from the list. Undo available for 10 seconds.`
+    );
+    window.setTimeout(() => setSuccess(null), 4000);
+  };
+
+  const handleUndoDelete = (entryId) => {
+    setPendingDeletionQueue((current) => {
+      const entry = current.find((candidate) => candidate.id === entryId);
+      if (entry?.timeoutId) {
+        window.clearTimeout(entry.timeoutId);
+      }
+
+      return current.filter((candidate) => candidate.id !== entryId);
+    });
+  };
+
+  const handleDeleteOrder = async () => {
+    if (!pendingDeleteOrder) {
       return;
     }
 
     try {
-      setIsBulkCancelling(true);
+      setIsDeletingOrder(true);
       setError(null);
-
-      const response = await orderAPI.cancelPendingBills({ reason: trimmedReason });
-      const result = response.data?.data || {};
-
-      setShowBulkCancelModal(false);
-      setBulkCancelReason('');
-      setSuccess(
-        result.cancelledCount > 0
-          ? `${result.cancelledCount} waiting/pending bill${result.cancelledCount === 1 ? '' : 's'} cancelled successfully.`
-          : 'No waiting or pending bills were available to cancel.'
-      );
-      await refetchOrders();
-      window.setTimeout(() => setSuccess(null), 4000);
+      queueDeletion([pendingDeleteOrder]);
+      setPendingDeleteOrder(null);
     } catch (err) {
-      setError(err.response?.data?.message || 'Failed to cancel waiting/pending bills');
+      setError(err.response?.data?.message || 'Failed to queue this order for deletion.');
     } finally {
-      setIsBulkCancelling(false);
+      setIsDeletingOrder(false);
+    }
+  };
+
+  const toggleOrderSelection = (orderId) => {
+    setSelectedOrderIds((current) =>
+      current.includes(orderId) ? current.filter((id) => id !== orderId) : [...current, orderId]
+    );
+  };
+
+  const clearFilters = () => {
+    setFilterStatus('all');
+    setDatePreset('all');
+    setDateRange({ start: '', end: '' });
+    setTimeRange({ start: '', end: '' });
+    setTableFilter('all');
+  };
+
+  const toggleSelectAllVisible = () => {
+    const visibleIds = bulkDeletableOrders.map((order) => order.id);
+    const allSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedOrderIds.includes(id));
+
+    setSelectedOrderIds((current) =>
+      allSelected
+        ? current.filter((id) => !visibleIds.includes(id))
+        : Array.from(new Set([...current, ...visibleIds]))
+    );
+  };
+
+  const selectTimelineOrders = () => {
+    const timelineIds = timelineOrders.map((order) => order.id);
+    setSelectedOrderIds((current) => Array.from(new Set([...current, ...timelineIds])));
+  };
+
+  const deleteTimelineOrders = () => {
+    if (timelineOrders.length === 0) {
+      setError('No orders found in the selected timeline.');
+      return;
+    }
+
+    setSelectedOrderIds(timelineOrders.map((order) => order.id));
+    setShowBulkDeleteModal(true);
+  };
+
+  const handleBulkDeleteOrders = async () => {
+    if (selectedBulkOrders.length === 0) {
+      setError('Select at least one order to delete.');
+      return;
+    }
+
+    try {
+      setIsBulkDeletingOrders(true);
+      setError(null);
+      queueDeletion(selectedBulkOrders);
+      setShowBulkDeleteModal(false);
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to queue selected orders for deletion.');
+    } finally {
+      setIsBulkDeletingOrders(false);
     }
   };
 
@@ -215,6 +308,30 @@ export default function Orders() {
     <div className="space-y-6">
       {success ? <Toast type="success" message={success} /> : null}
       {error ? <Toast type="error" message={error} /> : null}
+      {pendingDeletionQueue.length > 0 ? (
+        <Card className="border-amber-200 bg-amber-50">
+          <div className="flex flex-col gap-3">
+            {pendingDeletionQueue.map((entry) => {
+              const secondsLeft = Math.max(1, Math.ceil((entry.expiresAt - deleteClock) / 1000));
+
+              return (
+                <div key={entry.id} className="flex flex-col gap-3 rounded-2xl border border-amber-200 bg-white/70 p-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="text-sm font-semibold text-amber-900">
+                      {entry.orderIds.length === 1 ? `${entry.label} scheduled for deletion.` : `${entry.orderIds.length} orders scheduled for deletion.`}
+                    </p>
+                    <p className="text-sm text-amber-800">Undo is available for {secondsLeft} more second{secondsLeft === 1 ? '' : 's'}.</p>
+                  </div>
+                  <Button variant="secondary" onClick={() => handleUndoDelete(entry.id)}>
+                    <RotateCcw className="h-4 w-4" />
+                    Undo
+                  </Button>
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+      ) : null}
 
       <Card className="overflow-hidden bg-[radial-gradient(circle_at_top_right,_rgba(79,70,229,0.14),_transparent_35%),var(--color-surface)]">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
@@ -225,107 +342,309 @@ export default function Orders() {
               Review order history, filter by status, and create a new order directly from the admin panel.
             </p>
           </div>
-          <div className="flex flex-col gap-3 sm:flex-row">
-            <Button
-              variant="danger"
-              onClick={() => setShowBulkCancelModal(true)}
-            >
-              Cancel Pending Bills
-            </Button>
-            <Button variant="secondary">
-              <Download className="h-4 w-4" />
-              Export
-            </Button>
-            <Button onClick={() => setShowCreateForm(true)}>
-              <Plus className="h-4 w-4" />
-              New Order
-            </Button>
-          </div>
         </div>
       </Card>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <StatCard label="Filtered Orders" value={filteredOrders.length} subtitle="Current result set" tone="primary" />
-        <StatCard label="Revenue" value={formatCurrency(totalRevenue)} subtitle="Settled sales only" tone="success" />
+        <StatCard label="Filtered Orders" value={filteredOrders.length} subtitle="Current result set" />
+        <StatCard label="Revenue" value={formatCurrency(totalRevenue)} subtitle="Settled sales only" />
         <StatCard
           label="Settled"
           value={filteredOrders.filter((order) => isSettledOrder(order)).length}
           subtitle="Bills marked paid"
-          tone="neutral"
         />
       </div>
 
       <Card>
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
-          <label className="space-y-2">
-            <span className="text-sm font-medium text-[var(--color-text)]">Status</span>
-            <select
-              value={filterStatus}
-              onChange={(e) => setFilterStatus(e.target.value)}
-              className="input"
-            >
-              <option value="all">All Orders</option>
-              <option value="awaiting_waiter_approval">Waiting for Waiter</option>
-              <option value="pending">Pending</option>
-              <option value="preparing">Preparing</option>
-              <option value="ready">Ready</option>
-              <option value="served">Served</option>
-              <option value="completed">Completed</option>
-              <option value="cancelled">Cancelled</option>
-            </select>
-          </label>
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+          <div>
+            <p className="text-sm text-[var(--color-text-muted)]">Quick Filters</p>
+            <h3 className="mt-1 text-lg font-semibold text-[var(--color-text)]">Find orders fast without the clutter</h3>
+          </div>
 
-          <Input
-            label="From Date"
-            type="date"
-            value={dateRange.start}
-            onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })}
-          />
-
-          <Input
-            label="To Date"
-            type="date"
-            value={dateRange.end}
-            onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })}
-          />
-          <SortDropdown
-            value={sort}
-            onChange={setSort}
-            options={[
-              { label: 'Table (Low -> High)', value: 'nameAsc' },
-              { label: 'Table (High -> Low)', value: 'nameDesc' },
-              { label: 'Amount (Low -> High)', value: 'priceLowHigh' },
-              { label: 'Amount (High -> Low)', value: 'priceHighLow' },
-              { label: 'Recently Added', value: 'recent' },
-            ]}
-          />
+          <div className="flex flex-wrap gap-2">
+            {[
+              { label: 'All', value: 'all' },
+              { label: 'Pending', value: 'pending' },
+              { label: 'Preparing', value: 'preparing' },
+              { label: 'Ready', value: 'ready' },
+              { label: 'Completed', value: 'completed' },
+            ].map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => setFilterStatus(option.value)}
+                className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
+                  filterStatus === option.value
+                    ? 'bg-[var(--color-primary)] text-white'
+                    : 'bg-[var(--color-surface-muted)] text-[var(--color-text-muted)]'
+                }`}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
         </div>
+
+        <div className="mt-5 grid grid-cols-1 gap-3 md:grid-cols-3">
+          <div className="rounded-2xl bg-[var(--color-surface-muted)] p-4">
+            <p className="text-xs uppercase tracking-[0.16em] text-[var(--color-text-subtle)]">Active</p>
+            <p className="mt-2 text-2xl font-semibold text-[var(--color-text)]">{activeOrdersCount}</p>
+          </div>
+          <div className="rounded-2xl bg-[var(--color-surface-muted)] p-4">
+            <p className="text-xs uppercase tracking-[0.16em] text-[var(--color-text-subtle)]">Paid</p>
+            <p className="mt-2 text-2xl font-semibold text-[var(--color-text)]">{paidOrdersCount}</p>
+          </div>
+          <div className="rounded-2xl bg-[var(--color-surface-muted)] p-4">
+            <p className="text-xs uppercase tracking-[0.16em] text-[var(--color-text-subtle)]">Total Listed</p>
+            <p className="mt-2 text-2xl font-semibold text-[var(--color-text)]">{filteredOrders.length}</p>
+          </div>
+        </div>
+
+        <div className="mt-5 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="secondary"
+              onClick={() => setShowAdvancedFilters((current) => !current)}
+            >
+              {showAdvancedFilters ? 'Hide Advanced Filters' : 'Show Advanced Filters'}
+            </Button>
+            <Button variant="secondary" onClick={clearFilters}>
+              Reset View
+            </Button>
+          </div>
+
+          <p className="text-sm text-[var(--color-text-muted)]">
+            Filters stay local to loaded data for faster browsing.
+          </p>
+        </div>
+
+        {showAdvancedFilters ? (
+          <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <label className="space-y-2">
+              <span className="text-sm font-medium text-[var(--color-text)]">Date Filter</span>
+              <select
+                value={datePreset}
+                onChange={(e) => {
+                  const nextPreset = e.target.value;
+                  setDatePreset(nextPreset);
+                  applyDatePreset(nextPreset);
+                }}
+                className="input"
+              >
+                <option value="all">All Dates</option>
+                <option value="today">Today</option>
+                <option value="custom">Custom Date</option>
+              </select>
+            </label>
+
+            <Input
+              label="From Date"
+              type="date"
+              value={dateRange.start}
+              onChange={(e) => {
+                setDatePreset('custom');
+                setDateRange({ ...dateRange, start: e.target.value });
+              }}
+            />
+
+            <Input
+              label="To Date"
+              type="date"
+              value={dateRange.end}
+              onChange={(e) => {
+                setDatePreset('custom');
+                setDateRange({ ...dateRange, end: e.target.value });
+              }}
+            />
+
+            <Input
+              label="From Time"
+              type="time"
+              value={timeRange.start}
+              onChange={(e) => setTimeRange({ ...timeRange, start: e.target.value })}
+            />
+
+            <Input
+              label="To Time"
+              type="time"
+              value={timeRange.end}
+              onChange={(e) => setTimeRange({ ...timeRange, end: e.target.value })}
+            />
+
+            <label className="space-y-2">
+              <span className="text-sm font-medium text-[var(--color-text)]">Table</span>
+              <select value={tableFilter} onChange={(e) => setTableFilter(e.target.value)} className="input">
+                <option value="all">All Tables</option>
+                {tables.map((table) => (
+                  <option key={table.id} value={table.tableNumber}>
+                    Table {table.tableNumber}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+        ) : null}
+
+        {hasTimelineFilter ? (
+          <div className="mt-5 rounded-2xl border border-[var(--color-primary)]/20 bg-[var(--color-primary-soft)]/35 p-4">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <p className="text-sm font-semibold text-[var(--color-text)]">Timeline selection</p>
+                <p className="mt-1 text-sm text-[var(--color-text-muted)]">
+                  {timelineOrders.length} order{timelineOrders.length === 1 ? '' : 's'} found in the current date range.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button variant="secondary" onClick={selectTimelineOrders} disabled={timelineOrders.length === 0}>
+                  Select Timeline
+                </Button>
+                <Button variant="danger" onClick={deleteTimelineOrders} disabled={timelineOrders.length === 0}>
+                  Delete Timeline
+                </Button>
+              </div>
+            </div>
+          </div>
+        ) : null}
       </Card>
+
+      {selectedBulkOrders.length > 0 ? (
+        <Card className="border-[var(--color-primary)]/20 bg-[var(--color-primary-soft)]/40">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <p className="text-sm font-semibold text-[var(--color-text)]">{selectedBulkOrders.length} orders selected</p>
+              <p className="text-sm text-[var(--color-text-muted)]">Delete the selected orders permanently from the system.</p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="secondary" onClick={toggleSelectAllVisible}>
+                {bulkDeletableOrders.every((order) => selectedOrderIds.includes(order.id))
+                  ? 'Clear Visible Selection'
+                  : 'Select Visible'}
+              </Button>
+              <Button
+                variant="danger"
+                onClick={() => setShowBulkDeleteModal(true)}
+                disabled={selectedBulkOrders.length === 0}
+              >
+                Delete Selected ({selectedBulkOrders.length})
+              </Button>
+            </div>
+          </div>
+        </Card>
+      ) : null}
 
       {filteredOrders.length === 0 ? (
         <EmptyState
           icon={ShoppingCart}
           title="No orders found"
           description="Try adjusting the filters or create a new order to get started."
-          action={
-            <Button onClick={() => setShowCreateForm(true)}>
-              <Plus className="h-4 w-4" />
-              Create Order
-            </Button>
-          }
         />
       ) : (
         <div className="space-y-4">
-          {filteredOrders.map((order) => (
-            <Card key={order.id} className="p-4 sm:p-5">
-              <div className="flex flex-col gap-4">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                  <div className="min-w-0">
-                    <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--color-text-subtle)]">
-                      {formatDisplayOrderNumber(order)}
-                    </p>
-                    <h3 className="mt-2 text-lg font-bold text-[var(--color-text)]">Table {order.tableNumber || 'N/A'}</h3>
-                    <p className="mt-1 text-sm text-[var(--color-text-muted)]">{formatDate(order.createdAt)}</p>
+          <Card className="hidden overflow-hidden lg:block" padded={false}>
+            <div className="overflow-x-auto">
+              <table className="min-w-full">
+                <thead className="bg-[var(--color-surface-muted)]">
+                  <tr className="text-left text-xs uppercase tracking-[0.14em] text-[var(--color-text-subtle)]">
+                    <th className="px-4 py-4 font-semibold">Select</th>
+                    <th className="px-4 py-4 font-semibold">S.No.</th>
+                    <th className="px-4 py-4 font-semibold">Order</th>
+                    <th className="px-4 py-4 font-semibold">Table</th>
+                    <th className="px-4 py-4 font-semibold">Created</th>
+                    <th className="px-4 py-4 font-semibold">Amount</th>
+                    <th className="px-4 py-4 font-semibold">Status</th>
+                    <th className="px-4 py-4 font-semibold">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {paginatedOrders.map((order, index) => (
+                    <tr key={order.id} className="border-t border-[var(--color-border)] text-sm">
+                      <td className="px-4 py-4 align-top">
+                        <input
+                          type="checkbox"
+                          checked={selectedOrderIds.includes(order.id)}
+                          onChange={() => toggleOrderSelection(order.id)}
+                          className="mt-1 h-4 w-4 rounded border-[var(--color-border)]"
+                        />
+                      </td>
+                      <td className="px-4 py-4 align-top font-semibold text-[var(--color-primary)]">{pageStart + index + 1}</td>
+                      <td className="px-4 py-4 align-top">
+                        <p className="font-semibold text-[var(--color-text)]">
+                          {order.status === 'cancelled'
+                            ? `${formatDisplayOrderNumber(order)} (Cancelled)`
+                            : formatDisplayOrderNumber(order)}
+                        </p>
+                        <p className="mt-1 text-xs text-[var(--color-text-muted)]">{order.items?.length || 0} items</p>
+                      </td>
+                      <td className="px-4 py-4 align-top text-[var(--color-text)]">Table {order.tableNumber || 'N/A'}</td>
+                      <td className="px-4 py-4 align-top text-[var(--color-text-muted)]">{formatDate(order.createdAt)}</td>
+                      <td className="px-4 py-4 align-top font-semibold text-[var(--color-text)]">
+                        {formatCurrency(order.totalAmount || order.total || 0)}
+                      </td>
+                      <td className="px-4 py-4 align-top">
+                        <div className="flex flex-col gap-2">
+                          <span className={`w-fit rounded-full px-3 py-1 text-xs font-semibold ${STATUS_STYLES[order.status] || STATUS_STYLES.pending}`}>
+                            {order.status}
+                          </span>
+                          <span className="w-fit rounded-full bg-[var(--color-primary-soft)] px-3 py-1 text-xs font-semibold text-[var(--color-primary)]">
+                            {formatPaymentMethodLabel(order.paymentMethod)}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-4 align-top">
+                        <div className="flex flex-wrap gap-2">
+                          {order.status !== 'completed' && order.status !== 'cancelled' ? (
+                            <select
+                              value={order.status}
+                              onChange={(e) => handleStatusUpdate(order.id, e.target.value)}
+                              className="input min-w-[150px]"
+                            >
+                              <option value="awaiting_waiter_approval">Waiting</option>
+                              <option value="pending">Pending</option>
+                              <option value="preparing">Preparing</option>
+                              <option value="ready">Ready</option>
+                              <option value="served">Served</option>
+                              <option value="cancelled">Cancelled</option>
+                            </select>
+                          ) : null}
+                          <Button variant="danger" onClick={() => setPendingDeleteOrder(order)}>
+                            Delete
+                          </Button>
+                          <Button variant="secondary" onClick={() => setSelectedOrder(order)}>
+                            Details
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+
+          <div className="space-y-4 lg:hidden">
+            {paginatedOrders.map((order, index) => (
+              <Card key={order.id} className="p-4 sm:p-5">
+                <div className="flex flex-col gap-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--color-primary)]">
+                        S.No. {pageStart + index + 1}
+                      </p>
+                      <p className="mt-2 text-sm font-semibold text-[var(--color-text)]">
+                        {order.status === 'cancelled'
+                          ? `${formatDisplayOrderNumber(order)} (Cancelled)`
+                          : formatDisplayOrderNumber(order)}
+                      </p>
+                      <p className="mt-1 text-sm text-[var(--color-text-muted)]">Table {order.tableNumber || 'N/A'}</p>
+                      <p className="mt-1 text-sm text-[var(--color-text-muted)]">{formatDate(order.createdAt)}</p>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={selectedOrderIds.includes(order.id)}
+                      onChange={() => toggleOrderSelection(order.id)}
+                      className="mt-1 h-4 w-4 rounded border-[var(--color-border)]"
+                    />
                   </div>
 
                   <div className="flex flex-wrap items-center gap-2">
@@ -335,172 +654,79 @@ export default function Orders() {
                     <span className="rounded-full bg-[var(--color-primary-soft)] px-3 py-1 text-xs font-semibold text-[var(--color-primary)]">
                       {formatPaymentMethodLabel(order.paymentMethod)}
                     </span>
-                    <span className="rounded-full bg-[var(--color-surface-muted)] px-3 py-1 text-xs font-semibold text-[var(--color-text)]">
-                      {order.paymentStatus || 'unpaid'}
-                    </span>
                     <span className="rounded-full bg-[var(--color-surface-muted)] px-3 py-1 text-sm font-semibold text-[var(--color-text)]">
                       {formatCurrency(order.totalAmount || order.total || 0)}
                     </span>
                   </div>
-                </div>
 
-                <div className="rounded-2xl bg-[var(--color-surface-muted)] p-4">
-                  <div className="flex items-center justify-between gap-3">
+                  <div className="rounded-2xl bg-[var(--color-surface-muted)] p-4">
                     <p className="text-sm font-semibold text-[var(--color-text)]">Items</p>
-                    <p className="text-xs text-[var(--color-text-muted)]">{order.items?.length || 0} lines</p>
+                    <div className="mt-3 space-y-2">
+                      {(order.items || []).slice(0, 3).map((item, idx) => (
+                        <div key={`${order.id}-${idx}`} className="flex items-start justify-between gap-3 text-sm">
+                          <p className="min-w-0 flex-1 break-words text-[var(--color-text)]">
+                            {item.quantity}x {item.name}
+                          </p>
+                          <span className="shrink-0 text-[var(--color-text-muted)]">
+                            {formatCurrency((item.unitPrice || item.price) * item.quantity)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                  <div className="mt-3 space-y-2">
-                    {(order.items || []).slice(0, 3).map((item, idx) => (
-                      <div key={`${order.id}-${idx}`} className="flex items-start justify-between gap-3 text-sm">
-                        <p className="min-w-0 flex-1 break-words text-[var(--color-text)]">
-                          {item.quantity}x {item.name}
-                        </p>
-                        <span className="shrink-0 text-[var(--color-text-muted)]">
-                          {formatCurrency((item.unitPrice || item.price) * item.quantity)}
-                        </span>
-                      </div>
-                    ))}
+
+                  <div className="flex flex-col gap-3">
+                    {order.status !== 'completed' && order.status !== 'cancelled' ? (
+                      <select
+                        value={order.status}
+                        onChange={(e) => handleStatusUpdate(order.id, e.target.value)}
+                        className="input"
+                      >
+                        <option value="awaiting_waiter_approval">Waiting for Waiter</option>
+                        <option value="pending">Pending</option>
+                        <option value="preparing">Preparing</option>
+                        <option value="ready">Ready</option>
+                        <option value="served">Served</option>
+                        <option value="cancelled">Cancelled</option>
+                      </select>
+                    ) : null}
+                    <div className="flex flex-col gap-3 sm:flex-row">
+                      <Button variant="danger" onClick={() => setPendingDeleteOrder(order)}>
+                        Delete Order
+                      </Button>
+                      <Button variant="secondary" onClick={() => setSelectedOrder(order)}>
+                        View Details
+                      </Button>
+                    </div>
                   </div>
                 </div>
+              </Card>
+            ))}
+          </div>
 
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <label className="space-y-2 sm:max-w-[220px]">
-                    <span className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--color-text-subtle)]">
-                      Update Status
-                    </span>
-                    <select
-                      value={order.status}
-                      onChange={(e) => handleStatusUpdate(order.id, e.target.value)}
-                      disabled={order.status === 'completed' || order.status === 'cancelled'}
-                      className="input"
-                    >
-                      <option value="awaiting_waiter_approval">Waiting for Waiter</option>
-                      <option value="pending">Pending</option>
-                      <option value="preparing">Preparing</option>
-                      <option value="ready">Ready</option>
-                      <option value="served">Served</option>
-                      {order.status === 'completed' ? <option value="completed">Completed</option> : null}
-                      <option value="cancelled">Cancelled</option>
-                    </select>
-                  </label>
-
-                  <Button variant="secondary" onClick={() => setSelectedOrder(order)}>
-                    View Details
-                  </Button>
-                </div>
-              </div>
-            </Card>
-          ))}
+          {hasPagination ? (
+            <PaginationControls
+              currentPage={currentPage}
+              totalPages={totalPages}
+              canGoPrevious={canGoPrevious}
+              canGoNext={canGoNext}
+              onPrevious={goPrevious}
+              onNext={goNext}
+            />
+          ) : null}
         </div>
       )}
 
       <Modal
-        title="Create New Order"
-        isOpen={showCreateForm}
-        onClose={() => {
-          resetCreateState();
-          setError(null);
-        }}
-        maxWidth="max-w-3xl"
-      >
-        <form onSubmit={handleCreateOrder} className="space-y-5">
-          <label className="space-y-2">
-            <span className="text-sm font-medium text-[var(--color-text)]">Select Table</span>
-            <select value={selectedTable} onChange={(e) => setSelectedTable(e.target.value)} className="input" required>
-              <option value="">Choose a table...</option>
-              {tables.map((table) => (
-                <option key={table.id} value={table.id}>
-                  Table {table.tableNumber} (Capacity: {table.seatCapacity})
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1fr,1fr]">
-            <Card className="p-4">
-              <p className="text-sm font-semibold text-[var(--color-text)]">Available Menu Items</p>
-              <div className="mt-3 max-h-72 space-y-2 overflow-y-auto">
-                {items.map((item) => (
-                  <div key={item.id} className="flex items-center justify-between gap-3 rounded-2xl bg-[var(--color-surface-muted)] p-3">
-                    <div className="min-w-0">
-                      <p className="break-words text-sm font-semibold text-[var(--color-text)]">{item.name}</p>
-                      <p className="text-xs text-[var(--color-text-muted)]">{formatCurrency(item.price)}</p>
-                    </div>
-                    <Button size="sm" onClick={() => handleAddItem(item)}>
-                      Add
-                    </Button>
-                  </div>
-                ))}
-              </div>
-            </Card>
-
-            <Card className="p-4">
-              <p className="text-sm font-semibold text-[var(--color-text)]">Selected Items</p>
-              {selectedItems.length === 0 ? (
-                <p className="mt-4 text-sm text-[var(--color-text-muted)]">No items added yet.</p>
-              ) : (
-                <div className="mt-3 space-y-3">
-                  {selectedItems.map((item) => (
-                    <div key={item.id} className="rounded-2xl bg-[var(--color-surface-muted)] p-3">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <p className="break-words text-sm font-semibold text-[var(--color-text)]">{item.name}</p>
-                          <p className="text-xs text-[var(--color-text-muted)]">{formatCurrency(item.price)} each</p>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveItem(item.id)}
-                          className="rounded-full p-2 text-red-600 transition hover:bg-red-50"
-                        >
-                          <X className="h-4 w-4" />
-                        </button>
-                      </div>
-
-                      <div className="mt-3 flex items-center gap-3">
-                        <span className="text-xs uppercase tracking-[0.2em] text-[var(--color-text-subtle)]">Qty</span>
-                        <input
-                          type="number"
-                          min="1"
-                          value={item.quantity}
-                          onChange={(e) => handleQuantityChange(item.id, Number(e.target.value))}
-                          className="input max-w-[84px] text-center"
-                        />
-                      </div>
-                    </div>
-                  ))}
-                  <div className="rounded-2xl border border-[var(--color-border)] p-4">
-                    <p className="text-sm font-semibold text-[var(--color-text)]">
-                      Total: {formatCurrency(selectedItems.reduce((sum, item) => sum + item.price * item.quantity, 0))}
-                    </p>
-                  </div>
-                </div>
-              )}
-            </Card>
-          </div>
-
-          <label className="space-y-2">
-            <span className="text-sm font-medium text-[var(--color-text)]">Special Requests</span>
-            <textarea
-              name="specialRequests"
-              className="input min-h-[110px] resize-y"
-              placeholder="Any special requests or notes?"
-            />
-          </label>
-
-          <div className="flex flex-col-reverse gap-3 sm:flex-row">
-            <Button type="button" variant="secondary" className="w-full sm:flex-1" onClick={resetCreateState}>
-              Cancel
-            </Button>
-            <Button type="submit" className="w-full sm:flex-1" disabled={submitting || selectedItems.length === 0}>
-              {submitting ? <Loader className="h-4 w-4 animate-spin" /> : null}
-              Create Order
-            </Button>
-          </div>
-        </form>
-      </Modal>
-
-      <Modal
-        title={`Order #${selectedOrder?.id?.slice(-8) || ''}`}
+        title={
+          selectedOrder
+            ? `${formatDisplayOrderNumber(selectedOrder)}${
+                selectedOrder.status === 'cancelled'
+                  ? ' (Cancelled)'
+                  : ''
+              }`
+            : 'Order'
+        }
         isOpen={Boolean(selectedOrder)}
         onClose={() => setSelectedOrder(null)}
         maxWidth="max-w-lg"
@@ -547,33 +773,21 @@ export default function Orders() {
       </Modal>
 
       <Modal
-        title="Cancel All Pending Bills"
-        isOpen={showBulkCancelModal}
+        title={pendingDeleteOrder ? `Delete ${formatDisplayOrderNumber(pendingDeleteOrder)}` : 'Delete Order'}
+        isOpen={Boolean(pendingDeleteOrder)}
         onClose={() => {
-          if (isBulkCancelling) {
+          if (isDeletingOrder) {
             return;
           }
 
-          setShowBulkCancelModal(false);
-          setBulkCancelReason('');
+          setPendingDeleteOrder(null);
         }}
         maxWidth="max-w-lg"
       >
         <div className="space-y-4">
           <div className="rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm font-medium text-red-300">
-            This will cancel every unpaid bill that is still waiting for waiter approval or still in the <strong>pending</strong> state for this restaurant.
-            Preparing, ready, served, and settled bills will not be touched.
+            This order will be removed from the list now. You can undo it for 10 seconds before it is deleted permanently.
           </div>
-
-          <label className="space-y-2">
-            <span className="text-sm font-medium text-[var(--color-text)]">Reason</span>
-            <textarea
-              value={bulkCancelReason}
-              onChange={(event) => setBulkCancelReason(event.target.value)}
-              className="input min-h-[110px] resize-y"
-              placeholder="Example: day-end cleanup of stale waiting or pending bills."
-            />
-          </label>
 
           <div className="flex flex-col-reverse gap-3 sm:flex-row">
             <Button
@@ -581,21 +795,81 @@ export default function Orders() {
               variant="secondary"
               className="w-full sm:flex-1"
               onClick={() => {
-                setShowBulkCancelModal(false);
-                setBulkCancelReason('');
+                setPendingDeleteOrder(null);
               }}
-              disabled={isBulkCancelling}
+              disabled={isDeletingOrder}
             >
-              Keep Bills
+              Keep Order
             </Button>
             <Button
               type="button"
               variant="danger"
               className="w-full sm:flex-1"
-              onClick={handleBulkCancelPendingBills}
-              disabled={isBulkCancelling}
+              onClick={handleDeleteOrder}
+              disabled={isDeletingOrder}
             >
-              {isBulkCancelling ? 'Cancelling...' : 'Confirm Cancel'}
+              {isDeletingOrder ? 'Deleting...' : 'Confirm Delete'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        title={`Delete ${selectedBulkOrders.length} Selected Order${selectedBulkOrders.length === 1 ? '' : 's'}`}
+        isOpen={showBulkDeleteModal}
+        onClose={() => {
+          if (isBulkDeletingOrders) {
+            return;
+          }
+
+          setShowBulkDeleteModal(false);
+        }}
+        maxWidth="max-w-lg"
+      >
+        <div className="space-y-4">
+          <div className="rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm font-medium text-red-300">
+            The selected orders will be removed from the list now. You can undo them for 10 seconds before they are deleted permanently.
+          </div>
+
+          <div className="rounded-2xl bg-[var(--color-surface-muted)] p-4">
+            <p className="text-sm font-semibold text-[var(--color-text)]">Selected orders</p>
+            <div className="mt-3 space-y-2">
+              {selectedBulkOrders.slice(0, 6).map((order) => (
+                <div key={order.id} className="flex items-center justify-between gap-3 text-sm">
+                  <span className="text-[var(--color-text)]">{formatDisplayOrderNumber(order)}</span>
+                  <span className="text-[var(--color-text-muted)]">
+                    {formatCurrency(order.totalAmount || order.total || 0)}
+                  </span>
+                </div>
+              ))}
+              {selectedBulkOrders.length > 6 ? (
+                <p className="text-xs text-[var(--color-text-muted)]">
+                  +{selectedBulkOrders.length - 6} more selected order{selectedBulkOrders.length - 6 === 1 ? '' : 's'}
+                </p>
+              ) : null}
+            </div>
+          </div>
+
+          <div className="flex flex-col-reverse gap-3 sm:flex-row">
+            <Button
+              type="button"
+              variant="secondary"
+              className="w-full sm:flex-1"
+              onClick={() => {
+                setShowBulkDeleteModal(false);
+              }}
+              disabled={isBulkDeletingOrders}
+            >
+              Keep Orders
+            </Button>
+            <Button
+              type="button"
+              variant="danger"
+              className="w-full sm:flex-1"
+              onClick={handleBulkDeleteOrders}
+              disabled={isBulkDeletingOrders || selectedBulkOrders.length === 0}
+            >
+              {isBulkDeletingOrders ? 'Deleting...' : 'Confirm Bulk Delete'}
             </Button>
           </div>
         </div>

@@ -9,7 +9,9 @@
 }
 
 html {
+  min-height: 100%;
   scroll-behavior: smooth;
+  overflow-x: hidden;
 }
 
 body {
@@ -22,6 +24,7 @@ body {
     background-color 220ms ease,
     color 220ms ease,
     background 220ms ease;
+  overflow-x: hidden;
 }
 
 html body {
@@ -54,6 +57,7 @@ select {
 
 #root {
   min-height: 100vh;
+  overflow-x: hidden;
 }
 
 ::-webkit-scrollbar {
@@ -160,4 +164,74 @@ textarea.input {
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+@media print {
+  body * {
+    visibility: hidden;
+  }
+
+  #bill-section,
+  #bill-section *,
+  #kot-section,
+  #kot-section * {
+    visibility: visible;
+  }
+
+  #bill-section {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 80mm;
+  }
+
+  #kot-section {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 80mm;
+  }
+
+  body,
+  html,
+  #root {
+    background: #fff !important;
+  }
+
+  .bill-print-toolbar {
+    display: none !important;
+  }
+
+  .kot-print-toolbar {
+    display: none !important;
+  }
+
+  .bill-print-section {
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  .bill-print-grid {
+    display: block !important;
+  }
+
+  .bill-receipt {
+    width: 80mm !important;
+    max-width: 80mm !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    padding: 4mm !important;
+    margin: 0 !important;
+  }
+
+  .kot-receipt {
+    width: 80mm !important;
+    max-width: 80mm !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    padding: 4mm !important;
+    margin: 0 !important;
+  }
 }

@@ -11,9 +11,7 @@ function ThemeBootstrap({ children }) {
 }
 
 ReactDOM.createRoot(document.getElementById('root')).render(
-  <React.StrictMode>
-    <ThemeBootstrap>
-      <App />
-    </ThemeBootstrap>
-  </React.StrictMode>
+  <ThemeBootstrap>
+    <App />
+  </ThemeBootstrap>
 );

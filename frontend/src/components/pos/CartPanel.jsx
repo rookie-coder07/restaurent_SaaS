@@ -7,6 +7,7 @@ function CartPanel({
   subtotal,
   discountAmount,
   finalTotal,
+  invoicePreview,
   onIncrease,
   onDecrease,
   onRemove,
@@ -139,9 +140,33 @@ function CartPanel({
             <span>-{formatCurrency(discountAmount)}</span>
           </div>
           <div className="flex items-center justify-between text-lg font-bold text-[var(--text-primary)]">
-            <span>Total</span>
+            <span>Item Total</span>
             <span>{formatCurrency(finalTotal)}</span>
           </div>
+          {invoicePreview ? (
+            <>
+              <div className="flex items-center justify-between text-[var(--text-secondary)]">
+                <span>GST</span>
+                <span>{formatCurrency(invoicePreview.cgstAmount + invoicePreview.sgstAmount)}</span>
+              </div>
+              {invoicePreview.chargesTotal > 0 ? (
+                <div className="flex items-center justify-between text-[var(--text-secondary)]">
+                  <span>Extra Charges</span>
+                  <span>{formatCurrency(invoicePreview.chargesTotal)}</span>
+                </div>
+              ) : null}
+              {invoicePreview.loyaltyRedeemedAmount > 0 ? (
+                <div className="flex items-center justify-between text-[var(--text-secondary)]">
+                  <span>Loyalty</span>
+                  <span>-{formatCurrency(invoicePreview.loyaltyRedeemedAmount)}</span>
+                </div>
+              ) : null}
+              <div className="flex items-center justify-between text-lg font-bold text-[var(--text-primary)]">
+                <span>Final Amount</span>
+                <span>{formatCurrency(invoicePreview.grandTotal)}</span>
+              </div>
+            </>
+          ) : null}
         </div>
 
         {onSettle ? (

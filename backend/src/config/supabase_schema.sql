@@ -4,6 +4,7 @@
 CREATE TABLE IF NOT EXISTS restaurants (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name VARCHAR(255) NOT NULL,
+  business_name VARCHAR(255),
   email VARCHAR(255) UNIQUE NOT NULL,
   password_hash VARCHAR(255) NOT NULL,
   phone VARCHAR(20),
@@ -11,7 +12,16 @@ CREATE TABLE IF NOT EXISTS restaurants (
   address TEXT,
   gst_number VARCHAR(50),
   logo_url VARCHAR(500),
+  cuisine_type VARCHAR(100),
   status VARCHAR(50) DEFAULT 'active',
+  subscription_status VARCHAR(50) DEFAULT 'active',
+  subscription_start TIMESTAMP DEFAULT now(),
+  subscription_plan VARCHAR(100),
+  subscription_renewal TIMESTAMP,
+  timezone VARCHAR(100) DEFAULT 'Asia/Kolkata',
+  currency VARCHAR(10) DEFAULT 'INR',
+  enable_gst BOOLEAN DEFAULT true,
+  default_gst_percent DECIMAL(5, 2) DEFAULT 5,
   created_at TIMESTAMP DEFAULT now(),
   updated_at TIMESTAMP DEFAULT now()
 );
@@ -66,7 +76,10 @@ CREATE TABLE IF NOT EXISTS orders (
   customer_name VARCHAR(255),
   status VARCHAR(50) DEFAULT 'pending',
   total_amount DECIMAL(10, 2),
+  display_order_number VARCHAR(50),
+  payment_method VARCHAR(50) DEFAULT 'cash',
   payment_status VARCHAR(50) DEFAULT 'unpaid',
+  order_type VARCHAR(50) DEFAULT 'dine-in',
   notes TEXT,
   created_at TIMESTAMP DEFAULT now(),
   updated_at TIMESTAMP DEFAULT now()
@@ -78,7 +91,7 @@ CREATE TABLE IF NOT EXISTS order_items (
   order_id UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
   menu_item_id UUID NOT NULL REFERENCES menu_items(id) ON DELETE CASCADE,
   quantity INT NOT NULL,
-  price DECIMAL(10, 2) NOT NULL,
+  unit_price DECIMAL(10, 2) NOT NULL,
   special_instructions TEXT,
   item_status VARCHAR(50) DEFAULT 'pending',
   created_at TIMESTAMP DEFAULT now(),
@@ -89,9 +102,14 @@ CREATE TABLE IF NOT EXISTS order_items (
 CREATE TABLE IF NOT EXISTS tables (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   restaurant_id UUID NOT NULL REFERENCES restaurants(id) ON DELETE CASCADE,
-  table_name VARCHAR(50) NOT NULL,
+  table_number INT NOT NULL,
   capacity INT NOT NULL,
-  status VARCHAR(50) DEFAULT 'vacant',
+  location VARCHAR(100) DEFAULT 'main',
+  status VARCHAR(50) DEFAULT 'available',
+  reserved_by VARCHAR(120),
+  reservation_time TIMESTAMP,
+  qr_code VARCHAR(255),
+  is_active BOOLEAN DEFAULT true,
   created_at TIMESTAMP DEFAULT now(),
   updated_at TIMESTAMP DEFAULT now()
 );
@@ -167,6 +185,7 @@ CREATE INDEX idx_menu_items_restaurant_id ON menu_items(restaurant_id);
 CREATE INDEX idx_menu_items_category_id ON menu_items(category_id);
 CREATE INDEX idx_orders_restaurant_id ON orders(restaurant_id);
 CREATE INDEX idx_orders_status ON orders(status);
+CREATE INDEX idx_orders_display_order_number ON orders(display_order_number);
 CREATE INDEX idx_order_items_order_id ON order_items(order_id);
 CREATE INDEX idx_tables_restaurant_id ON tables(restaurant_id);
 CREATE INDEX idx_daily_analytics_restaurant_id ON daily_analytics(restaurant_id);

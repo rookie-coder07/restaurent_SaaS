@@ -53,6 +53,8 @@ export const orderAPI = {
   updateOnlineOrder: (orderId, data) => api.patch(`/v1/orders/${orderId}/online`, data),
   sendToKitchen: (orderId) => api.post(`/v1/orders/${orderId}/send-to-kitchen`),
   settleOrder: (orderId, data) => api.post(`/v1/orders/${orderId}/settle`, data),
+  softDeleteOrder: (orderId, data) => api.post(`/v1/orders/${orderId}/delete`, data),
+  getLoyaltyProfile: (phone) => api.get('/v1/orders/loyalty/profile', { params: { phone } }),
   updateStatus: (orderId, data) => api.put(`/v1/orders/${orderId}/status`, data),
   updateKitchenStatus: (orderId, data) => api.patch(`/v1/orders/${orderId}/status`, data),
 };
@@ -82,6 +84,9 @@ export const analyticsAPI = {
   getMonthlySalesReport: (filters) => api.get('/v1/analytics/monthly-sales', { params: filters }),
   getTopItems: (filters) => api.get('/v1/analytics/top-items', { params: filters }),
   getPeakHours: (date) => api.get('/v1/analytics/peak-hours', { params: { date } }),
+  getLatestEodSummary: (filters) => api.get('/v1/analytics/eod/latest', { params: filters }),
+  getEodSummaryHistory: (filters) => api.get('/v1/analytics/eod/history', { params: filters }),
+  getLoyaltySummary: () => api.get('/v1/analytics/loyalty'),
 };
 
 export const inventoryAPI = {

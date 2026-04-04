@@ -1,0 +1,128 @@
+# Page snapshot
+
+```yaml
+- generic [ref=e3]:
+  - complementary [ref=e4]:
+    - generic [ref=e5]:
+      - link "Restaurant SaaS POS Portal" [ref=e7] [cursor=pointer]:
+        - /url: /pos
+        - img [ref=e9]
+        - generic [ref=e14]:
+          - paragraph [ref=e15]: Restaurant SaaS
+          - paragraph [ref=e16]: POS Portal
+      - generic [ref=e18]:
+        - paragraph [ref=e19]: POS Workspace
+        - paragraph [ref=e20]: Main branch
+        - paragraph [ref=e21]: "Role: staff"
+      - paragraph [ref=e23]: POS Navigation
+      - navigation [ref=e24]:
+        - link "Billing" [ref=e25] [cursor=pointer]:
+          - /url: /pos
+          - img [ref=e26]
+          - generic [ref=e29]: Billing
+        - link "Orders" [ref=e30] [cursor=pointer]:
+          - /url: /pos/orders
+          - img [ref=e31]
+          - generic [ref=e34]: Orders
+        - link "Tables" [ref=e35] [cursor=pointer]:
+          - /url: /pos/tables
+          - img [ref=e36]
+          - generic [ref=e41]: Tables
+  - generic [ref=e42]:
+    - banner [ref=e43]:
+      - generic [ref=e44]:
+        - generic [ref=e46]:
+          - paragraph [ref=e47]: POS
+          - heading "Billing & Floor Operations" [level=1] [ref=e48]
+          - paragraph [ref=e49]: Welcome back, POS Staff
+        - generic [ref=e50]:
+          - generic [ref=e51]: Fast billing
+          - button "Log Out" [ref=e52] [cursor=pointer]:
+            - img [ref=e53]
+            - generic [ref=e56]: Log Out
+          - button "Switch to Light Theme" [ref=e57] [cursor=pointer]:
+            - img [ref=e58]
+          - generic [ref=e64]: P
+    - main [ref=e65]:
+      - generic [ref=e67]:
+        - generic [ref=e69]:
+          - generic [ref=e70]:
+            - paragraph [ref=e71]: Bill View
+            - heading "#04" [level=1] [ref=e72]
+            - paragraph [ref=e73]: Review items, GST, total, and payment details before printing the final bill.
+          - generic [ref=e74]:
+            - link "Back" [ref=e75] [cursor=pointer]:
+              - /url: /pos
+              - button "Back" [ref=e76]:
+                - img [ref=e77]
+                - text: Back
+            - button "Print Bill" [ref=e79] [cursor=pointer]:
+              - img [ref=e80]
+              - text: Print Bill
+        - generic [ref=e84]:
+          - generic [ref=e85]:
+            - generic [ref=e86]:
+              - img [ref=e88]
+              - generic [ref=e91]:
+                - paragraph [ref=e92]: Invoice
+                - heading "INV-20260405-000004" [level=2] [ref=e93]
+            - generic [ref=e94]:
+              - generic [ref=e95]:
+                - paragraph [ref=e96]: Restaurant
+                - paragraph [ref=e97]: Test Restaurant
+                - paragraph [ref=e98]: MG Road, Bengaluru
+                - paragraph [ref=e99]: "9876543210"
+              - generic [ref=e100]:
+                - paragraph [ref=e101]: Order
+                - paragraph [ref=e102]: Table 4
+                - paragraph [ref=e103]: dine in
+                - paragraph [ref=e104]: "Payment: CASH"
+            - table [ref=e106]:
+              - rowgroup [ref=e107]:
+                - row "Item Qty Price Total" [ref=e108]:
+                  - columnheader "Item" [ref=e109]
+                  - columnheader "Qty" [ref=e110]
+                  - columnheader "Price" [ref=e111]
+                  - columnheader "Total" [ref=e112]
+              - rowgroup [ref=e113]:
+                - row "Chicken Biryani 1 ₹220.00 ₹220.00" [ref=e114]:
+                  - cell "Chicken Biryani" [ref=e115]
+                  - cell "1" [ref=e116]
+                  - cell "₹220.00" [ref=e117]
+                  - cell "₹220.00" [ref=e118]
+                - row "Coke 1 ₹40.00 ₹40.00" [ref=e119]:
+                  - cell "Coke" [ref=e120]
+                  - cell "1" [ref=e121]
+                  - cell "₹40.00" [ref=e122]
+                  - cell "₹40.00" [ref=e123]
+          - generic [ref=e124]:
+            - paragraph [ref=e125]: Summary
+            - heading "Bill breakdown" [level=2] [ref=e126]
+            - generic [ref=e127]:
+              - generic [ref=e128]:
+                - generic [ref=e129]: Subtotal
+                - generic [ref=e130]: ₹260.00
+              - generic [ref=e131]:
+                - generic [ref=e132]: Discount
+                - generic [ref=e133]: "-₹0.00"
+              - generic [ref=e134]:
+                - generic [ref=e135]: Taxable Amount
+                - generic [ref=e136]: ₹260.00
+              - generic [ref=e137]:
+                - generic [ref=e138]: CGST (2.5%)
+                - generic [ref=e139]: ₹6.50
+              - generic [ref=e140]:
+                - generic [ref=e141]: SGST (2.5%)
+                - generic [ref=e142]: ₹6.50
+              - generic [ref=e143]:
+                - generic [ref=e144]: Round Off
+                - generic [ref=e145]: ₹0.00
+              - generic [ref=e146]:
+                - generic [ref=e147]: Final Amount
+                - generic [ref=e148]: ₹273.00
+            - generic [ref=e149]:
+              - paragraph [ref=e150]: Payment
+              - paragraph [ref=e151]: "Mode: CASH"
+              - paragraph [ref=e152]: "Paid: ₹273.00"
+              - paragraph [ref=e153]: "Handled by: POS Staff"
+```

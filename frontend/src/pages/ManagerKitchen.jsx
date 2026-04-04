@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertCircle, Package2 } from 'lucide-react';
+import { AlertCircle, ShieldAlert } from 'lucide-react';
+import { kitchenAPI } from '../services/apiEndpoints';
+import { parseServerDate } from '../utils/formatters';
+import { printKitchenTicket } from '../utils/kotPrint';
+import { useManagerStore } from '../context/managerStore';
+import Card from '../components/common/Card';
+import Button from '../components/common/Button';
+import Toast from '../components/common/Toast';
 import KOTHeader from '../components/kot/KOTHeader';
 import ViewToggle from '../components/kot/ViewToggle';
 import OrderCard from '../components/kot/OrderCard';
-import { kitchenAPI } from '../services/apiEndpoints';
-import ThemeToggle from '../components/common/ThemeToggle';
-import PortalLogoutButton from '../components/common/PortalLogoutButton';
-import { parseServerDate } from '../utils/formatters';
-import { printKitchenTicket } from '../utils/kotPrint';
 
 const POLLING_INTERVAL_MS = 5000;
 const STATUS_LANES = [
@@ -88,18 +90,21 @@ function normalizeTicket(ticket) {
   };
 }
 
-export default function KOT() {
+export default function ManagerKitchen() {
   const [tickets, setTickets] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState(null);
-  const [view, setView] = useState('order');
-  const [lastUpdatedAt, setLastUpdatedAt] = useState(null);
   const [updatingTicketId, setUpdatingTicketId] = useState(null);
   const [printingTicketId, setPrintingTicketId] = useState(null);
   const [newTicketIds, setNewTicketIds] = useState([]);
+  const [view, setView] = useState('order');
+  const [lastUpdatedAt, setLastUpdatedAt] = useState(null);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
   const knownTicketIdsRef = useRef(new Set());
   const fetchInFlightRef = useRef(false);
+  const prioritizedOrders = useManagerStore((state) => state.prioritizedOrders);
+  const setOrderPriority = useManagerStore((state) => state.setOrderPriority);
 
   const fetchOrders = async (showLoader = false, { force = false } = {}) => {
     if (fetchInFlightRef.current && !force) {
@@ -131,7 +136,7 @@ export default function KOT() {
 
       knownTicketIdsRef.current = incomingIds;
       setTickets(activeTickets);
-      setError(null);
+      setError('');
       setLastUpdatedAt(new Date());
       return activeTickets;
     } catch (requestError) {
@@ -151,7 +156,7 @@ export default function KOT() {
       try {
         await fetchOrders(showLoader);
       } catch {
-        // Error state is already set.
+        // handled in state
       }
     };
 
@@ -168,11 +173,11 @@ export default function KOT() {
     };
   }, []);
 
-  const ticketsByStatus = useMemo(
+  const groups = useMemo(
     () => ({
-      pending: tickets.filter((ticket) => ticket.status === 'pending'),
-      preparing: tickets.filter((ticket) => ticket.status === 'preparing'),
-      ready: tickets.filter((ticket) => ticket.status === 'ready'),
+      pending: (tickets || []).filter((ticket) => ticket.status === 'pending'),
+      preparing: (tickets || []).filter((ticket) => ticket.status === 'preparing'),
+      ready: (tickets || []).filter((ticket) => ticket.status === 'ready'),
     }),
     [tickets]
   );
@@ -212,7 +217,7 @@ export default function KOT() {
     }
 
     setUpdatingTicketId(ticket.id);
-    setError(null);
+    setError('');
 
     try {
       setTickets((currentTickets) =>
@@ -225,14 +230,11 @@ export default function KOT() {
       setNewTicketIds((current) => current.filter((id) => id !== ticket.id));
 
       await kitchenAPI.updateStatus(ticket.orderId, ticket.id, { status: nextStatus });
-      fetchOrders(false, { force: true }).catch(() => {
-        // Error state is already set.
-      });
+      setSuccess(`KOT moved to ${nextStatus}.`);
+      fetchOrders(false, { force: true }).catch(() => {});
     } catch (requestError) {
-      setError(requestError.response?.data?.message || 'Failed to update kitchen ticket.');
-      fetchOrders(false, { force: true }).catch(() => {
-        // Error state is already set.
-      });
+      setError(requestError.response?.data?.message || 'Failed to update KOT status.');
+      fetchOrders(false, { force: true }).catch(() => {});
     } finally {
       setUpdatingTicketId(null);
     }
@@ -244,7 +246,7 @@ export default function KOT() {
     }
 
     setPrintingTicketId(ticket.id);
-    setError(null);
+    setError('');
 
     try {
       const response = await kitchenAPI.reprintTicket(ticket.orderId, ticket.id);
@@ -258,9 +260,8 @@ export default function KOT() {
         setError('Ticket updated, but the browser blocked the print window.');
       }
 
-      fetchOrders(false, { force: true }).catch(() => {
-        // Error state is already set.
-      });
+      setSuccess('Kitchen ticket reprinted.');
+      fetchOrders(false, { force: true }).catch(() => {});
     } catch (requestError) {
       setError(requestError.response?.data?.message || 'Failed to reprint kitchen ticket.');
     } finally {
@@ -274,7 +275,7 @@ export default function KOT() {
     }
 
     setUpdatingTicketId(ticket.id);
-    setError(null);
+    setError('');
 
     try {
       const response = await kitchenAPI.refireTicket(ticket.orderId, ticket.id);
@@ -283,9 +284,8 @@ export default function KOT() {
       printKitchenTicket(printableTicket, {
         title: `${printableTicket.displayOrderNumber || 'KOT'}${printableTicket.tableNumber ? ` - Table ${printableTicket.tableNumber}` : ''}`,
       });
-      fetchOrders(false, { force: true }).catch(() => {
-        // Error state is already set.
-      });
+      setSuccess('Kitchen ticket re-fired.');
+      fetchOrders(false, { force: true }).catch(() => {});
     } catch (requestError) {
       setError(requestError.response?.data?.message || 'Failed to re-fire kitchen ticket.');
     } finally {
@@ -294,36 +294,34 @@ export default function KOT() {
   };
 
   return (
-    <div className="min-h-full space-y-5">
-      <div className="flex items-center justify-between gap-3 rounded-[1.5rem] border border-[var(--border-color)] bg-[var(--color-surface)] px-4 py-3 shadow-[var(--shadow-card)]">
-        <div className="text-center">
-          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--text-secondary)]">Mode</p>
-          <p className="text-base font-black text-[var(--text-primary)]">Full Screen KOT</p>
-        </div>
+    <div className="space-y-6">
+      {success ? <Toast type="success" message={success} /> : null}
+      {error ? <Toast type="error" message={error} /> : null}
 
-        <div className="flex items-center gap-2">
-          <PortalLogoutButton portal="kot" className="px-3" label="Logout" />
-          <ThemeToggle className="min-h-[3rem] min-w-[3rem]" />
+      <Card>
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.25em] text-[var(--color-text-subtle)]">Kitchen Control</p>
+            <h1 className="mt-3 text-3xl font-bold text-[var(--color-text)]">Unified kitchen operations</h1>
+            <p className="mt-2 text-sm text-[var(--color-text-muted)]">Live KOT queue, item view, reprint, re-fire, delays, and manager priority controls in one kitchen workspace.</p>
+          </div>
         </div>
-      </div>
+      </Card>
 
       <KOTHeader
         totalCount={tickets.length}
-        pendingCount={ticketsByStatus.pending.length}
-        preparingCount={ticketsByStatus.preparing.length}
-        readyCount={ticketsByStatus.ready.length}
+        pendingCount={groups.pending.length}
+        preparingCount={groups.preparing.length}
+        readyCount={groups.ready.length}
         lastUpdatedLabel={formatLastUpdated(lastUpdatedAt)}
         isRefreshing={refreshing}
         onRefresh={() => {
-          fetchOrders(false).catch(() => {
-            // Error state is already set.
-          });
+          fetchOrders(false).catch(() => {});
         }}
       />
 
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <ViewToggle activeView={view} onChange={setView} />
-
         <div className="rounded-[1.25rem] border border-[var(--border-color)] bg-[var(--color-surface)] px-4 py-3 text-sm font-semibold text-[var(--text-secondary)] shadow-[var(--shadow-card)]">
           Auto refresh every 5 seconds
         </div>
@@ -358,31 +356,57 @@ export default function KOT() {
                     <p className="mt-1 text-sm text-[var(--text-secondary)]">{lane.subtitle}</p>
                   </div>
                   <span className="rounded-2xl bg-[var(--bg-card-muted)] px-3 py-2 text-lg font-black text-[var(--color-primary)]">
-                    {ticketsByStatus[lane.key].length}
+                    {groups[lane.key].length}
                   </span>
                 </div>
 
-                {ticketsByStatus[lane.key].length === 0 ? (
+                {groups[lane.key].length === 0 ? (
                   <div className="flex min-h-[12rem] items-center justify-center rounded-[1.5rem] border border-dashed border-[var(--border-color)] bg-[var(--color-panel)] px-4 text-center text-sm font-semibold text-[var(--text-secondary)]">
                     {lane.empty}
                   </div>
                 ) : (
                   <div className="space-y-4">
-                    {ticketsByStatus[lane.key].map((ticket) => (
-                      <OrderCard
-                        key={ticket.id}
-                        ticket={ticket}
-                        laneLabel={lane.title}
-                        elapsedLabel={formatElapsed(ticket.createdAt)}
-                        ageTone={getAgeTone(ticket.createdAt)}
-                        isNewTicket={newTicketIds.includes(ticket.id)}
-                        onAdvanceStatus={handleAdvanceStatus}
-                        onReprint={handleReprint}
-                        onRefire={handleRefire}
-                        isUpdating={updatingTicketId === ticket.id}
-                        isPrinting={printingTicketId === ticket.id}
-                      />
-                    ))}
+                    {groups[lane.key]
+                      .slice()
+                      .sort((left, right) => {
+                        const leftPriority = prioritizedOrders[left.orderId]?.priority === 'high' ? 1 : 0;
+                        const rightPriority = prioritizedOrders[right.orderId]?.priority === 'high' ? 1 : 0;
+                        if (leftPriority !== rightPriority) {
+                          return rightPriority - leftPriority;
+                        }
+                        return getAgeMinutes(right.createdAt) - getAgeMinutes(left.createdAt);
+                      })
+                      .map((ticket) => {
+                        const isPriority = prioritizedOrders[ticket.orderId]?.priority === 'high';
+
+                        return (
+                          <div key={ticket.id} className="space-y-3">
+                            <OrderCard
+                              ticket={ticket}
+                              laneLabel={lane.title}
+                              elapsedLabel={formatElapsed(ticket.createdAt)}
+                              ageTone={getAgeTone(ticket.createdAt)}
+                              isNewTicket={newTicketIds.includes(ticket.id)}
+                              onAdvanceStatus={handleAdvanceStatus}
+                              onReprint={handleReprint}
+                              onRefire={handleRefire}
+                              isUpdating={updatingTicketId === ticket.id}
+                              isPrinting={printingTicketId === ticket.id}
+                            />
+                            <Button
+                              variant={isPriority ? 'danger' : 'secondary'}
+                              onClick={() => {
+                                setOrderPriority(ticket.orderId, isPriority ? 'normal' : 'high');
+                                setSuccess(isPriority ? 'Kitchen priority cleared.' : 'Kitchen priority applied.');
+                              }}
+                              className="w-full"
+                            >
+                              <ShieldAlert className="h-4 w-4" />
+                              {isPriority ? 'Clear Priority' : 'Prioritize Order'}
+                            </Button>
+                          </div>
+                        );
+                      })}
                   </div>
                 )}
               </section>
@@ -418,12 +442,13 @@ export default function KOT() {
 
 function EmptyState() {
   return (
-    <div className="flex min-h-[20rem] flex-col items-center justify-center rounded-[2rem] border border-dashed border-[var(--border-color)] bg-[var(--color-surface)] px-6 py-12 text-center shadow-[var(--shadow-card)]">
-      <Package2 className="h-14 w-14 text-[var(--color-success)]" />
-      <h2 className="mt-4 text-2xl font-black text-[var(--text-primary)]">No active tickets</h2>
-      <p className="mt-2 max-w-md text-sm font-medium text-[var(--text-secondary)]">
-        Pending, preparing, and ready KOT actions will appear here automatically.
-      </p>
+    <div className="flex min-h-[18rem] items-center justify-center rounded-[1.9rem] border border-dashed border-[var(--border-color)] bg-[var(--color-surface)] px-6 text-center shadow-[var(--shadow-card)]">
+      <div>
+        <p className="text-base font-black text-[var(--text-primary)]">No active kitchen tickets</p>
+        <p className="mt-2 text-sm font-semibold text-[var(--text-secondary)]">
+          Pending, preparing, and ready KOT actions will appear here automatically.
+        </p>
+      </div>
     </div>
   );
 }

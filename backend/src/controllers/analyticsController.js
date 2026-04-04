@@ -38,3 +38,22 @@ export const getTopItems = asyncHandler(async (req, res) => {
 
   return sendSuccess(res, 200, items, 'Top items fetched successfully');
 });
+
+export const getLatestEodSummary = asyncHandler(async (req, res) => {
+  const ensure = String(req.query.ensure || '').toLowerCase() === 'true';
+  const summary = await AnalyticsService.getLatestEodSummary(req.user.restaurantId, { ensure });
+
+  return sendSuccess(res, 200, summary, 'Latest EOD summary fetched successfully');
+});
+
+export const getEodSummaryHistory = asyncHandler(async (req, res) => {
+  const limit = Number.parseInt(req.query.limit, 10) || 7;
+  const history = await AnalyticsService.getEodSummaryHistory(req.user.restaurantId, limit);
+
+  return sendSuccess(res, 200, { history, total: history.length }, 'EOD summary history fetched successfully');
+});
+
+export const getLoyaltySummary = asyncHandler(async (req, res) => {
+  const summary = await AnalyticsService.getLoyaltySummary(req.user.restaurantId);
+  return sendSuccess(res, 200, summary, 'Loyalty summary fetched successfully');
+});

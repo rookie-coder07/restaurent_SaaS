@@ -67,6 +67,54 @@ function getOptionalPaymentNote(body = {}) {
   return undefined;
 }
 
+function getOptionalLoyaltyPhone(body = {}) {
+  if (Object.prototype.hasOwnProperty.call(body, 'loyaltyPhone')) {
+    return body.loyaltyPhone;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'loyalty_phone')) {
+    return body.loyalty_phone;
+  }
+
+  return undefined;
+}
+
+function getOptionalRedeemPoints(body = {}) {
+  if (Object.prototype.hasOwnProperty.call(body, 'redeemPoints')) {
+    return Number(body.redeemPoints);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'redeem_points')) {
+    return Number(body.redeem_points);
+  }
+
+  return undefined;
+}
+
+function getOptionalDiscountPercent(body = {}) {
+  if (Object.prototype.hasOwnProperty.call(body, 'discountPercent')) {
+    return Number(body.discountPercent);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'discount_percent')) {
+    return Number(body.discount_percent);
+  }
+
+  return undefined;
+}
+
+function getOptionalChargeValue(body = {}, camelKey, snakeKey) {
+  if (Object.prototype.hasOwnProperty.call(body, camelKey)) {
+    return Number(body[camelKey]);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, snakeKey)) {
+    return Number(body[snakeKey]);
+  }
+
+  return undefined;
+}
+
 function getOptionalSource(body = {}) {
   if (Object.prototype.hasOwnProperty.call(body, 'source')) {
     return body.source;
@@ -185,7 +233,8 @@ export const createOrder = asyncHandler(async (req, res) => {
 
   const order = await OrderService.createOrder(
     req.restaurantId || req.user?.restaurantId,
-    normalizedOrder
+    normalizedOrder,
+    { actorRole: req.user?.role }
   );
 
   return sendSuccess(res, 201, order, 'Order created successfully');
@@ -241,6 +290,16 @@ export const cancelPendingBills = asyncHandler(async (req, res) => {
   return sendSuccess(res, 200, result, 'Pending bills cancelled successfully');
 });
 
+export const softDeleteOrder = asyncHandler(async (req, res) => {
+  const { orderId } = req.params;
+  const deletedOrder = await OrderService.softDeleteOrder(req.user.restaurantId, orderId, req.body.reason, {
+    actorRole: req.user?.role,
+    actorName: req.user?.name || req.user?.email || 'Unknown user',
+  });
+
+  return sendSuccess(res, 200, deletedOrder, 'Order deleted safely');
+});
+
 export const updateOrder = asyncHandler(async (req, res) => {
   const { orderId } = req.params;
   const normalizedOrder = {
@@ -265,7 +324,9 @@ export const updateOrder = asyncHandler(async (req, res) => {
     return sendError(res, 400, 'Table is required for dine-in orders');
   }
 
-  const order = await OrderService.updateOrder(req.restaurantId, orderId, normalizedOrder);
+  const order = await OrderService.updateOrder(req.restaurantId, orderId, normalizedOrder, {
+    actorRole: req.user?.role,
+  });
   return sendSuccess(res, 200, order, 'Order updated successfully');
 });
 
@@ -295,10 +356,23 @@ export const settleOrder = asyncHandler(async (req, res) => {
   const settlement = await OrderService.settleOrder(req.restaurantId, orderId, {
     method: getOptionalPaymentMethod(req.body),
     amountReceived: getOptionalAmountReceived(req.body),
+    discountPercent: getOptionalDiscountPercent(req.body),
     paymentNote: getOptionalPaymentNote(req.body) ?? '',
+    loyaltyPhone: getOptionalLoyaltyPhone(req.body) ?? '',
+    redeemPoints: getOptionalRedeemPoints(req.body),
+    packingCharge: getOptionalChargeValue(req.body, 'packingCharge', 'packing_charge'),
+    serviceCharge: getOptionalChargeValue(req.body, 'serviceCharge', 'service_charge'),
+    deliveryCharge: getOptionalChargeValue(req.body, 'deliveryCharge', 'delivery_charge'),
+    actorRole: req.user?.role,
+    actorName: req.user?.name || req.user?.email || 'Unknown user',
   });
 
   return sendSuccess(res, 200, settlement, 'Order settled successfully');
+});
+
+export const getLoyaltyProfile = asyncHandler(async (req, res) => {
+  const profile = await OrderService.getLoyaltyProfile(req.restaurantId, req.query.phone || req.query.customerPhone || '');
+  return sendSuccess(res, 200, profile, 'Loyalty profile fetched successfully');
 });
 
 export const getOnlineOrderInbox = asyncHandler(async (req, res) => {

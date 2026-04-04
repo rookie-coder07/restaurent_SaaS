@@ -14,5 +14,8 @@ router.use(authMiddleware, tenantIsolation);
 router.get('/daily-sales', checkPermission(['view_analytics']), analyticsController.getDailySalesReport);
 router.get('/monthly-sales', checkPermission(['view_analytics']), analyticsController.getMonthlySalesReport);
 router.get('/top-items', checkPermission(['view_analytics']), analyticsController.getTopItems);
+router.get('/eod/latest', checkPermission(['view_analytics']), analyticsController.getLatestEodSummary);
+router.get('/eod/history', checkPermission(['view_analytics']), analyticsController.getEodSummaryHistory);
+router.get('/loyalty', checkPermission(['view_analytics']), analyticsController.getLoyaltySummary);
 
 export default router;

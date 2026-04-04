@@ -55,13 +55,19 @@ export default function CustomerMenu() {
   const updateQuantity = useCustomerCartStore((state) => state.updateQuantity);
   const clearCart = useCustomerCartStore((state) => state.clearCart);
   const removeCart = useCustomerCartStore((state) => state.removeCart);
+  const [menuRetryCount, setMenuRetryCount] = useState(0);
 
-  const { data: menuData = { restaurantName: 'Restaurant Menu', categories: [], items: [] }, loading, error: apiError } = useApi(
+  const {
+    data: menuData = { restaurantName: 'Restaurant Menu', categories: [], items: [] },
+    loading,
+    error: apiError,
+    refetch,
+  } = useApi(
     () =>
       hasValidQrParams
         ? customerAPI.getPublicMenu({ tableNumber, tableId })
         : Promise.resolve({ data: { data: { restaurantName: 'Restaurant Menu', categories: [], items: [] } } }),
-    [tableNumber, tableId, hasValidQrParams]
+    [tableNumber, tableId, hasValidQrParams, menuRetryCount]
   );
 
   const restaurantName = menuData?.restaurantName || 'Restaurant Menu';
@@ -307,13 +313,17 @@ export default function CustomerMenu() {
           </div>
           <div className="flex flex-wrap justify-center gap-3">
             <button
-              onClick={() => window.location.reload()}
+              onClick={() => {
+                refetch().catch(() => {
+                  setMenuRetryCount((current) => current + 1);
+                });
+              }}
               className="rounded-xl bg-[var(--color-primary)] px-6 py-2 text-white transition hover:brightness-110"
             >
               Retry
             </button>
             <button
-              onClick={() => window.location.href = '/'}
+              onClick={() => navigate('/')}
               className="rounded-xl border border-[var(--border-color)] bg-[var(--bg-card)] px-6 py-2 text-[var(--text-primary)] transition hover:bg-[var(--bg-card-muted)]"
             >
               Go Back

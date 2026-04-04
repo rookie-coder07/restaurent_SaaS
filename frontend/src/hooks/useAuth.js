@@ -1,7 +1,7 @@
 import { useAuthStore } from '../context/authStore.js';
 import { authAPI } from '../services/apiEndpoints.js';
 import { useNavigate } from 'react-router-dom';
-import { canAccessPortal, PORTAL_LOGIN } from '../utils/portalRouting.js';
+import { canAccessPortal, normalizePortalRole, PORTAL_LOGIN, resolvePortalHome } from '../utils/portalRouting.js';
 import { clearAllPortalSessions, clearPortalSession, savePortalSession } from '../utils/authStorage.js';
 
 const AUTH_RETRYABLE_ERROR_CODES = new Set(['ECONNABORTED', 'ERR_NETWORK']);
@@ -16,13 +16,18 @@ export const useAuth = () => {
 
   const normalizeUser = (restaurant, user, isStaff) => {
     if (user) {
-      return user;
+      return {
+        ...user,
+        role: normalizePortalRole(user.role),
+        restaurantId: user.restaurantId || restaurant?.id || restaurant?.restaurantId || null,
+      };
     }
 
     if (restaurant) {
       return {
         ...restaurant,
-        role: restaurant.role || (isStaff ? 'staff' : 'owner'),
+        role: normalizePortalRole(restaurant.role || (isStaff ? 'staff' : 'owner')),
+        restaurantId: restaurant.restaurantId || restaurant.id || null,
       };
     }
 
@@ -127,17 +132,21 @@ export const useAuth = () => {
       }
 
       authStore.logout(portal);
-      navigate(portal === 'admin' ? '/' : PORTAL_LOGIN[portal] || PORTAL_LOGIN.admin);
+      navigate(
+        portal === 'admin' ? PORTAL_LOGIN.admin : PORTAL_LOGIN[portal] || PORTAL_LOGIN.admin
+      );
     }
   };
 
   return {
     user: authStore.user,
+    restaurantId: authStore.restaurantId,
     isAuthenticated: authStore.isAuthenticated,
     isLoading: authStore.isLoading,
     error: authStore.error,
     login,
     register,
     logout,
+    resolvePortalHome,
   };
 };

@@ -2,6 +2,7 @@ import jwt from 'jsonwebtoken';
 import logger from '../utils/logger.js';
 import { AppError } from '../utils/errorCodes.js';
 import { sendError } from '../utils/apiResponse.js';
+import { normalizeRole, VALID_ROLES } from '../constants/index.js';
 
 export const authMiddleware = (req, res, next) => {
   try {
@@ -20,13 +21,18 @@ export const authMiddleware = (req, res, next) => {
 
     // Verify JWT
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const normalizedRole = normalizeRole(decoded.role);
+
+    if (!VALID_ROLES.includes(normalizedRole)) {
+      return sendError(res, 401, 'Invalid role in token');
+    }
     
     // Attach user info to request
     req.user = {
       userId: decoded.userId,
       restaurantId: decoded.restaurantId,
       email: decoded.email,
-      role: decoded.role,
+      role: normalizedRole,
     };
 
     logger.info(`Auth successful for user: ${decoded.email}`);
@@ -61,11 +67,17 @@ export const optionalAuth = (req, res, next) => {
 
     if (token) {
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      const normalizedRole = normalizeRole(decoded.role);
+
+      if (!VALID_ROLES.includes(normalizedRole)) {
+        return next();
+      }
+
       req.user = {
         userId: decoded.userId,
         restaurantId: decoded.restaurantId,
         email: decoded.email,
-        role: decoded.role,
+        role: normalizedRole,
       };
     }
   } catch (error) {

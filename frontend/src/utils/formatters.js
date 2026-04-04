@@ -58,24 +58,18 @@ export const formatTime = (date) => {
   }).format(parsedDate);
 };
 
-export const formatDisplayOrderNumber = (order) => {
-  if (order?.displayOrderNumber) {
-    return order.displayOrderNumber;
-  }
-
-  if (order?.id) {
-    return `ORD-${String(order.id).slice(-6).toUpperCase()}`;
-  }
-
-  return 'ORD-UNKNOWN';
-};
-
-export const formatShortDisplayOrderNumber = (order) => {
+const getShortOrderNumber = (order) => {
   const displayValue = order?.displayOrderNumber || '';
   const sequenceMatch = displayValue.match(/-(\d+)$/);
 
   if (sequenceMatch) {
     return `#${String(Number(sequenceMatch[1])).padStart(2, '0')}`;
+  }
+
+  const numericDisplayValue = String(displayValue).match(/^#?(\d+)$/);
+
+  if (numericDisplayValue) {
+    return `#${String(Number(numericDisplayValue[1])).padStart(2, '0')}`;
   }
 
   if (order?.id) {
@@ -84,3 +78,7 @@ export const formatShortDisplayOrderNumber = (order) => {
 
   return '#--';
 };
+
+export const formatDisplayOrderNumber = (order) => getShortOrderNumber(order);
+
+export const formatShortDisplayOrderNumber = (order) => getShortOrderNumber(order);

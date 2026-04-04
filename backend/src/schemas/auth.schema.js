@@ -31,5 +31,5 @@ export const createStaffSchema = Joi.object({
   email: Joi.string().email().lowercase().required(),
   phone: Joi.string().pattern(/^\d{10}$/).required(),
   password: Joi.string().required(),
-  role: Joi.string().valid('kitchen_staff', 'staff').required(),
+  role: Joi.string().valid('manager', 'kitchen_staff', 'staff').required(),
 });

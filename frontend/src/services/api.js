@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { clearPortalSession, readPortalSession, savePortalSession } from '../utils/authStorage';
-import { PORTAL_LOGIN, canAccessPortal, getPortalKeyFromPathname } from '../utils/portalRouting';
+import { PORTAL_LOGIN, canAccessPortal, getPortalKeyFromPathname, normalizePortalRole } from '../utils/portalRouting';
 
 const PRODUCTION_API_BASE_URL = 'https://restaurent-backend-448t.onrender.com/api';
 const DEVELOPMENT_API_BASE_URL = 'http://localhost:3000/api';
@@ -33,9 +33,22 @@ function decodeTokenPayload(token) {
   }
 }
 
+function isExpiredTokenPayload(payload) {
+  if (!payload?.exp) {
+    return false;
+  }
+
+  return Date.now() >= payload.exp * 1000;
+}
+
 function rejectMismatchedPortalSession(portal) {
   clearPortalSession(portal);
-  window.location.href = PORTAL_LOGIN[portal] || PORTAL_LOGIN.admin;
+  window.dispatchEvent(new CustomEvent('auth:session-expired', {
+    detail: {
+      portal,
+      redirectTo: PORTAL_LOGIN[portal] || PORTAL_LOGIN.admin,
+    },
+  }));
 }
 
 if (shouldDebugApi) {
@@ -72,13 +85,28 @@ api.interceptors.request.use(
     const token = session?.accessToken;
 
     if (token) {
-      const tokenRole = decodeTokenPayload(token)?.role;
+      const tokenPayload = decodeTokenPayload(token);
+      const tokenRole = normalizePortalRole(tokenPayload?.role);
+
+      if (!tokenPayload?.restaurantId || !tokenRole || isExpiredTokenPayload(tokenPayload)) {
+        rejectMismatchedPortalSession(portal);
+        return Promise.reject(new Error('Your session has expired. Please sign in again.'));
+      }
+
       if (tokenRole && !canAccessPortal(tokenRole, portal)) {
         rejectMismatchedPortalSession(portal);
         return Promise.reject(new Error('Portal session does not match the current account role.'));
       }
 
       config.headers.Authorization = `Bearer ${token}`;
+      config.headers['X-Restaurant-Id'] = String(tokenPayload.restaurantId);
+
+      if (config.params && typeof config.params === 'object' && !Array.isArray(config.params)) {
+        config.params = {
+          ...config.params,
+          restaurantId: config.params.restaurantId || String(tokenPayload.restaurantId),
+        };
+      }
     }
 
     if (shouldDebugApi) {
@@ -156,7 +184,7 @@ api.interceptors.response.use(
             user: refreshedRole
               ? {
                   ...existingSession.user,
-                  role: refreshedRole,
+                  role: normalizePortalRole(refreshedRole),
                 }
               : existingSession.user,
             accessToken,
@@ -167,8 +195,7 @@ api.interceptors.response.use(
         }
       } catch (refreshError) {
         const portal = getPortalKeyFromPathname(window.location.pathname);
-        clearPortalSession(portal);
-        window.location.href = PORTAL_LOGIN[portal] || PORTAL_LOGIN.admin;
+        rejectMismatchedPortalSession(portal);
         return Promise.reject(refreshError);
       }
     }

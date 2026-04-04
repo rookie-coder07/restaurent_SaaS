@@ -2,6 +2,7 @@ import bcryptjs from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import logger from '../utils/logger.js';
 import supabase from '../config/supabase.js';
+import { normalizeRole, ROLES, VALID_ROLES } from '../constants/index.js';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-super-secret-jwt-key-min-32-characters-change-this-in-production';
 const REFRESH_TOKEN_SECRET = process.env.REFRESH_TOKEN_SECRET || 'your-super-secret-refresh-token-key-min-32-characters';
@@ -9,11 +10,17 @@ const REFRESH_TOKEN_SECRET = process.env.REFRESH_TOKEN_SECRET || 'your-super-sec
 export class AuthService {
   // Generate JWT access token
   static generateAccessToken(userId, restaurantId, email, role) {
+    const normalizedRole = normalizeRole(role);
+
+    if (!VALID_ROLES.includes(normalizedRole)) {
+      throw new Error('Cannot issue token for an unsupported role');
+    }
+
     const payload = {
       userId,
       restaurantId,
       email,
-      role,
+      role: normalizedRole,
     };
 
     return jwt.sign(payload, JWT_SECRET, {
@@ -23,11 +30,17 @@ export class AuthService {
 
   // Generate refresh token
   static generateRefreshToken(userId, restaurantId, email, role) {
+    const normalizedRole = normalizeRole(role);
+
+    if (!VALID_ROLES.includes(normalizedRole)) {
+      throw new Error('Cannot issue refresh token for an unsupported role');
+    }
+
     const payload = {
       userId,
       restaurantId,
       email,
-      role,
+      role: normalizedRole,
       type: 'refresh',
     };
 
@@ -97,7 +110,7 @@ export class AuthService {
         restaurant.id,
         restaurant.id,
         restaurant.email,
-        'owner'
+        ROLES.OWNER
       );
 
       const restaurantPayload = {
@@ -105,7 +118,7 @@ export class AuthService {
         name: restaurant.name,
         email: restaurant.email,
         city: restaurant.city,
-        role: 'owner',
+        role: ROLES.OWNER,
       };
 
       return {
@@ -115,7 +128,7 @@ export class AuthService {
           restaurant.id,
           restaurant.id,
           restaurant.email,
-          'owner'
+          ROLES.OWNER
         ),
       };
     } catch (error) {
@@ -149,14 +162,14 @@ export class AuthService {
         restaurant.id,
         restaurant.id,
         restaurant.email,
-        'owner'
+        ROLES.OWNER
       );
 
       const refreshToken = this.generateRefreshToken(
         restaurant.id,
         restaurant.id,
         restaurant.email,
-        'owner'
+        ROLES.OWNER
       );
 
       return {
@@ -165,7 +178,7 @@ export class AuthService {
           name: restaurant.name,
           email: restaurant.email,
           city: restaurant.city,
-          role: 'owner',
+          role: ROLES.OWNER,
         },
         accessToken,
         refreshToken,
@@ -198,22 +211,23 @@ export class AuthService {
         throw new Error('User account is inactive');
       }
 
-      if (user.role === 'manager') {
-        throw new Error('Manager role has been removed. Create a POS Staff or KOT Staff account instead.');
+      const normalizedRole = normalizeRole(user.role);
+      if (!VALID_ROLES.includes(normalizedRole)) {
+        throw new Error('User account has an unsupported role');
       }
 
       const accessToken = this.generateAccessToken(
         user.id,
         user.restaurant_id,
         user.email,
-        user.role
+        normalizedRole
       );
 
       const refreshToken = this.generateRefreshToken(
         user.id,
         user.restaurant_id,
         user.email,
-        user.role
+        normalizedRole
       );
 
       logger.info(`✅ Staff login successful: ${user.id}`);
@@ -223,7 +237,7 @@ export class AuthService {
           id: user.id,
           name: user.name,
           email: user.email,
-          role: user.role,
+          role: normalizedRole,
         },
         restaurant: {
           id: user.restaurant_id,
@@ -250,7 +264,7 @@ export class AuthService {
         decoded.userId,
         decoded.restaurantId,
         decoded.email || 'user@restaurant',
-        decoded.role || 'owner'
+        normalizeRole(decoded.role) || ROLES.OWNER
       );
 
       return { accessToken, refreshToken };

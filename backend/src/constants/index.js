@@ -1,11 +1,33 @@
 export const ROLES = {
   OWNER: 'owner',
+  MANAGER: 'manager',
   STAFF: 'staff',
   KITCHEN_STAFF: 'kitchen_staff',
 };
 
+const ROLE_ALIASES = {
+  admin: ROLES.OWNER,
+  owner: ROLES.OWNER,
+  manager: ROLES.MANAGER,
+  waiter: ROLES.STAFF,
+  cashier: ROLES.STAFF,
+  staff: ROLES.STAFF,
+  kitchen: ROLES.KITCHEN_STAFF,
+  kitchen_staff: ROLES.KITCHEN_STAFF,
+};
+
+export const VALID_ROLES = Object.values(ROLES);
+
+export function normalizeRole(role) {
+  const normalizedRole = String(role || '').trim().toLowerCase();
+  return ROLE_ALIASES[normalizedRole] || normalizedRole;
+}
+
+export const MANAGER_MAX_DISCOUNT_PERCENT = 15;
+
 export const ROLE_PERMISSIONS = {
-  owner: ['create_menu', 'manage_menu', 'manage_orders', 'manage_staff', 'view_analytics', 'manage_restaurant', 'view_orders', 'update_order_status'],
+  owner: ['create_menu', 'manage_menu', 'manage_orders', 'manage_staff', 'view_staff', 'view_analytics', 'manage_restaurant', 'view_orders', 'update_order_status'],
+  manager: ['manage_orders', 'manage_tables', 'view_staff', 'view_analytics', 'view_orders', 'update_order_status'],
   staff: ['view_orders', 'manage_orders'],
   kitchen_staff: ['view_orders', 'update_order_status'],
 };
@@ -40,6 +62,7 @@ export const RESTAURANT_STATUS = {
 };
 
 export default {
+  MANAGER_MAX_DISCOUNT_PERCENT,
   ROLES,
   ROLE_PERMISSIONS,
   ORDER_STATUS,

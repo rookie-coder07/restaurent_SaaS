@@ -13,12 +13,12 @@ router.use(authMiddleware, tenantIsolation);
 
 // Profile routes
 router.get('/profile', restaurantController.getProfile);
-router.put('/profile', validateRequest(updateRestaurantSchema), restaurantController.updateProfile);
-router.put('/settings', validateRequest(updateRestaurantSettingsSchema), restaurantController.updateSettings);
+router.put('/profile', checkPermission(['manage_restaurant']), validateRequest(updateRestaurantSchema), restaurantController.updateProfile);
+router.put('/settings', checkPermission(['manage_restaurant']), validateRequest(updateRestaurantSettingsSchema), restaurantController.updateSettings);
 
 // Staff management (owner only)
 router.post('/staff', checkPermission(['manage_staff']), validateRequest(createStaffSchema), restaurantController.createStaff);
-router.get('/staff', checkPermission(['manage_staff']), restaurantController.getStaffUsers);
+router.get('/staff', checkPermission(['manage_staff', 'view_staff']), restaurantController.getStaffUsers);
 router.delete('/staff/:staffId', checkPermission(['manage_staff']), restaurantController.deactivateStaff);
 
 // Subscription

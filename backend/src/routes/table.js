@@ -19,13 +19,13 @@ router.post('/', checkPermission(['manage_menu']), validateRequest(createTableSc
 router.post('/batch', checkPermission(['manage_menu']), validateRequest(batchCreateTablesSchema), tableController.createMultipleTables);
 
 // Get tables
-router.get('/', checkPermission(['manage_menu', 'view_orders']), tableController.getTables);
+router.get('/', checkPermission(['manage_tables', 'manage_menu', 'view_orders']), tableController.getTables);
 
 // Update/delete table
-router.put('/:tableId', checkPermission(['manage_menu']), tableController.updateTable);
+router.put('/:tableId', checkPermission(['manage_tables', 'manage_menu']), tableController.updateTable);
 router.delete('/:tableId', checkPermission(['manage_menu']), tableController.deleteTable);
-router.post('/:tableId/reserve', checkPermission(['manage_menu', 'manage_orders']), validateRequest(reserveTableSchema), tableController.reserveTable);
-router.post('/:tableId/release', checkPermission(['manage_menu', 'manage_orders']), tableController.releaseTable);
+router.post('/:tableId/reserve', checkPermission(['manage_tables', 'manage_menu', 'manage_orders']), validateRequest(reserveTableSchema), tableController.reserveTable);
+router.post('/:tableId/release', checkPermission(['manage_tables', 'manage_menu', 'manage_orders']), tableController.releaseTable);
 
 // Generate QR URLs
 router.post('/qr/generate', checkPermission(['manage_menu']), tableController.generateQRUrls);

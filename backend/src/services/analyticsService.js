@@ -1,7 +1,237 @@
 import logger from '../utils/logger.js';
 import supabase from '../config/supabase.js';
+import { splitNotesAndKotMeta } from '../utils/kotMetadata.js';
 
 export class AnalyticsService {
+  static isMissingEodTableError(error) {
+    const message = String(error?.message || '').toLowerCase();
+    const details = String(error?.details || '').toLowerCase();
+    return (
+      message.includes('daily_eod_summaries') ||
+      details.includes('daily_eod_summaries') ||
+      error?.code === '42P01'
+    );
+  }
+
+  static isSettledOrder(order) {
+    return order?.status === 'completed' || order?.payment_status === 'paid';
+  }
+
+  static getDateString(value = new Date()) {
+    const date = typeof value === 'string' ? new Date(value) : value;
+    return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().split('T')[0];
+  }
+
+  static getDayBounds(date) {
+    const dateStr = typeof date === 'string' ? date : this.getDateString(date);
+    return {
+      dateStr,
+      start: `${dateStr}T00:00:00.000Z`,
+      end: `${dateStr}T23:59:59.999Z`,
+    };
+  }
+
+  static getPreviousDateString(referenceDate = new Date()) {
+    const baseDate = typeof referenceDate === 'string' ? new Date(referenceDate) : new Date(referenceDate);
+    const previousDate = new Date(baseDate);
+    previousDate.setDate(previousDate.getDate() - 1);
+    return this.getDateString(previousDate);
+  }
+
+  static parseDiscountAmountFromNotes(notes = '') {
+    const match = String(notes || '').match(/discount amount\s+(\d+(?:\.\d+)?)/i);
+    return match ? Number(match[1]) : 0;
+  }
+
+  static buildHourLabel(hour) {
+    const numericHour = Number(hour || 0);
+    const suffix = numericHour >= 12 ? 'PM' : 'AM';
+    const formattedHour = numericHour % 12 || 12;
+    return `${formattedHour}:00 ${suffix}`;
+  }
+
+  static buildSummaryMessage(summary) {
+    return `Closed ${summary.totalOrders} orders with ${summary.totalRevenue.toFixed(2)} revenue, ${summary.averageOrderValue.toFixed(2)} average order value, and ${summary.totalDiscounts.toFixed(2)} in discounts.`;
+  }
+
+  static normalizeLoyaltyPhone(value = '') {
+    const normalized = String(value || '').replace(/[^\d]/g, '');
+    return normalized.length >= 10 ? normalized.slice(-10) : '';
+  }
+
+  static extractLoyaltyOrderMeta(order = {}) {
+    const { kotMeta } = splitNotesAndKotMeta(order.notes);
+    const customerPhone = this.normalizeLoyaltyPhone(kotMeta?.loyalty?.customerPhone || kotMeta?.online?.customerPhone || '');
+    return {
+      customerPhone,
+      earnedPoints: Math.max(0, Number(kotMeta?.loyalty?.earnedPoints || 0)),
+      redeemedPoints: Math.max(0, Number(kotMeta?.loyalty?.redeemedPoints || 0)),
+      redeemedAmount: Math.max(0, Number(kotMeta?.loyalty?.redeemedAmount || 0)),
+    };
+  }
+
+  static async fetchOrdersForDay(restaurantId, date) {
+    const { start, end } = this.getDayBounds(date);
+    const { data: orders, error } = await supabase
+      .from('orders')
+      .select(`
+        id,
+        created_at,
+        status,
+        payment_status,
+        total_amount,
+        notes,
+        order_items (
+          id,
+          quantity,
+          unit_price,
+          menu_items (
+            name
+          )
+        )
+      `)
+      .eq('restaurant_id', restaurantId)
+      .gte('created_at', start)
+      .lte('created_at', end)
+      .order('created_at', { ascending: true });
+
+    if (error) {
+      throw error;
+    }
+
+    return orders || [];
+  }
+
+  static async computeEodSummaryForDate(restaurantId, date) {
+    const dateStr = typeof date === 'string' ? date : this.getDateString(date);
+    const orders = await this.fetchOrdersForDay(restaurantId, dateStr);
+    const settledOrders = orders.filter((order) => this.isSettledOrder(order));
+    const totalRevenue = settledOrders.reduce((sum, order) => sum + Number(order.total_amount || 0), 0);
+    const totalOrders = orders.length;
+    const averageOrderValue = settledOrders.length > 0 ? totalRevenue / settledOrders.length : 0;
+    const totalDiscounts = settledOrders.reduce(
+      (sum, order) => sum + this.parseDiscountAmountFromNotes(order.notes),
+      0
+    );
+
+    const itemMap = new Map();
+    const hourMap = new Map();
+
+    orders.forEach((order) => {
+      const orderHour = new Date(order.created_at || Date.now()).getHours();
+      const currentHour = hourMap.get(orderHour) || {
+        hour: orderHour,
+        label: this.buildHourLabel(orderHour),
+        orders: 0,
+        revenue: 0,
+      };
+      currentHour.orders += 1;
+      currentHour.revenue += Number(order.total_amount || 0);
+      hourMap.set(orderHour, currentHour);
+
+      (order.order_items || []).forEach((item) => {
+        const itemName = item.menu_items?.name || 'Unknown item';
+        const currentItem = itemMap.get(itemName) || {
+          name: itemName,
+          quantity: 0,
+          revenue: 0,
+        };
+        const quantity = Number(item.quantity || 0);
+        const revenue = Number(item.unit_price || 0) * quantity;
+        currentItem.quantity += quantity;
+        currentItem.revenue += revenue;
+        itemMap.set(itemName, currentItem);
+      });
+    });
+
+    const rankedItems = Array.from(itemMap.values()).sort(
+      (left, right) => right.quantity - left.quantity || right.revenue - left.revenue
+    );
+    const topItems = rankedItems.slice(0, 5);
+    const lowPerformingItems = rankedItems
+      .filter((item) => item.quantity > 0)
+      .slice(-5)
+      .reverse()
+      .sort((left, right) => left.quantity - right.quantity || left.revenue - right.revenue);
+    const peakHours = Array.from(hourMap.values())
+      .sort((left, right) => right.orders - left.orders || right.revenue - left.revenue)
+      .slice(0, 4);
+
+    const summary = {
+      date: dateStr,
+      totalRevenue: Number(totalRevenue.toFixed(2)),
+      totalOrders,
+      averageOrderValue: Number(averageOrderValue.toFixed(2)),
+      totalDiscounts: Number(totalDiscounts.toFixed(2)),
+      topItems,
+      lowPerformingItems,
+      peakHours,
+      stats: {
+        settledOrders: settledOrders.length,
+        discountedOrders: settledOrders.filter((order) => this.parseDiscountAmountFromNotes(order.notes) > 0).length,
+        peakHour: peakHours[0]?.label || null,
+      },
+    };
+
+    return {
+      ...summary,
+      summaryMessage: this.buildSummaryMessage(summary),
+    };
+  }
+
+  static async saveEodSummary(restaurantId, summary) {
+    const payload = {
+      restaurant_id: restaurantId,
+      date: summary.date,
+      total_revenue: summary.totalRevenue || 0,
+      total_orders: summary.totalOrders || 0,
+      average_order_value: summary.averageOrderValue || 0,
+      total_discounts: summary.totalDiscounts || 0,
+      top_items: summary.topItems || [],
+      low_performing_items: summary.lowPerformingItems || [],
+      peak_hours: summary.peakHours || [],
+      stats: summary.stats || {},
+      summary_message: summary.summaryMessage || '',
+      updated_at: new Date().toISOString(),
+    };
+
+    const { data, error } = await supabase
+      .from('daily_eod_summaries')
+      .upsert(payload, {
+        onConflict: 'restaurant_id,date',
+      })
+      .select()
+      .single();
+
+    if (error) {
+      throw error;
+    }
+
+    return this.transformEodSummary(data);
+  }
+
+  static transformEodSummary(row) {
+    if (!row) {
+      return null;
+    }
+
+    return {
+      id: row.id,
+      date: row.date,
+      totalRevenue: Number(row.total_revenue || 0),
+      totalOrders: Number(row.total_orders || 0),
+      averageOrderValue: Number(row.average_order_value || 0),
+      totalDiscounts: Number(row.total_discounts || 0),
+      topItems: Array.isArray(row.top_items) ? row.top_items : [],
+      lowPerformingItems: Array.isArray(row.low_performing_items) ? row.low_performing_items : [],
+      peakHours: Array.isArray(row.peak_hours) ? row.peak_hours : [],
+      stats: row.stats || {},
+      summaryMessage: row.summary_message || '',
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  }
+
   // ============ DAILY ANALYTICS ============
 
   static async recordDailyAnalytics(restaurantId, analyticsData) {
@@ -391,6 +621,198 @@ export class AnalyticsService {
       };
     } catch (error) {
       logger.error('❌ Get top items error:', error);
+      throw error;
+    }
+  }
+
+  static async getOrCreateEodSummary(restaurantId, date) {
+    try {
+      const dateStr = typeof date === 'string' ? date : this.getDateString(date);
+      const { data: existing, error } = await supabase
+        .from('daily_eod_summaries')
+        .select('*')
+        .eq('restaurant_id', restaurantId)
+        .eq('date', dateStr)
+        .maybeSingle();
+
+      if (error) {
+        throw error;
+      }
+
+      if (existing) {
+        return this.transformEodSummary(existing);
+      }
+
+      const summary = await this.computeEodSummaryForDate(restaurantId, dateStr);
+      return await this.saveEodSummary(restaurantId, summary);
+    } catch (error) {
+      if (this.isMissingEodTableError(error)) {
+        logger.warn('daily_eod_summaries table is missing, returning computed EOD summary without persistence');
+        const fallbackSummary = await this.computeEodSummaryForDate(
+          restaurantId,
+          typeof date === 'string' ? date : this.getDateString(date)
+        );
+        return {
+          id: null,
+          createdAt: null,
+          updatedAt: null,
+          ...fallbackSummary,
+        };
+      }
+
+      logger.error('❌ Get or create EOD summary error:', error);
+      throw error;
+    }
+  }
+
+  static async getLatestEodSummary(restaurantId, { ensure = false, referenceDate = new Date() } = {}) {
+    try {
+      if (ensure) {
+        const previousDate = this.getPreviousDateString(referenceDate);
+        await this.getOrCreateEodSummary(restaurantId, previousDate);
+      }
+
+      const { data, error } = await supabase
+        .from('daily_eod_summaries')
+        .select('*')
+        .eq('restaurant_id', restaurantId)
+        .order('date', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (error) {
+        if (this.isMissingEodTableError(error)) {
+          logger.warn('daily_eod_summaries table is missing, returning computed latest EOD summary without persistence');
+          const previousDate = this.getPreviousDateString(referenceDate);
+          const fallbackSummary = await this.computeEodSummaryForDate(restaurantId, previousDate);
+          return {
+            id: null,
+            createdAt: null,
+            updatedAt: null,
+            ...fallbackSummary,
+          };
+        }
+
+        throw error;
+      }
+
+      return this.transformEodSummary(data);
+    } catch (error) {
+      logger.error('❌ Get latest EOD summary error:', error);
+      throw error;
+    }
+  }
+
+  static async getEodSummaryHistory(restaurantId, limit = 7) {
+    try {
+      const { data, error } = await supabase
+        .from('daily_eod_summaries')
+        .select('*')
+        .eq('restaurant_id', restaurantId)
+        .order('date', { ascending: false })
+        .limit(limit);
+
+      if (error) {
+        if (this.isMissingEodTableError(error)) {
+          logger.warn('daily_eod_summaries table is missing, returning empty EOD summary history');
+          return [];
+        }
+
+        throw error;
+      }
+
+      return (data || []).map((row) => this.transformEodSummary(row));
+    } catch (error) {
+      logger.error('❌ Get EOD summary history error:', error);
+      throw error;
+    }
+  }
+
+  static async getLoyaltySummary(restaurantId) {
+    try {
+      const { data: orders, error } = await supabase
+        .from('orders')
+        .select('id, created_at, total_amount, status, payment_status, notes')
+        .eq('restaurant_id', restaurantId)
+        .or('status.eq.completed,payment_status.eq.paid')
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        throw error;
+      }
+
+      const memberMap = new Map();
+      const recentActivity = [];
+
+      (orders || []).forEach((order) => {
+        const loyalty = this.extractLoyaltyOrderMeta(order);
+        if (!loyalty.customerPhone) {
+          return;
+        }
+
+        const currentMember = memberMap.get(loyalty.customerPhone) || {
+          customerPhone: loyalty.customerPhone,
+          visitCount: 0,
+          totalSpend: 0,
+          totalEarnedPoints: 0,
+          totalRedeemedPoints: 0,
+          totalRedeemedAmount: 0,
+          lastVisitAt: null,
+        };
+
+        currentMember.visitCount += 1;
+        currentMember.totalSpend += Number(order.total_amount || 0);
+        currentMember.totalEarnedPoints += loyalty.earnedPoints;
+        currentMember.totalRedeemedPoints += loyalty.redeemedPoints;
+        currentMember.totalRedeemedAmount += loyalty.redeemedAmount;
+        currentMember.lastVisitAt = currentMember.lastVisitAt || order.created_at;
+        memberMap.set(loyalty.customerPhone, currentMember);
+
+        if (loyalty.earnedPoints > 0 || loyalty.redeemedPoints > 0) {
+          recentActivity.push({
+            orderId: order.id,
+            customerPhone: loyalty.customerPhone,
+            createdAt: order.created_at,
+            totalAmount: Number(order.total_amount || 0),
+            earnedPoints: loyalty.earnedPoints,
+            redeemedPoints: loyalty.redeemedPoints,
+            redeemedAmount: Number(loyalty.redeemedAmount.toFixed(2)),
+          });
+        }
+      });
+
+      const members = Array.from(memberMap.values()).map((member) => ({
+        ...member,
+        totalSpend: Number(member.totalSpend.toFixed(2)),
+        totalRedeemedAmount: Number(member.totalRedeemedAmount.toFixed(2)),
+        pointsBalance: Math.max(0, member.totalEarnedPoints - member.totalRedeemedPoints),
+      }));
+
+      const activeMembers = members.length;
+      const repeatCustomers = members.filter((member) => member.visitCount > 1).length;
+      const totalPointsIssued = members.reduce((sum, member) => sum + member.totalEarnedPoints, 0);
+      const totalRedeemedPoints = members.reduce((sum, member) => sum + member.totalRedeemedPoints, 0);
+      const totalRedeemedAmount = members.reduce((sum, member) => sum + member.totalRedeemedAmount, 0);
+
+      return {
+        program: {
+          earnRule: '1 point for every Rs 100 spent',
+          redeemRule: '1 point = Rs 1 discount',
+        },
+        summary: {
+          activeMembers,
+          repeatCustomers,
+          totalPointsIssued,
+          totalRedeemedPoints,
+          totalRedeemedAmount: Number(totalRedeemedAmount.toFixed(2)),
+        },
+        topMembers: members
+          .sort((left, right) => right.pointsBalance - left.pointsBalance || right.totalSpend - left.totalSpend)
+          .slice(0, 10),
+        recentActivity: recentActivity.slice(0, 12),
+      };
+    } catch (error) {
+      logger.error('Loyalty summary error:', error);
       throw error;
     }
   }

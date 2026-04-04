@@ -5,6 +5,48 @@ export function createEmptyKotMeta() {
   return {
     version: 1,
     lineDetails: {},
+    billing: {
+      invoiceNumber: '',
+      invoiceDate: null,
+      subtotal: 0,
+      orderDiscountAmount: 0,
+      managerDiscountPercent: 0,
+      managerDiscountAmount: 0,
+      taxableAmount: 0,
+      gstPercent: 0,
+      cgstRate: 0,
+      sgstRate: 0,
+      cgstAmount: 0,
+      sgstAmount: 0,
+      packingCharge: 0,
+      serviceCharge: 0,
+      deliveryCharge: 0,
+      chargesTotal: 0,
+      loyaltyRedeemedAmount: 0,
+      loyaltyRedeemedPoints: 0,
+      roundOff: 0,
+      grandTotal: 0,
+      paymentMode: '',
+      paidAmount: 0,
+      cashierName: '',
+    },
+    loyalty: {
+      customerPhone: '',
+      earnedPoints: 0,
+      redeemedPoints: 0,
+      redeemedAmount: 0,
+      availablePointsBefore: 0,
+      availablePointsAfter: 0,
+      finalPayableTotal: 0,
+      settledAt: null,
+    },
+    system: {
+      deletion: {
+        isDeleted: false,
+        deletedAt: null,
+        deletedReason: '',
+      },
+    },
     online: {
       source: null,
       fulfillmentType: null,
@@ -31,6 +73,48 @@ export function normalizeKotMeta(meta = {}) {
   return {
     version: Number(meta?.version || 1),
     lineDetails: meta?.lineDetails && typeof meta.lineDetails === 'object' ? meta.lineDetails : {},
+    billing: {
+      invoiceNumber: meta?.billing?.invoiceNumber || '',
+      invoiceDate: meta?.billing?.invoiceDate || null,
+      subtotal: Number(meta?.billing?.subtotal || 0),
+      orderDiscountAmount: Number(meta?.billing?.orderDiscountAmount || 0),
+      managerDiscountPercent: Number(meta?.billing?.managerDiscountPercent || 0),
+      managerDiscountAmount: Number(meta?.billing?.managerDiscountAmount || 0),
+      taxableAmount: Number(meta?.billing?.taxableAmount || 0),
+      gstPercent: Number(meta?.billing?.gstPercent || 0),
+      cgstRate: Number(meta?.billing?.cgstRate || 0),
+      sgstRate: Number(meta?.billing?.sgstRate || 0),
+      cgstAmount: Number(meta?.billing?.cgstAmount || 0),
+      sgstAmount: Number(meta?.billing?.sgstAmount || 0),
+      packingCharge: Number(meta?.billing?.packingCharge || 0),
+      serviceCharge: Number(meta?.billing?.serviceCharge || 0),
+      deliveryCharge: Number(meta?.billing?.deliveryCharge || 0),
+      chargesTotal: Number(meta?.billing?.chargesTotal || 0),
+      loyaltyRedeemedAmount: Number(meta?.billing?.loyaltyRedeemedAmount || 0),
+      loyaltyRedeemedPoints: Number(meta?.billing?.loyaltyRedeemedPoints || 0),
+      roundOff: Number(meta?.billing?.roundOff || 0),
+      grandTotal: Number(meta?.billing?.grandTotal || 0),
+      paymentMode: meta?.billing?.paymentMode || '',
+      paidAmount: Number(meta?.billing?.paidAmount || 0),
+      cashierName: meta?.billing?.cashierName || '',
+    },
+    loyalty: {
+      customerPhone: meta?.loyalty?.customerPhone || '',
+      earnedPoints: Number(meta?.loyalty?.earnedPoints || 0),
+      redeemedPoints: Number(meta?.loyalty?.redeemedPoints || 0),
+      redeemedAmount: Number(meta?.loyalty?.redeemedAmount || 0),
+      availablePointsBefore: Number(meta?.loyalty?.availablePointsBefore || 0),
+      availablePointsAfter: Number(meta?.loyalty?.availablePointsAfter || 0),
+      finalPayableTotal: Number(meta?.loyalty?.finalPayableTotal || 0),
+      settledAt: meta?.loyalty?.settledAt || null,
+    },
+    system: {
+      deletion: {
+        isDeleted: Boolean(meta?.system?.deletion?.isDeleted),
+        deletedAt: meta?.system?.deletion?.deletedAt || null,
+        deletedReason: meta?.system?.deletion?.deletedReason || '',
+      },
+    },
     online: {
       source: meta?.online?.source || null,
       fulfillmentType: meta?.online?.fulfillmentType || null,
@@ -96,6 +180,11 @@ function hasKotPayload(kotMeta = {}) {
   const normalized = normalizeKotMeta(kotMeta);
   return (
     Object.keys(normalized.lineDetails).length > 0 ||
+    Boolean(normalized.billing.invoiceNumber) ||
+    normalized.billing.grandTotal > 0 ||
+    Boolean(normalized.loyalty.customerPhone) ||
+    normalized.loyalty.earnedPoints > 0 ||
+    normalized.loyalty.redeemedPoints > 0 ||
     Object.values(normalized.online).some((value) => {
       if (typeof value === 'string') {
         return Boolean(value.trim());
@@ -103,6 +192,7 @@ function hasKotPayload(kotMeta = {}) {
 
       return value !== null && value !== undefined;
     }) ||
+    normalized.system.deletion.isDeleted ||
     normalized.kitchen.lastSentSnapshot.length > 0 ||
     normalized.kitchen.tickets.length > 0
   );
