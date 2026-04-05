@@ -1,6 +1,8 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
+import { useAuthStore } from '../context/authStore';
 
 export const useApi = (apiFunction, deps = []) => {
+  const restaurantId = useAuthStore((state) => state.restaurantId);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -9,6 +11,12 @@ export const useApi = (apiFunction, deps = []) => {
   useEffect(() => {
     apiFunctionRef.current = apiFunction;
   }, [apiFunction]);
+
+  useEffect(() => {
+    setData(null);
+    setError(null);
+    setLoading(Boolean(restaurantId));
+  }, [restaurantId]);
 
   const execute = useCallback(
     async (...args) => {
@@ -37,7 +45,7 @@ export const useApi = (apiFunction, deps = []) => {
         // Error state is already captured in the hook.
       });
     }
-  }, [execute, ...deps]);
+  }, [execute, restaurantId, ...deps]);
 
   const refetch = useCallback(async () => {
     try {

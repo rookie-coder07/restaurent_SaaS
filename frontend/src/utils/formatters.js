@@ -81,7 +81,8 @@ const getShortOrderNumber = (order) => {
   const normalizedDisplayValue = String(displayValue).trim();
 
   if (/^ORD-\d{8}-\d+$/i.test(normalizedDisplayValue)) {
-    return normalizedDisplayValue.toUpperCase();
+    const [, numericSuffix = ''] = normalizedDisplayValue.match(/^ORD-\d{8}-(\d+)$/i) || [];
+    return `#${numericSuffix.padStart(Math.max(3, numericSuffix.length), '0')}`;
   }
 
   const numericDisplayValue = normalizedDisplayValue.match(/^#?(\d+)$/);

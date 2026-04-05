@@ -9,6 +9,7 @@ import OnlineOrderInbox from '../components/pos/OnlineOrderInbox';
 import OnlineOrderDetailsPanel from '../components/pos/OnlineOrderDetailsPanel';
 import PaymentPanel from '../components/pos/PaymentPanel';
 import Modal from '../components/common/Modal';
+import Toast from '../components/common/Toast';
 import { compareTableLabels, formatCurrency, formatDisplayOrderNumber } from '../utils/formatters';
 import { getPosWorkspaceDraftKey, usePosStore } from '../context/posStore';
 import { useAuthStore } from '../context/authStore';
@@ -308,6 +309,7 @@ export default function POS() {
   const [onlineInboxError, setOnlineInboxError] = useState(cachedOnlineInboxError || '');
   const [updatingOnlineOrderId, setUpdatingOnlineOrderId] = useState('');
   const [isSwitchingTable, setIsSwitchingTable] = useState(false);
+  const [waiterAlertMessage, setWaiterAlertMessage] = useState('');
   const qrAlertedOrderIdsRef = useRef(new Set());
   const hasPrimedQrAlertsRef = useRef(false);
 
@@ -373,6 +375,23 @@ export default function POS() {
   }, [cachedOnlineInbox, cachedOnlineInboxError]);
 
   useEffect(() => {
+    if (!isWaiterAccount) {
+      return undefined;
+    }
+
+    const refreshAssignedQueue = () => {
+      refreshTableOverview({ force: true }).catch(() => {
+        // Shared store error state handles the UI.
+      });
+    };
+
+    refreshAssignedQueue();
+    const intervalId = window.setInterval(refreshAssignedQueue, 6000);
+
+    return () => window.clearInterval(intervalId);
+  }, [isWaiterAccount, refreshTableOverview]);
+
+  useEffect(() => {
     const nextIds = new Set(pendingAssignedQrOrders.map((order) => order.id).filter(Boolean));
 
     if (!hasPrimedQrAlertsRef.current) {
@@ -382,10 +401,21 @@ export default function POS() {
     }
 
     const hasNewQrAlert = Array.from(nextIds).some((id) => !qrAlertedOrderIdsRef.current.has(id));
+    const newQrOrders = pendingAssignedQrOrders.filter(
+      (order) => order.id && !qrAlertedOrderIdsRef.current.has(order.id)
+    );
     qrAlertedOrderIdsRef.current = nextIds;
 
     if (isWaiterAccount && hasNewQrAlert) {
       playWaiterQrAlertBuzzer();
+      const affectedTables = Array.from(
+        new Set(newQrOrders.map((order) => order.tableNumber || 'Walk-in').filter(Boolean))
+      );
+      setWaiterAlertMessage(
+        affectedTables.length > 1
+          ? `New QR orders waiting for ${affectedTables.join(', ')}`
+          : `New QR order waiting for ${affectedTables[0] || 'your assigned table'}`
+      );
     }
   }, [isWaiterAccount, pendingAssignedQrOrders]);
 
@@ -1418,6 +1448,12 @@ export default function POS() {
 
   return (
     <div className="compact-page space-y-4">
+      <Toast
+        type="info"
+        message={waiterAlertMessage}
+        onClose={() => setWaiterAlertMessage('')}
+        autoDismissMs={5600}
+      />
       <section className="rounded-[var(--radius-card)] border border-[var(--border-color)] bg-[linear-gradient(135deg,var(--color-primary-soft),rgba(255,255,255,0.02))] p-4 sm:p-5 shadow-[var(--shadow-card)]">
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <div className="rounded-[1.5rem] bg-[var(--bg-card)] px-4 py-3">

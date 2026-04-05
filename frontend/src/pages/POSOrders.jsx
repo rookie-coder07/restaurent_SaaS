@@ -3,24 +3,14 @@ import { ArrowRight, Loader, RefreshCw, Store, PhoneCall, ShoppingBag, Truck, Pa
 import { useNavigate } from 'react-router-dom';
 import { orderAPI } from '../services/apiEndpoints';
 import { formatCurrency, formatDisplayOrderNumber } from '../utils/formatters';
-
-const SOURCE_FILTERS = [
-  { id: 'all', label: 'All Sources', icon: ShoppingBag },
-  { id: 'direct', label: 'Direct', icon: Store },
-  { id: 'phone', label: 'Phone', icon: PhoneCall },
-  { id: 'website', label: 'Website', icon: ShoppingBag },
-  { id: 'swiggy', label: 'Swiggy', icon: Truck },
-  { id: 'zomato', label: 'Zomato', icon: Package2 },
-];
+import Toast from '../components/common/Toast';
 
 const WORKFLOW_FILTERS = [
-  { id: 'all', label: 'All Statuses' },
-  { id: 'new', label: 'New' },
-  { id: 'accepted', label: 'Accepted' },
+  { id: 'all', label: 'All' },
+  { id: 'live', label: 'Live' },
   { id: 'preparing', label: 'Preparing' },
   { id: 'ready', label: 'Ready' },
-  { id: 'dispatched', label: 'Dispatched' },
-  { id: 'rejected', label: 'Rejected' },
+  { id: 'completed', label: 'Completed' },
 ];
 
 const WORKFLOW_ACTIONS = [
@@ -37,6 +27,24 @@ const SOURCE_META = {
   website: { label: 'Website', icon: ShoppingBag },
   swiggy: { label: 'Swiggy', icon: Truck },
   zomato: { label: 'Zomato', icon: Package2 },
+  pos: { label: 'POS Order', icon: Store },
+  qr: { label: 'QR Order', icon: ShoppingBag },
+};
+
+const STATUS_META = {
+  awaiting_waiter_approval: 'border-sky-300 bg-sky-50 text-sky-900',
+  pending: 'border-amber-300 bg-amber-50 text-amber-900',
+  accepted: 'border-indigo-300 bg-indigo-50 text-indigo-900',
+  preparing: 'border-violet-300 bg-violet-50 text-violet-900',
+  ready: 'border-emerald-300 bg-emerald-50 text-emerald-900',
+  served: 'border-cyan-300 bg-cyan-50 text-cyan-900',
+  dispatched: 'border-fuchsia-300 bg-fuchsia-50 text-fuchsia-900',
+  completed: 'border-emerald-300 bg-emerald-50 text-emerald-900',
+  rejected: 'border-rose-300 bg-rose-50 text-rose-900',
+  unpaid: 'border-rose-300 bg-rose-50 text-rose-900',
+  paid: 'border-emerald-300 bg-emerald-50 text-emerald-900',
+  cash: 'border-slate-300 bg-slate-50 text-slate-900',
+  upi: 'border-teal-300 bg-teal-50 text-teal-900',
 };
 
 function formatPromise(value) {
@@ -57,13 +65,35 @@ function formatPromise(value) {
   }).format(date);
 }
 
+function getOrderWorkflow(order) {
+  return String(order?.online?.workflowStatus || order?.status || 'new');
+}
+
+function isLiveWorkflow(status) {
+  return ['new', 'accepted', 'preparing', 'pending', 'awaiting_waiter_approval', 'served', 'dispatched'].includes(status);
+}
+
+function isInboxWorkflowOrder(order) {
+  const source = String(order?.online?.source || '').trim().toLowerCase();
+  const isOnlineChannel = ['direct', 'phone', 'website', 'swiggy', 'zomato'].includes(source);
+  const isOffPremise = order?.orderType === 'takeaway' || order?.orderType === 'delivery';
+  return Boolean(order?.online) && isOnlineChannel && isOffPremise;
+}
+
+function isWaiterApprovalOrder(order) {
+  return order?.origin === 'qr' && order?.orderType === 'dine-in' && String(order?.status || '') === 'awaiting_waiter_approval';
+}
+
+function getStatusChipClass(value, fallback = 'border-slate-300 bg-slate-50 text-slate-900') {
+  return STATUS_META[String(value || '').trim().toLowerCase()] || fallback;
+}
+
 export default function POSOrders() {
   const navigate = useNavigate();
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
-  const [sourceFilter, setSourceFilter] = useState('all');
   const [workflowFilter, setWorkflowFilter] = useState('all');
   const [updatingOrderId, setUpdatingOrderId] = useState('');
 
@@ -72,11 +102,12 @@ export default function POSOrders() {
     setError('');
 
     try {
-      const response = await orderAPI.getOnlineInbox();
-      setOrders(response.data?.data || []);
+      const response = await orderAPI.getOrders({ limit: 150 });
+      const nextOrders = response.data?.data?.items || response.data?.data || [];
+      setOrders(Array.isArray(nextOrders) ? nextOrders : []);
     } catch (requestError) {
       setOrders([]);
-      setError(requestError.response?.data?.message || 'Failed to load the unified online order page.');
+      setError(requestError.response?.data?.message || 'Failed to load POS orders.');
     } finally {
       setLoading(false);
     }
@@ -89,23 +120,38 @@ export default function POSOrders() {
   const filteredOrders = useMemo(
     () =>
       orders.filter((order) => {
-        const sourceMatches = sourceFilter === 'all' || order.online?.source === sourceFilter;
-        const workflowMatches = workflowFilter === 'all' || order.online?.workflowStatus === workflowFilter;
-        return sourceMatches && workflowMatches;
+        const currentWorkflow = getOrderWorkflow(order);
+        if (workflowFilter === 'all') {
+          return true;
+        }
+
+        if (workflowFilter === 'live') {
+          return isLiveWorkflow(currentWorkflow);
+        }
+
+        return currentWorkflow === workflowFilter;
       }),
-    [orders, sourceFilter, workflowFilter]
+    [orders, workflowFilter]
   );
 
-  const stats = useMemo(() => {
-    return {
-      total: filteredOrders.length,
-      pending: filteredOrders.filter((order) => ['new', 'accepted', 'preparing'].includes(order.online?.workflowStatus)).length,
-      ready: filteredOrders.filter((order) => order.online?.workflowStatus === 'ready').length,
-      revenue: filteredOrders.reduce((sum, order) => sum + Number(order.totalAmount || order.total || 0), 0),
-    };
-  }, [filteredOrders]);
+  const queueCounts = useMemo(
+    () => ({
+      all: orders.length,
+      live: orders.filter((order) => isLiveWorkflow(getOrderWorkflow(order))).length,
+      preparing: orders.filter((order) => getOrderWorkflow(order) === 'preparing').length,
+      ready: orders.filter((order) => getOrderWorkflow(order) === 'ready').length,
+      completed: orders.filter((order) => getOrderWorkflow(order) === 'completed').length,
+    }),
+    [orders]
+  );
 
-  const handleWorkflowUpdate = async (orderId, workflowStatus) => {
+  const handleWorkflowUpdate = async (order, workflowStatus) => {
+    if (!isInboxWorkflowOrder(order)) {
+      setError('Only takeaway or delivery inbox orders can be updated from this queue.');
+      return;
+    }
+
+    const orderId = order.id;
     setUpdatingOrderId(orderId);
     setError('');
     setSuccess('');
@@ -124,13 +170,19 @@ export default function POSOrders() {
   };
 
   return (
-    <div className="space-y-5">
-      <div className="flex justify-end">
+    <div className="space-y-4">
+      <div className="flex flex-col gap-3 rounded-[1.6rem] border border-[var(--border-color)] bg-[var(--bg-card)] p-4 shadow-[var(--shadow-card)] sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--text-secondary)]">Order Queue</p>
+          <p className="mt-1 text-lg font-bold text-[var(--text-primary)]">
+            {filteredOrders.length} visible
+          </p>
+        </div>
         <button
           type="button"
           onClick={loadOrders}
           disabled={loading}
-          className="inline-flex min-h-[3.5rem] items-center gap-2 rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card)] px-4 text-sm font-semibold text-[var(--text-primary)] transition hover:bg-[var(--bg-card-muted)] disabled:cursor-not-allowed disabled:opacity-60"
+          className="inline-flex min-h-[3rem] items-center gap-2 rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card-muted)] px-4 text-sm font-semibold text-[var(--text-primary)] transition hover:bg-[var(--color-primary-soft)] disabled:cursor-not-allowed disabled:opacity-60"
         >
           <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
           Refresh
@@ -140,51 +192,8 @@ export default function POSOrders() {
       {success ? <Toast type="success" message={success} /> : null}
       {error ? <Toast type="error" message={error} /> : null}
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <div className="rounded-[1.6rem] border border-[var(--border-color)] bg-[var(--bg-card)] p-4 shadow-[var(--shadow-card)]">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--text-secondary)]">Visible Orders</p>
-          <p className="mt-2 text-3xl font-black text-[var(--text-primary)]">{stats.total}</p>
-        </div>
-        <div className="rounded-[1.6rem] border border-[var(--border-color)] bg-[var(--bg-card)] p-4 shadow-[var(--shadow-card)]">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--text-secondary)]">In Progress</p>
-          <p className="mt-2 text-3xl font-black text-[var(--text-primary)]">{stats.pending}</p>
-        </div>
-        <div className="rounded-[1.6rem] border border-[var(--border-color)] bg-[var(--bg-card)] p-4 shadow-[var(--shadow-card)]">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--text-secondary)]">Ready Queue</p>
-          <p className="mt-2 text-3xl font-black text-[var(--text-primary)]">{stats.ready}</p>
-        </div>
-        <div className="rounded-[1.6rem] border border-[var(--border-color)] bg-[var(--bg-card)] p-4 shadow-[var(--shadow-card)]">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--text-secondary)]">Order Value</p>
-          <p className="mt-2 text-3xl font-black text-[var(--text-primary)]">{formatCurrency(stats.revenue)}</p>
-        </div>
-      </div>
-
-      <section className="rounded-[2rem] border border-[var(--border-color)] bg-[var(--bg-card)] p-4 shadow-[var(--shadow-card)] sm:p-5">
-        <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--text-secondary)]">Sources</p>
-        <div className="mt-3 flex flex-wrap gap-2">
-          {SOURCE_FILTERS.map((filter) => {
-            const Icon = filter.icon;
-            const isActive = sourceFilter === filter.id;
-            return (
-              <button
-                key={filter.id}
-                type="button"
-                onClick={() => setSourceFilter(filter.id)}
-                className={`inline-flex min-h-[3rem] items-center gap-2 rounded-2xl border px-4 text-sm font-semibold transition ${
-                  isActive
-                    ? 'border-[var(--color-primary)] bg-[var(--color-primary-soft)] text-[var(--color-primary)]'
-                    : 'border-[var(--border-color)] bg-[var(--bg-card-muted)] text-[var(--text-primary)] hover:bg-[var(--color-primary-soft)]'
-                }`}
-              >
-                <Icon className="h-4 w-4" />
-                {filter.label}
-              </button>
-            );
-          })}
-        </div>
-
-        <p className="mt-5 text-xs font-semibold uppercase tracking-[0.22em] text-[var(--text-secondary)]">Workflow</p>
-        <div className="mt-3 flex flex-wrap gap-2">
+      <section className="rounded-[1.6rem] border border-[var(--border-color)] bg-[var(--bg-card)] p-4 shadow-[var(--shadow-card)]">
+        <div className="flex flex-wrap gap-2">
           {WORKFLOW_FILTERS.map((filter) => {
             const isActive = workflowFilter === filter.id;
             return (
@@ -198,7 +207,7 @@ export default function POSOrders() {
                     : 'border-[var(--border-color)] bg-[var(--bg-card-muted)] text-[var(--text-primary)] hover:bg-[var(--color-primary-soft)]'
                 }`}
               >
-                {filter.label}
+                {filter.label} ({queueCounts[filter.id] || 0})
               </button>
             );
           })}
@@ -213,80 +222,130 @@ export default function POSOrders() {
         <section className="rounded-[2rem] border border-dashed border-[var(--border-color)] bg-[var(--bg-card)] p-8 text-center shadow-[var(--shadow-card)]">
           <p className="text-lg font-bold text-[var(--text-primary)]">No orders match this view</p>
           <p className="mt-2 text-sm text-[var(--text-secondary)]">
-            Try another source or workflow filter, or create a fresh manual online order from the billing screen.
+            Try another workflow filter or create a fresh order from the POS billing screen.
           </p>
         </section>
       ) : (
-        <div className="grid gap-4 xl:grid-cols-2">
+        <div className="space-y-3">
           {filteredOrders.map((order) => {
-            const source = order.online?.source || 'direct';
+            const source = order.online?.source || order.origin || 'pos';
             const sourceMeta = SOURCE_META[source] || SOURCE_META.direct;
             const SourceIcon = sourceMeta.icon;
+            const workflowKey = getOrderWorkflow(order);
+            const currentWorkflow = workflowKey.replace(/_/g, ' ');
+            const paymentValue = String(order.online?.paymentState || order.paymentStatus || order.paymentMethod || 'pending');
 
             return (
               <article
                 key={order.id}
-                className="rounded-[1.8rem] border border-[var(--border-color)] bg-[var(--bg-card)] p-5 shadow-[var(--shadow-card)]"
+                className="rounded-[1.5rem] border border-[var(--border-color)] bg-[var(--bg-card)] p-4 shadow-[var(--shadow-card)]"
               >
-                <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                  <div className="min-w-0">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                  <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="inline-flex items-center gap-2 rounded-full bg-[var(--bg-card-muted)] px-3 py-1 text-xs font-bold uppercase tracking-[0.14em] text-[var(--text-primary)]">
                         <SourceIcon className="h-3.5 w-3.5" />
                         {sourceMeta.label}
                       </span>
-                      <span className="rounded-full bg-amber-500/10 px-3 py-1 text-xs font-bold uppercase tracking-[0.14em] text-amber-300">
-                        {String(order.online?.workflowStatus || 'new').replace(/_/g, ' ')}
+                      <span className={`rounded-full border px-3 py-1 text-xs font-bold uppercase tracking-[0.14em] ${getStatusChipClass(workflowKey)}`}>
+                        {currentWorkflow}
                       </span>
                     </div>
-                    <h2 className="mt-3 text-xl font-black text-[var(--text-primary)]">{formatDisplayOrderNumber(order)}</h2>
-                    <p className="mt-1 text-sm text-[var(--text-secondary)]">
-                      {order.orderType === 'delivery' ? 'Delivery' : 'Takeaway'} • {order.items?.length || 0} lines • {formatCurrency(order.totalAmount || 0)}
+                    <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1">
+                      <h2 className="text-base font-black text-[var(--text-primary)]">{formatDisplayOrderNumber(order)}</h2>
+                      <span className="text-sm text-[var(--text-secondary)]">
+                        {order.orderType === 'delivery' ? 'Delivery' : order.orderType === 'takeaway' ? 'Takeaway' : `Table ${order.tableNumber || 'Walk-in'}`}
+                      </span>
+                      <span className="text-sm text-[var(--text-secondary)]">{order.items?.length || 0} items</span>
+                      <span className="text-sm font-semibold text-[var(--text-primary)]">{formatCurrency(order.totalAmount || 0)}</span>
+                    </div>
+                    <p className="mt-2 text-sm text-[var(--text-secondary)]">
+                      {order.orderType === 'dine-in'
+                        ? order.origin === 'qr'
+                          ? 'Customer placed from QR and is waiting in the service queue.'
+                          : 'Created from POS billing.'
+                        : order.online?.customerName || 'Walk-in / not added'}
                     </p>
                   </div>
 
                   <button
                     type="button"
                     onClick={() => navigate(`/pos?orderId=${order.id}`)}
-                    className="inline-flex min-h-[3rem] items-center gap-2 rounded-2xl bg-[var(--color-primary)] px-4 text-sm font-semibold text-white transition hover:opacity-95"
+                    className="inline-flex min-h-[3rem] items-center justify-center gap-2 rounded-2xl bg-[var(--color-primary)] px-4 text-sm font-semibold text-white transition hover:opacity-95 lg:min-w-[9rem]"
                   >
-                    Open In POS
+                    Open
                     <ArrowRight className="h-4 w-4" />
                   </button>
                 </div>
 
-                <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                  <div className="rounded-[1.4rem] bg-[var(--bg-card-muted)] px-4 py-3 text-sm">
-                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--text-secondary)]">Customer</p>
-                    <p className="mt-2 font-semibold text-[var(--text-primary)]">{order.online?.customerName || 'Walk-in / not added'}</p>
-                    <p className="mt-1 text-[var(--text-secondary)]">{order.online?.customerPhone || 'No phone added'}</p>
+                <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                  <div className="rounded-[1.2rem] bg-[var(--bg-card-muted)] px-3 py-2 text-sm">
+                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--text-secondary)]">Guest</p>
+                    <p className="mt-1 font-semibold text-[var(--text-primary)]">
+                      {order.orderType === 'dine-in' ? `Table ${order.tableNumber || 'Walk-in'}` : order.online?.customerName || 'Walk-in / not added'}
+                    </p>
                   </div>
-                  <div className="rounded-[1.4rem] bg-[var(--bg-card-muted)] px-4 py-3 text-sm">
-                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--text-secondary)]">Promise & Payment</p>
-                    <p className="mt-2 font-semibold text-[var(--text-primary)]">{formatPromise(order.online?.promisedAt)}</p>
-                    <p className="mt-1 text-[var(--text-secondary)]">Channel payment: {order.online?.paymentState || order.paymentStatus || 'pending'}</p>
+                  <div className="rounded-[1.2rem] bg-[var(--bg-card-muted)] px-3 py-2 text-sm">
+                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--text-secondary)]">
+                      {order.orderType === 'dine-in' ? 'Status' : 'Promise'}
+                    </p>
+                    {order.orderType === 'dine-in' ? (
+                      <div className="mt-2">
+                        <span className={`inline-flex rounded-full border px-3 py-1 text-xs font-bold uppercase tracking-[0.14em] ${getStatusChipClass(workflowKey)}`}>
+                          {currentWorkflow}
+                        </span>
+                      </div>
+                    ) : (
+                      <p className="mt-1 font-semibold text-[var(--text-primary)]">{formatPromise(order.online?.promisedAt)}</p>
+                    )}
+                  </div>
+                  <div className="rounded-[1.2rem] bg-[var(--bg-card-muted)] px-3 py-2 text-sm">
+                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--text-secondary)]">Payment</p>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      <span className={`inline-flex rounded-full border px-3 py-1 text-xs font-bold uppercase tracking-[0.14em] ${getStatusChipClass(paymentValue)}`}>
+                        {paymentValue}
+                      </span>
+                    </div>
                   </div>
                 </div>
 
                 {order.online?.customerAddress ? (
-                  <div className="mt-4 rounded-[1.4rem] bg-[var(--bg-card-muted)] px-4 py-3 text-sm text-[var(--text-secondary)]">
+                  <div className="mt-3 rounded-[1.2rem] bg-[var(--bg-card-muted)] px-3 py-2 text-sm text-[var(--text-secondary)]">
                     {order.online.customerAddress}
                   </div>
                 ) : null}
 
-                <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-                  {WORKFLOW_ACTIONS.map((action) => (
+                {isWaiterApprovalOrder(order) ? (
+                  <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <p className="text-sm font-medium text-[var(--text-secondary)]">
+                      Open this QR bill and use <span className="font-bold text-[var(--text-primary)]">Approve & Send to Kitchen</span>.
+                    </p>
                     <button
-                      key={action.id}
                       type="button"
-                      onClick={() => handleWorkflowUpdate(order.id, action.id)}
-                      disabled={updatingOrderId === order.id || order.online?.workflowStatus === action.id}
-                      className="min-h-[3rem] rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card-muted)] px-3 text-sm font-semibold text-[var(--text-primary)] transition hover:bg-[var(--color-primary-soft)] disabled:cursor-not-allowed disabled:opacity-50"
+                      onClick={() => navigate(`/pos?tableId=${order.tableId}&orderId=${order.id}`)}
+                      className="inline-flex min-h-[3rem] items-center justify-center gap-2 rounded-2xl bg-[var(--color-primary)] px-4 text-sm font-semibold text-white transition hover:opacity-95"
                     >
-                      {updatingOrderId === order.id ? 'Updating...' : action.label}
+                      Approve Order
+                      <ArrowRight className="h-4 w-4" />
                     </button>
-                  ))}
-                </div>
+                  </div>
+                ) : null}
+
+                {isInboxWorkflowOrder(order) ? (
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                    {WORKFLOW_ACTIONS.map((action) => (
+                      <button
+                        key={action.id}
+                        type="button"
+                        onClick={() => handleWorkflowUpdate(order, action.id)}
+                        disabled={updatingOrderId === order.id || order.online?.workflowStatus === action.id}
+                        className="min-h-[3rem] rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card-muted)] px-3 text-sm font-semibold text-[var(--text-primary)] transition hover:bg-[var(--color-primary-soft)] disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {updatingOrderId === order.id ? 'Updating...' : action.label}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
               </article>
             );
           })}

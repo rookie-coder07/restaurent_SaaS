@@ -328,6 +328,37 @@ export default function CustomerMenu() {
       import.meta.env.NEXT_PUBLIC_API_URL ||
       (import.meta.env.PROD ? PRODUCTION_API_BASE_URL : DEVELOPMENT_API_BASE_URL);
     const apiUrl = `${apiBaseUrl}/v1/customer/menu/items?table=${tableNumber || ''}${tableId ? `&tableId=${tableId}` : ''}`;
+    const isBusyTableError = /currently busy|running bill|blocked until that bill is cleared/i.test(apiError);
+
+    if (isBusyTableError) {
+      return (
+        <div className="flex min-h-screen items-center justify-center bg-[var(--bg-main)] p-6">
+          <div className="glass-panel max-w-md rounded-3xl p-6 text-center">
+            <AlertCircle className="mx-auto mb-4 h-12 w-12 text-amber-400" />
+            <h1 className="mb-2 text-2xl font-bold text-[var(--text-primary)]">Table Is Busy</h1>
+            <p className="mb-4 text-[var(--text-secondary)]">{apiError}</p>
+            <div className="flex flex-wrap justify-center gap-3">
+              <button
+                onClick={() => {
+                  refetch().catch(() => {
+                    setMenuRetryCount((current) => current + 1);
+                  });
+                }}
+                className="rounded-xl bg-[var(--color-primary)] px-6 py-2 text-white transition hover:brightness-110"
+              >
+                Check Again
+              </button>
+              <button
+                onClick={() => navigate('/')}
+                className="rounded-xl border border-[var(--border-color)] bg-[var(--bg-card)] px-6 py-2 text-[var(--text-primary)] transition hover:bg-[var(--bg-card-muted)]"
+              >
+                Go Back
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
 
     return (
       <div className="flex min-h-screen items-center justify-center bg-[var(--bg-main)] p-6">

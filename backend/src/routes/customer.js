@@ -4,6 +4,7 @@ import { validateParams } from '../middleware/validation.js';
 import Joi from 'joi';
 import MenuService from '../services/menuService.js';
 import TableService from '../services/tableService.js';
+import OrderService from '../services/orderService.js';
 import * as orderController from '../controllers/orderController.js';
 import supabase from '../config/supabase.js';
 
@@ -15,6 +16,18 @@ const tableSchema = Joi.object({
 
 function normalizeTableLabel(value) {
   return String(value || '').trim();
+}
+
+async function getBusyTableOrder(restaurantId, tableId) {
+  if (!restaurantId || !tableId) {
+    return null;
+  }
+
+  try {
+    return await OrderService.getActiveOrderByTable(restaurantId, tableId);
+  } catch {
+    return null;
+  }
 }
 
 // Get public menu items (no auth required)
@@ -61,6 +74,21 @@ router.get('/menu/items', async (req, res) => {
 
     const restaurantId = tableData.restaurant_id;
     console.log(`✅ Found restaurant: ${restaurantId} for table ${tableData.table_number}`);
+
+    const activeOrder = await getBusyTableOrder(restaurantId, tableData.id);
+    if (activeOrder) {
+      return res.status(409).json({
+        statusCode: 409,
+        success: false,
+        message: `Table ${tableData.table_number} is currently busy. Please ask the waiter for the running bill.`,
+        data: {
+          tableId: tableData.id,
+          tableNumber: tableData.table_number,
+          orderId: activeOrder.id,
+          orderStatus: activeOrder.status,
+        },
+      });
+    }
 
     console.log(`📦 Fetching categories and menu items for restaurant ${restaurantId}...`);
     const [{ data: restaurantData }, categories, items] = await Promise.all([
@@ -153,6 +181,20 @@ router.post('/orders', optionalAuth, async (req, res, next) => {
 
       req.restaurantId = table.restaurant_id;
       console.log(`✅ Using table ID ${req.body.tableId} for restaurant ${table.restaurant_id}`);
+
+      const activeOrder = await getBusyTableOrder(table.restaurant_id, table.id);
+      if (activeOrder) {
+        return res.status(409).json({
+          statusCode: 409,
+          success: false,
+          message: 'This table already has a running bill. New QR orders are blocked until that bill is cleared.',
+          data: {
+            tableId: table.id,
+            orderId: activeOrder.id,
+            orderStatus: activeOrder.status,
+          },
+        });
+      }
     }
 
     // If tableNumber is provided but not tableId, resolve it
@@ -175,6 +217,21 @@ router.post('/orders', optionalAuth, async (req, res, next) => {
       req.body.tableId = table.id;
       req.restaurantId = table.restaurant_id;
       console.log(`✅ Resolved Table #${req.body.tableNumber} → ID: ${table.id}`);
+
+      const activeOrder = await getBusyTableOrder(table.restaurant_id, table.id);
+      if (activeOrder) {
+        return res.status(409).json({
+          statusCode: 409,
+          success: false,
+          message: `Table ${req.body.tableNumber} already has a running bill. New QR orders are blocked until that bill is cleared.`,
+          data: {
+            tableId: table.id,
+            tableNumber: req.body.tableNumber,
+            orderId: activeOrder.id,
+            orderStatus: activeOrder.status,
+          },
+        });
+      }
     }
 
     // Call the order controller
