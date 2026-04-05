@@ -108,4 +108,104 @@ describe('Backend deployment smoke', () => {
     expect(response.body.success).toBe(false);
     expect(response.body.message).toBe('Cannot access other restaurants data');
   });
+
+  test('POST /api/v1/inventory/items blocks manager write access', async () => {
+    const token = jwt.sign(
+      {
+        userId: 'manager-1',
+        restaurantId: 'rest-1',
+        email: 'manager@example.com',
+        role: 'manager',
+      },
+      process.env.JWT_SECRET
+    );
+
+    const response = await request(app)
+      .post('/api/v1/inventory/items')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        name: 'Rice',
+        quantity: 10,
+        unit: 'kg',
+        threshold: 2,
+      });
+
+    expect(response.status).toBe(403);
+    expect(response.body.success).toBe(false);
+  });
+
+  test('POST /api/v1/inventory/items validates owner payloads before any write happens', async () => {
+    const token = jwt.sign(
+      {
+        userId: 'owner-1',
+        restaurantId: 'rest-1',
+        email: 'owner@example.com',
+        role: 'owner',
+      },
+      process.env.JWT_SECRET
+    );
+
+    const response = await request(app)
+      .post('/api/v1/inventory/items')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        name: '',
+        quantity: -1,
+        unit: 'bad-unit',
+        threshold: -1,
+      });
+
+    expect(response.status).toBe(400);
+    expect(response.body.success).toBe(false);
+    expect(response.body.message).toBe('Validation error');
+  });
+
+  test('POST /api/v1/inventory/items/:itemId/add-stock validates owner payloads locally', async () => {
+    const token = jwt.sign(
+      {
+        userId: 'owner-1',
+        restaurantId: 'rest-1',
+        email: 'owner@example.com',
+        role: 'owner',
+      },
+      process.env.JWT_SECRET
+    );
+
+    const response = await request(app)
+      .post('/api/v1/inventory/items/item-1/add-stock')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        quantity: 0,
+        reason: 'restock',
+      });
+
+    expect(response.status).toBe(400);
+    expect(response.body.success).toBe(false);
+    expect(response.body.message).toBe('Validation error');
+  });
+
+  test('POST /api/v1/inventory/items/:itemId/adjust validates stock adjustment actions locally', async () => {
+    const token = jwt.sign(
+      {
+        userId: 'owner-1',
+        restaurantId: 'rest-1',
+        email: 'owner@example.com',
+        role: 'owner',
+      },
+      process.env.JWT_SECRET
+    );
+
+    const response = await request(app)
+      .post('/api/v1/inventory/items/item-1/adjust')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        action: 'multiply',
+        quantity: 5,
+        reason: 'test',
+      });
+
+    expect(response.status).toBe(400);
+    expect(response.body.success).toBe(false);
+    expect(response.body.message).toBe('Validation error');
+  });
 });
