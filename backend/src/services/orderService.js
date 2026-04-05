@@ -171,6 +171,34 @@ export class OrderService {
       paymentMethod: order.payment_method,
       paymentStatus: order.payment_status,
     });
+    const hasPersistedBilling =
+      Boolean(billing.invoiceNumber) ||
+      Boolean(billing.invoiceDate) ||
+      billing.grandTotal > 0 ||
+      billing.subtotal > 0;
+    const isSettledOrder = order.payment_status === 'paid' || normalizedStatus === 'completed';
+    const subtotalFromItems = this.roundCurrency(
+      (order.order_items || []).reduce(
+        (sum, item) => sum + Number(item.quantity || 0) * Number(item.unit_price || 0),
+        0
+      )
+    );
+    const effectiveBilling = hasPersistedBilling || !isSettledOrder
+      ? billing
+      : this.normalizeBillingMeta(
+          {
+            invoiceNumber: this.generateInvoiceNumber(order),
+            invoiceDate: this.normalizeTimestamp(order.updated_at || order.created_at || new Date().toISOString()),
+            subtotal: subtotalFromItems,
+            grandTotal: Number(order.total_amount || 0),
+            paidAmount: Number(order.total_amount || 0),
+            paymentMode: order.payment_method || '',
+          },
+          {
+            paymentMethod: order.payment_method,
+            paymentStatus: order.payment_status,
+          }
+        );
     return {
       id: order.id,
       restaurantId: order.restaurant_id,
@@ -181,7 +209,7 @@ export class OrderService {
       total: Number(order.total_amount || 0),
       paymentMethod: order.payment_method,
       paymentStatus: order.payment_status || 'unpaid',
-      billing,
+      billing: effectiveBilling,
       notes: publicNotes,
       createdAt: this.normalizeTimestamp(order.created_at),
       updatedAt: this.normalizeTimestamp(order.updated_at),

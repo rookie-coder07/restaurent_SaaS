@@ -6,7 +6,7 @@ test.describe('Manager Portal Smoke', () => {
     await mockApi(page, async ({ url, method }) => {
       const { pathname } = url;
 
-      if (pathname.endsWith('/v1/auth/login') && method === 'POST') {
+      if ((pathname.endsWith('/v1/auth/login') || pathname.endsWith('/v1/auth/staff/login')) && method === 'POST') {
         return jsonSuccess({
           accessToken: createTestJwt({ role: 'manager', restaurantId: 'rest-1' }),
           refreshToken: createTestJwt({ role: 'manager', restaurantId: 'rest-1', type: 'refresh' }),
@@ -123,8 +123,7 @@ test.describe('Manager Portal Smoke', () => {
       return jsonSuccess({});
     });
 
-    await page.goto('/admin/login');
-    await page.getByRole('button', { name: /Manager/i }).click();
+    await page.goto('/manager/login');
     await page.getByLabel(/Email/i).fill('manager@restaurant.com');
     await page.getByLabel(/Password/i).fill('Test123@456');
     await page.getByRole('button', { name: /Open Manager Portal/i }).click();

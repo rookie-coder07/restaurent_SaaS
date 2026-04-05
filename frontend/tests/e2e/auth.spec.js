@@ -24,12 +24,26 @@ test.describe('Portal Access Smoke', () => {
     await expect(page).toHaveURL(/\/pos\/login$/);
 
     await page.goto('/staff/login');
-    await page.getByRole('link', { name: /KOT Login/i }).click();
-    await expect(page).toHaveURL(/\/kot\/login$/);
+    await expect(page.getByRole('link', { name: /POS Login/i })).toBeVisible();
+    await expect(page.getByRole('link', { name: /KOT Login/i })).toHaveCount(0);
 
-    await page.reload();
-    await expect(page).toHaveURL(/\/kot\/login$/);
+    await page.goto('/kot/login');
+    await expect(page).toHaveURL(/\/staff\/login$/);
 
     expect(consoleMessages.some((message) => message.includes('Throttling navigation'))).toBeFalsy();
+  });
+
+  test('protected routes redirect unauthenticated users to the correct login entry', async ({ page }) => {
+    await page.goto('/admin');
+    await expect(page).toHaveURL(/\/admin\/login$/);
+
+    await page.goto('/manager');
+    await expect(page).toHaveURL(/\/admin\/login$/);
+
+    await page.goto('/pos');
+    await expect(page).toHaveURL(/\/pos\/login$/);
+
+    await page.goto('/kot');
+    await expect(page).toHaveURL(/\/staff\/login$/);
   });
 });

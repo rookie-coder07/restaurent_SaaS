@@ -1,24 +1,20 @@
 import QRCode from 'qrcode';
-import { buildQrMenuUrl, getFrontendBaseUrl } from './frontendUrl';
+import { buildQrMenuUrl } from './frontendUrl';
+import { printHtmlDocument } from './printDocument';
 
 /**
  * Generate a QR code for a single table
  * @param {Object} table - Table object with tableNumber
- * @param {string} restaurantName - Restaurant name to display
  * @returns {Promise<string>} - Base64 encoded image data
  */
 export const generateTableQRCode = async (table) => {
   try {
-    const baseUrl = getFrontendBaseUrl();
     const qrValue = buildQrMenuUrl({
       tableNumber: table.tableNumber,
       tableId: table.id,
     });
-    console.log('📱 Generating QR for table', table.tableNumber, 'URL:', qrValue);
-    console.log('📍 QR pointing to:', baseUrl);
-    console.log('📍 Using VITE_FRONTEND_URL:', import.meta.env.VITE_FRONTEND_URL || 'Not set');
 
-    const imageData = await QRCode.toDataURL(qrValue, {
+    return await QRCode.toDataURL(qrValue, {
       errorCorrectionLevel: 'H',
       type: 'image/png',
       quality: 0.95,
@@ -29,8 +25,6 @@ export const generateTableQRCode = async (table) => {
         light: '#FFFFFF',
       },
     });
-
-    return imageData;
   } catch (error) {
     console.error(`Error generating QR code for table ${table.tableNumber}:`, error);
     throw error;
@@ -38,15 +32,12 @@ export const generateTableQRCode = async (table) => {
 };
 
 /**
- * Generate all QR codes as a PDF or print document
+ * Generate all QR codes as a print document
  * @param {Array} tables - Array of table objects
  * @param {string} restaurantName - Restaurant name
  */
 export const generateBulkQRCodes = async (tables, restaurantName = 'Restaurant') => {
   try {
-    const printWindow = window.open('', '_blank');
-
-    // Generate all QR codes
     const qrCodes = await Promise.all(
       tables.map(async (table) => ({
         tableNumber: table.tableNumber,
@@ -56,7 +47,6 @@ export const generateBulkQRCodes = async (tables, restaurantName = 'Restaurant')
       }))
     );
 
-    // HTML template for printing
     const htmlContent = `
       <!DOCTYPE html>
       <html>
@@ -188,7 +178,7 @@ export const generateBulkQRCodes = async (tables, restaurantName = 'Restaurant')
                 </div>
                 <img src="${qr.qrImage}" alt="QR Code for Table ${qr.tableNumber}" />
                 <div class="instructions">
-                  <p>📲 Scan to access menu</p>
+                  <p>Scan to access menu</p>
                 </div>
               </div>
             `
@@ -201,24 +191,20 @@ export const generateBulkQRCodes = async (tables, restaurantName = 'Restaurant')
           </div>
         </div>
 
-        <button 
-          onclick="window.print()" 
-          style="position: fixed; top: 20px; right: 20px; padding: 10px 20px; background: #2563eb; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; z-index: 1000; no-print: true;"
+        <button
+          onclick="window.print()"
+          style="position: fixed; top: 20px; right: 20px; padding: 10px 20px; background: #2563eb; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; z-index: 1000;"
           class="no-print"
         >
-          🖨️ Print
+          Print
         </button>
       </body>
       </html>
     `;
 
-    printWindow.document.write(htmlContent);
-    printWindow.document.close();
-
-    // Auto-print after a brief delay
-    setTimeout(() => {
-      printWindow.print();
-    }, 500);
+    printHtmlDocument(htmlContent, {
+      title: `${restaurantName} - Table QR Codes`,
+    });
   } catch (error) {
     console.error('Error generating bulk QR codes:', error);
     throw error;

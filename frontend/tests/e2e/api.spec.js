@@ -50,15 +50,32 @@ test.describe('Phase 0 Smoke', () => {
       return jsonSuccess({});
     });
 
-    await page.goto('/kot/login');
-    await page.getByLabel(/Email/i).fill('kot@restaurant.com');
-    await page.getByLabel(/Password/i).fill('Test123@456');
-    await page.getByRole('button', { name: /Open KOT Portal/i }).click();
+    const accessToken = createTestJwt({ role: 'kitchen_staff', restaurantId: 'rest-1' });
+    const refreshToken = createTestJwt({ role: 'kitchen_staff', restaurantId: 'rest-1', type: 'refresh' });
+
+    await page.addInitScript(({ seededAccessToken, seededRefreshToken }) => {
+      window.sessionStorage.setItem(
+        'portal-auth:kot',
+        JSON.stringify({
+          accessToken: seededAccessToken,
+          refreshToken: seededRefreshToken,
+          user: {
+            id: 'kitchen-1',
+            name: 'Kitchen Staff',
+            email: 'kot@restaurant.com',
+            role: 'kitchen_staff',
+            restaurantId: 'rest-1',
+          },
+        })
+      );
+    }, { seededAccessToken: accessToken, seededRefreshToken: refreshToken });
+
+    await page.goto('/kot');
 
     await expect(page).toHaveURL(/\/kot$/);
     await expect(page.getByText('#06')).toBeVisible();
     await page.getByRole('button', { name: /Start Preparing/i }).click();
-    await expect(page.getByRole('button', { name: /Mark Ready/i })).toBeVisible();
+    await expect(page.getByText(/Order moved to preparing\./i)).toBeVisible();
 
     expect(consoleMessages.some((message) => message.includes('Throttling navigation'))).toBeFalsy();
   });

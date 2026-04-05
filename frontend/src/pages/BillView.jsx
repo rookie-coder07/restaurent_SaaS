@@ -37,10 +37,6 @@ export default function BillView() {
   );
 
   useEffect(() => {
-    console.log('BillView order', order);
-  }, [order]);
-
-  useEffect(() => {
     if (invoiceOverride || !orderId) {
       setLoading(false);
       return;

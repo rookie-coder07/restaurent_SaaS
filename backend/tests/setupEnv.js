@@ -1,0 +1,10 @@
+process.env.NODE_ENV = 'test';
+process.env.API_VERSION = 'v1';
+process.env.JWT_SECRET = 'test-jwt-secret';
+process.env.REFRESH_TOKEN_SECRET = 'test-refresh-secret';
+process.env.SUPABASE_URL = 'https://example.supabase.co';
+process.env.SUPABASE_ANON_KEY = 'test-anon-key';
+process.env.CLOUDINARY_CLOUD_NAME = 'test-cloud';
+process.env.CLOUDINARY_API_KEY = 'test-api-key';
+process.env.CLOUDINARY_API_SECRET = 'test-api-secret';
+process.env.CORS_ORIGIN = 'https://restaurentsaas-seven.vercel.app';

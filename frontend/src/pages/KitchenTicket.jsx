@@ -96,10 +96,6 @@ export default function KitchenTicket() {
     [initialTicketId, location.state, order]
   );
 
-  useEffect(() => {
-    console.log('KitchenTicket order', order);
-  }, [order]);
-
   const handlePrint = () => {
     if (!ticket) {
       return;

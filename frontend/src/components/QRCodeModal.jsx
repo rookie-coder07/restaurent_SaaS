@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { X, Download, Printer } from 'lucide-react';
 import QRCode from 'qrcode';
 import { buildQrMenuUrl } from '../utils/frontendUrl';
+import { printHtmlDocument } from '../utils/printDocument';
 import Modal from './common/Modal';
 
 export default function QRCodeModal({ table, restaurantName, onClose }) {
@@ -36,7 +37,6 @@ export default function QRCodeModal({ table, restaurantName, onClose }) {
 
         setLoading(false);
       } catch (err) {
-        console.error('Error generating QR code:', err);
         setError('Failed to generate QR code');
         setLoading(false);
       }
@@ -59,12 +59,8 @@ export default function QRCodeModal({ table, restaurantName, onClose }) {
   const handlePrint = () => {
     if (!canvasRef.current || loading || error) return;
 
-    const printWindow = window.open('', '_blank');
-    if (!printWindow) return;
-
     const qrImage = canvasRef.current.toDataURL('image/png');
-
-    printWindow.document.write(`
+    printHtmlDocument(`
       <!DOCTYPE html>
       <html>
       <head>
@@ -118,12 +114,9 @@ export default function QRCodeModal({ table, restaurantName, onClose }) {
         </div>
       </body>
       </html>
-    `);
-
-    printWindow.document.close();
-    setTimeout(() => {
-      printWindow.print();
-    }, 250);
+    `, {
+      title: `Table ${table.tableNumber} QR Code`,
+    });
   };
 
   const qrLink = buildQrMenuUrl({

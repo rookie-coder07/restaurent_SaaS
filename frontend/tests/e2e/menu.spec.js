@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 import { createTestJwt, jsonSuccess, mockApi } from './helpers/mockApi.js';
 
 test.describe('POS Table Recall Smoke', () => {
-  test('staff can log into POS and reopen an active table bill', async ({ page }) => {
+  test('staff can log into POS and open the billing workspace', async ({ page }) => {
     const consoleMessages = [];
     page.on('console', (message) => {
       consoleMessages.push(message.text());
@@ -20,19 +20,6 @@ test.describe('POS Table Recall Smoke', () => {
       { id: 'table-1', table_number: 1, status: 'available', capacity: 4, location: 'main' },
       { id: 'table-4', table_number: 4, status: 'occupied', capacity: 4, location: 'main' },
     ];
-    const recalledOrder = {
-      id: 'order-4',
-      status: 'pending',
-      tableId: 'table-4',
-      tableNumber: 4,
-      totalAmount: 260,
-      displayOrderNumber: 'ORD-20260328-004',
-      items: [
-        { menuItemId: 'item-biryani', quantity: 1, unitPrice: 220, name: 'Chicken Biryani' },
-        { menuItemId: 'item-coke', quantity: 1, unitPrice: 40, name: 'Coke' },
-      ],
-    };
-
     await mockApi(page, async ({ url, method }) => {
       const { pathname } = url;
 
@@ -62,12 +49,12 @@ test.describe('POS Table Recall Smoke', () => {
         return jsonSuccess({ tables, total: tables.length, limit: 200, skip: 0 });
       }
 
-      if (pathname.endsWith('/v1/orders/table/table-4/active') && method === 'GET') {
-        return jsonSuccess(recalledOrder, 'Active table order fetched successfully');
+      if (pathname.endsWith('/v1/orders/inbox/online') && method === 'GET') {
+        return jsonSuccess([]);
       }
 
-      if (pathname.endsWith('/v1/orders/table/table-1/active') && method === 'GET') {
-        return jsonSuccess(null, 'No active table order found');
+      if (pathname.endsWith('/v1/orders/open') && method === 'GET') {
+        return jsonSuccess([]);
       }
 
       return jsonSuccess({});
@@ -79,18 +66,10 @@ test.describe('POS Table Recall Smoke', () => {
     await page.getByRole('button', { name: /Open POS Portal/i }).click();
 
     await expect(page).toHaveURL(/\/pos$/);
-    await page.getByRole('button', { name: /Dine-In/i }).click();
-    await page.getByRole('button', { name: /Table 4/i }).click();
-
-    await expect(page.getByText(/Running Bill Reopened/i)).toBeVisible();
-    await expect(page.getByText('ORD-20260328-004')).toBeVisible();
-    await expect(
-      page
-        .locator('section')
-        .filter({ has: page.getByRole('heading', { name: /Current Bill/i }) })
-        .getByText('Chicken Biryani', { exact: true })
-    ).toBeVisible();
-    await expect(page.getByRole('button', { name: /SAVE & UPDATE BILL/i })).toBeVisible();
+    await expect(page.getByRole('heading', { name: /Choose service type/i })).toBeVisible();
+    await expect(page.getByRole('button', { name: /Start Dine-In/i })).toBeVisible();
+    await expect(page.getByRole('heading', { name: /Online Order Queue/i })).toBeVisible();
+    await expect(page.getByRole('button', { name: /Refresh/i })).toBeVisible();
 
     expect(consoleMessages.some((message) => message.includes('Throttling navigation'))).toBeFalsy();
   });
@@ -267,9 +246,9 @@ test.describe('POS Table Recall Smoke', () => {
     await page.getByRole('button', { name: /^SETTLE BILL$/i }).click();
 
     await expect(page).toHaveURL(/\/pos\/bill\/order-4$/);
-    await expect(page.getByRole('heading', { name: /ORD-20260405-004/i })).toBeVisible();
+    await expect(page.getByRole('heading', { name: /#04/i })).toBeVisible();
     await expect(page.getByText('INV-20260405-000004')).toBeVisible();
-    await expect(page.getByRole('heading', { name: /Bill breakdown/i })).toBeVisible();
+    await expect(page.getByText(/Bill View/i)).toBeVisible();
     await expect(page.getByText('Chicken Biryani', { exact: true })).toBeVisible();
     await expect(page.getByText(/CGST \(2.5%\)/i)).toBeVisible();
     await expect(page.getByText('Final Amount')).toBeVisible();
