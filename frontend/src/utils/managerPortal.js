@@ -1,4 +1,4 @@
-import { parseServerDate } from './formatters';
+import { compareTableLabels, parseServerDate } from './formatters';
 
 export const ORDER_STATUS_STEPS = ['pending', 'preparing', 'ready'];
 export const ACTIVE_ORDER_STATUSES = new Set(['awaiting_waiter_approval', 'pending', 'preparing', 'ready', 'served']);
@@ -7,16 +7,24 @@ export const DISCOUNT_LIMIT_PERCENT = 15;
 export const MANAGER_DISCOUNT_LIMIT = 15;
 
 export function getOrderSourceLabel(order) {
-  if (order?.online?.workflowStatus || order?.source === 'qr' || order?.orderType === 'qr') {
-    return 'QR';
+  if (order?.origin === 'qr' || order?.source === 'qr' || order?.orderType === 'qr') {
+    return 'QR Order';
+  }
+
+  if (order?.origin === 'pos') {
+    return 'POS Order';
+  }
+
+  if (order?.online?.workflowStatus) {
+    return 'Online Order';
   }
 
   if (order?.source === 'waiter' || order?.orderType === 'dine-in') {
-    return 'Waiter';
+    return 'POS Order';
   }
 
   if (order?.source === 'pos' || order?.paymentMethod) {
-    return 'POS';
+    return 'POS Order';
   }
 
   return 'Service';
@@ -47,22 +55,131 @@ export function isSettled(order) {
   return order?.status === 'completed' || String(order?.paymentStatus).toLowerCase() === 'paid';
 }
 
-export function getTableActivity(table, openBills = [], tableAssignments = {}, tableClosures = {}) {
-  const activeOrders = openBills.filter((order) => order.tableId === table.id && ACTIVE_ORDER_STATUSES.has(order.status));
+function buildMergeGroups(allTables = [], tableMerges = []) {
+  const parent = new Map();
+  const createdAtList = [...(tableMerges || [])].sort(
+    (left, right) => new Date(left?.createdAt || 0) - new Date(right?.createdAt || 0)
+  );
+
+  const ensure = (tableId) => {
+    if (!tableId) {
+      return;
+    }
+
+    if (!parent.has(tableId)) {
+      parent.set(tableId, tableId);
+    }
+  };
+
+  const find = (tableId) => {
+    ensure(tableId);
+
+    let current = parent.get(tableId);
+    while (current !== parent.get(current)) {
+      current = parent.get(current);
+    }
+
+    let node = tableId;
+    while (node !== current) {
+      const next = parent.get(node);
+      parent.set(node, current);
+      node = next;
+    }
+
+    return current;
+  };
+
+  const union = (primaryTableId, secondaryTableId) => {
+    const primaryRoot = find(primaryTableId);
+    const secondaryRoot = find(secondaryTableId);
+
+    if (primaryRoot === secondaryRoot) {
+      return;
+    }
+
+    parent.set(secondaryRoot, primaryRoot);
+  };
+
+  (allTables || []).forEach((table) => ensure(table.id));
+
+  createdAtList.forEach((merge) => {
+    const primaryTableId = merge?.primaryTableId;
+    const secondaryTableIds = merge?.secondaryTableIds || [];
+
+    ensure(primaryTableId);
+    secondaryTableIds.forEach((tableId) => union(primaryTableId, tableId));
+  });
+
+  const groups = new Map();
+  (allTables || []).forEach((table) => {
+    const rootId = find(table.id);
+    const current = groups.get(rootId) || [];
+    current.push(table.id);
+    groups.set(rootId, current);
+  });
+
+  return { find, groups };
+}
+
+function buildMergedTableMeta(table, allTables = [], tableMerges = []) {
+  const tableLookup = new Map((allTables || []).map((entry) => [entry.id, entry]));
+  const { find, groups } = buildMergeGroups(allTables, tableMerges);
+  const rootId = find(table.id);
+  const mergedTableIds = groups.get(rootId) || [table.id];
+  const canonicalTable = tableLookup.get(rootId) || table;
+
+  const mergedTableNumbers = mergedTableIds
+    .map((tableId) => tableLookup.get(tableId)?.tableNumber)
+    .filter((value) => value !== undefined && value !== null)
+    .sort((left, right) => compareTableLabels(left, right));
+
+  const mergedDisplayName = mergedTableNumbers.length > 1
+    ? `Table ${mergedTableNumbers.join(' + ')}`
+    : `Table ${canonicalTable.tableNumber}`;
+
+  return {
+    isMergedPrimary: mergedTableIds.length > 1 && canonicalTable.id === table.id,
+    isMergedSecondary: canonicalTable.id !== table.id,
+    mergedIntoTableId: canonicalTable.id === table.id ? '' : canonicalTable.id,
+    mergedTableIds,
+    mergedTableNumbers,
+    mergedDisplayName,
+  };
+}
+
+export function getTableActivity(
+  table,
+  openBills = [],
+  tableAssignments = {},
+  tableClosures = {},
+  tableTransfers = [],
+  tableMerges = [],
+  allTables = []
+) {
+  const activeOrders = openBills.filter(
+    (order) =>
+      order.tableId === table.id &&
+      ACTIVE_ORDER_STATUSES.has(order.status)
+  );
   const closure = tableClosures[table.id];
   const assignedWaiterId = tableAssignments[table.id] || '';
+  const isClosed = table.status === 'closed' || Boolean(closure?.closed);
+  const mergedMeta = buildMergedTableMeta(table, allTables, tableMerges);
 
   return {
     ...table,
     activeOrders,
     assignedWaiterId,
-    isClosed: Boolean(closure?.closed),
+    isClosed,
     closureNote: closure?.note || '',
+    ...mergedMeta,
     effectiveStatus: closure?.closed
       ? 'closed'
       : activeOrders.length > 0
         ? 'busy'
-        : table.status === 'reserved' || table.reservedBy
+        : table.status === 'closed'
+          ? 'closed'
+          : table.status === 'reserved' || table.reservedBy
           ? 'reserved'
           : 'open',
   };

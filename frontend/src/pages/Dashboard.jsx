@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useApi } from '../hooks/useApi';
+import useAutoRefresh from '../hooks/useAutoRefresh';
 import { analyticsAPI, restaurantAPI, orderAPI, tableAPI, inventoryAPI } from '../services/apiEndpoints';
 import { formatCurrency, formatDate, formatDisplayOrderNumber } from '../utils/formatters';
 import { useManagerStore } from '../context/managerStore';
@@ -66,13 +67,13 @@ function DashboardSection({
 }
 
 export default function Dashboard() {
-  const { data: profile, loading } = useApi(restaurantAPI.getProfile);
-  const { data: ordersData = {} } = useApi(() => orderAPI.getOrders({ limit: 150 }));
-  const { data: staffData = {} } = useApi(() => restaurantAPI.getStaff({ limit: 100, skip: 0, isActive: true }));
-  const { data: tablesData = {} } = useApi(() => tableAPI.getTables({}));
-  const { data: inventorySummary = {} } = useApi(inventoryAPI.getSummary);
-  const { data: latestEodSummary } = useApi(() => analyticsAPI.getLatestEodSummary({ ensure: true }));
-  const { data: loyaltySummary } = useApi(analyticsAPI.getLoyaltySummary);
+  const { data: profile, loading, refetch: refetchProfile } = useApi(restaurantAPI.getProfile);
+  const { data: ordersData = {}, refetch: refetchOrders } = useApi(() => orderAPI.getOrders({ limit: 150 }));
+  const { data: staffData = {}, refetch: refetchStaff } = useApi(() => restaurantAPI.getStaff({ limit: 100, skip: 0, isActive: true }));
+  const { data: tablesData = {}, refetch: refetchTables } = useApi(() => tableAPI.getTables({}));
+  const { data: inventorySummary = {}, refetch: refetchInventory } = useApi(inventoryAPI.getSummary);
+  const { data: latestEodSummary, refetch: refetchEod } = useApi(() => analyticsAPI.getLatestEodSummary({ ensure: true }));
+  const { data: loyaltySummary, refetch: refetchLoyalty } = useApi(analyticsAPI.getLoyaltySummary);
   const tableClosures = useManagerStore((state) => state.tableClosures);
   const tableTransfers = useManagerStore((state) => state.tableTransfers);
   const tableMerges = useManagerStore((state) => state.tableMerges);
@@ -142,7 +143,6 @@ export default function Dashboard() {
       waiterActivity,
     ]
   );
-  const recentManagerActivity = activityLog.filter((entry) => entry.category === 'manager').length;
   const [collapsedSections, setCollapsedSections] = useState({
     activityLog: false,
     notifications: false,
@@ -151,6 +151,20 @@ export default function Dashboard() {
     staffMonitor: true,
   });
   const [showEodSummary, setShowEodSummary] = useState(false);
+
+  useAutoRefresh(
+    () =>
+      Promise.allSettled([
+        refetchProfile(),
+        refetchOrders(),
+        refetchStaff(),
+        refetchTables(),
+        refetchInventory(),
+        refetchEod(),
+        refetchLoyalty(),
+      ]),
+    12000
+  );
 
   const toggleSection = (sectionKey) => {
     setCollapsedSections((current) => ({
@@ -196,20 +210,7 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="space-y-4">
-      <Card className="overflow-hidden">
-        <div className="absolute inset-y-0 right-0 w-40 bg-gradient-to-l from-cyan-400/10 to-transparent" />
-        <div className="relative mb-1 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <div className="min-w-0">
-            <p className="text-xs font-semibold uppercase tracking-[0.28em] text-[var(--text-secondary)]">Dashboard</p>
-            <h2 className="mt-2 text-lg font-bold text-[var(--text-primary)] md:text-2xl">Restaurant Overview</h2>
-            <p className="mt-1 text-xs text-[var(--text-secondary)] md:text-sm">
-              Welcome back, {profile?.name || 'Restaurant Admin'}. Here&apos;s your restaurant performance for today.
-            </p>
-          </div>
-        </div>
-      </Card>
-
+    <div className="compact-page space-y-4">
       <ResponsiveGrid>
         <StatCard
           icon={BarChart3}
@@ -307,7 +308,7 @@ export default function Dashboard() {
               orders.slice(0, 6).map((order) => (
                 <div
                   key={order.id}
-                  className="flex w-full flex-col gap-3 rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card-muted)] p-5 sm:flex-row sm:items-center sm:justify-between"
+                  className="flex w-full flex-col gap-3 rounded-[var(--radius-card)] border border-[var(--border-color)] bg-[var(--bg-card-muted)] p-4 sm:flex-row sm:items-center sm:justify-between"
                 >
                   <div className="min-w-0">
                     <p className="text-sm font-semibold text-[var(--text-primary)]">{formatDisplayOrderNumber(order)}</p>
@@ -332,19 +333,19 @@ export default function Dashboard() {
           <h3 className="mt-1 text-xl font-semibold text-[var(--text-primary)]">Today&apos;s Snapshot</h3>
 
           <div className="mt-5 space-y-4">
-            <div className="rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card-muted)] p-5">
+            <div className="rounded-[var(--radius-card)] border border-[var(--border-color)] bg-[var(--bg-card-muted)] p-4">
               <p className="text-sm text-[var(--text-secondary)]">Staff</p>
               <p className="mt-2 text-xl font-semibold text-[var(--text-primary)]">{staff.length} team members</p>
               <p className="mt-1 text-sm text-[var(--text-secondary)]">{activeUsers} active right now</p>
             </div>
 
-            <div className="rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card-muted)] p-5">
+            <div className="rounded-[var(--radius-card)] border border-[var(--border-color)] bg-[var(--bg-card-muted)] p-4">
               <p className="text-sm text-[var(--text-secondary)]">Tables</p>
               <p className="mt-2 text-xl font-semibold text-[var(--text-primary)]">{tables.length} configured tables</p>
               <p className="mt-1 text-sm text-[var(--text-secondary)]">{availableTables} currently available</p>
             </div>
 
-            <div className="rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card-muted)] p-5">
+            <div className="rounded-[var(--radius-card)] border border-[var(--border-color)] bg-[var(--bg-card-muted)] p-4">
               <p className="text-sm text-[var(--text-secondary)]">Performance</p>
               <p className="mt-2 text-xl font-semibold text-[var(--text-primary)]">
                 {todayOrders.length > 0 ? 'Service is active' : 'No order activity yet'}
@@ -354,7 +355,7 @@ export default function Dashboard() {
               </p>
             </div>
 
-            <div className="rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card-muted)] p-5">
+            <div className="rounded-[var(--radius-card)] border border-[var(--border-color)] bg-[var(--bg-card-muted)] p-4">
               <p className="text-sm text-[var(--text-secondary)]">Inventory Alerts</p>
               <p className="mt-2 text-xl font-semibold text-[var(--text-primary)]">
                 {lowStockCount > 0 ? `${lowStockCount} item${lowStockCount === 1 ? '' : 's'} low` : 'No urgent stock issues'}
@@ -532,7 +533,7 @@ export default function Dashboard() {
             <ShieldAlert className="h-4 w-4 text-[var(--color-primary)]" />
             Team visibility
           </div>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card-muted)] p-4">
               <p className="text-sm text-[var(--text-secondary)]">Active waiters</p>
               <p className="mt-2 text-2xl font-semibold text-[var(--text-primary)]">{waiters.length}</p>
@@ -540,10 +541,6 @@ export default function Dashboard() {
             <div className="rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card-muted)] p-4">
               <p className="text-sm text-[var(--text-secondary)]">Active managers</p>
               <p className="mt-2 text-2xl font-semibold text-[var(--text-primary)]">{managers.length}</p>
-            </div>
-            <div className="rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card-muted)] p-4">
-              <p className="text-sm text-[var(--text-secondary)]">Manager activity</p>
-              <p className="mt-2 text-2xl font-semibold text-[var(--text-primary)]">{recentManagerActivity}</p>
             </div>
           </div>
 

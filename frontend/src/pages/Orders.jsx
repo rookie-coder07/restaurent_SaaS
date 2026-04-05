@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Loader, ShoppingCart, RotateCcw } from 'lucide-react';
 import { useApi } from '../hooks/useApi';
+import useAutoRefresh from '../hooks/useAutoRefresh';
 import { orderAPI, tableAPI } from '../services/apiEndpoints';
 import { formatCurrency, formatDate, formatDisplayOrderNumber } from '../utils/formatters';
 import Card from '../components/common/Card';
@@ -12,6 +13,7 @@ import EmptyState from '../components/common/EmptyState';
 import StatCard from '../components/common/StatCard';
 import PaginationControls from '../components/common/PaginationControls';
 import useResponsivePagination from '../hooks/useResponsivePagination';
+import { getOrderSourceLabel } from '../utils/managerPortal';
 
 const STATUS_STYLES = {
   awaiting_waiter_approval: 'bg-sky-100 text-sky-700',
@@ -32,8 +34,8 @@ function formatPaymentMethodLabel(value) {
 }
 
 export default function Orders() {
-  const { data: ordersData = {}, loading, execute: refetchOrders } = useApi(() => orderAPI.getOrders({ limit: 100 }));
-  const { data: tablesData = {} } = useApi(() => tableAPI.getTables({}));
+  const { data: ordersData = {}, loading, execute: refetchOrders, refetch: refetchOrdersLatest } = useApi(() => orderAPI.getOrders({ limit: 100 }));
+  const { data: tablesData = {}, refetch: refetchTables } = useApi(() => tableAPI.getTables({}));
 
   const [filterStatus, setFilterStatus] = useState('all');
   const [datePreset, setDatePreset] = useState('all');
@@ -41,6 +43,8 @@ export default function Orders() {
   const [timeRange, setTimeRange] = useState({ start: '', end: '' });
   const [tableFilter, setTableFilter] = useState('all');
   const [selectedOrder, setSelectedOrder] = useState(null);
+  const [selectedOrderDetails, setSelectedOrderDetails] = useState(null);
+  const [detailsLoading, setDetailsLoading] = useState(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
   const [pendingDeleteOrder, setPendingDeleteOrder] = useState(null);
@@ -123,6 +127,8 @@ export default function Orders() {
     hasPagination,
   } = useResponsivePagination(filteredOrders, { mobileItemsPerPage: 6, desktopItemsPerPage: 12 });
 
+  useAutoRefresh(() => Promise.allSettled([refetchOrdersLatest(), refetchTables()]), 12000);
+
   useEffect(() => {
     pendingDeletionQueueRef.current = pendingDeletionQueue;
   }, [pendingDeletionQueue]);
@@ -157,6 +163,29 @@ export default function Orders() {
     } catch (err) {
       setError(err.response?.data?.message || 'Failed to update order');
     }
+  };
+
+  const openOrderDetails = async (order) => {
+    setSelectedOrder(order);
+    setSelectedOrderDetails(order);
+    setDetailsLoading(true);
+    setError(null);
+
+    try {
+      const response = await orderAPI.getOrder(order.id);
+      setSelectedOrderDetails(response.data?.data || order);
+    } catch (err) {
+      setSelectedOrderDetails(order);
+      setError(err.response?.data?.message || 'Failed to load order details.');
+    } finally {
+      setDetailsLoading(false);
+    }
+  };
+
+  const closeOrderDetails = () => {
+    setSelectedOrder(null);
+    setSelectedOrderDetails(null);
+    setDetailsLoading(false);
   };
 
   const removePendingDeletionEntry = (entryId) => {
@@ -332,18 +361,6 @@ export default function Orders() {
           </div>
         </Card>
       ) : null}
-
-      <Card className="overflow-hidden bg-[radial-gradient(circle_at_top_right,_rgba(79,70,229,0.14),_transparent_35%),var(--color-surface)]">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.25em] text-[var(--color-text-subtle)]">Orders</p>
-            <h1 className="mt-3 text-3xl font-bold text-[var(--color-text)]">Track live service and manual orders</h1>
-            <p className="mt-2 text-sm text-[var(--color-text-muted)]">
-              Review order history, filter by status, and create a new order directly from the admin panel.
-            </p>
-          </div>
-        </div>
-      </Card>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <StatCard label="Filtered Orders" value={filteredOrders.length} subtitle="Current result set" />
@@ -575,6 +592,9 @@ export default function Orders() {
                             : formatDisplayOrderNumber(order)}
                         </p>
                         <p className="mt-1 text-xs text-[var(--color-text-muted)]">{order.items?.length || 0} items</p>
+                        <span className="mt-2 inline-flex rounded-full bg-[var(--color-surface-muted)] px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--text-secondary)]">
+                          {getOrderSourceLabel(order)}
+                        </span>
                       </td>
                       <td className="px-4 py-4 align-top text-[var(--color-text)]">Table {order.tableNumber || 'N/A'}</td>
                       <td className="px-4 py-4 align-top text-[var(--color-text-muted)]">{formatDate(order.createdAt)}</td>
@@ -610,7 +630,7 @@ export default function Orders() {
                           <Button variant="danger" onClick={() => setPendingDeleteOrder(order)}>
                             Delete
                           </Button>
-                          <Button variant="secondary" onClick={() => setSelectedOrder(order)}>
+                          <Button variant="secondary" onClick={() => openOrderDetails(order)}>
                             Details
                           </Button>
                         </div>
@@ -636,6 +656,9 @@ export default function Orders() {
                           ? `${formatDisplayOrderNumber(order)} (Cancelled)`
                           : formatDisplayOrderNumber(order)}
                       </p>
+                      <span className="mt-2 inline-flex rounded-full bg-[var(--color-surface-muted)] px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--text-secondary)]">
+                        {getOrderSourceLabel(order)}
+                      </span>
                       <p className="mt-1 text-sm text-[var(--color-text-muted)]">Table {order.tableNumber || 'N/A'}</p>
                       <p className="mt-1 text-sm text-[var(--color-text-muted)]">{formatDate(order.createdAt)}</p>
                     </div>
@@ -694,7 +717,7 @@ export default function Orders() {
                       <Button variant="danger" onClick={() => setPendingDeleteOrder(order)}>
                         Delete Order
                       </Button>
-                      <Button variant="secondary" onClick={() => setSelectedOrder(order)}>
+                      <Button variant="secondary" onClick={() => openOrderDetails(order)}>
                         View Details
                       </Button>
                     </div>
@@ -728,44 +751,56 @@ export default function Orders() {
             : 'Order'
         }
         isOpen={Boolean(selectedOrder)}
-        onClose={() => setSelectedOrder(null)}
+        onClose={closeOrderDetails}
         maxWidth="max-w-lg"
       >
         {selectedOrder ? (
           <div className="space-y-4">
             <div className="flex flex-wrap items-center gap-2">
-              <span className={`rounded-full px-3 py-1 text-xs font-semibold ${STATUS_STYLES[selectedOrder.status] || STATUS_STYLES.pending}`}>
-                {selectedOrder.status}
+              <span className={`rounded-full px-3 py-1 text-xs font-semibold ${STATUS_STYLES[(selectedOrderDetails || selectedOrder).status] || STATUS_STYLES.pending}`}>
+                {(selectedOrderDetails || selectedOrder).status}
               </span>
               <span className="rounded-full bg-[var(--color-primary-soft)] px-3 py-1 text-xs font-semibold text-[var(--color-primary)]">
-                {formatPaymentMethodLabel(selectedOrder.paymentMethod)}
+                {formatPaymentMethodLabel((selectedOrderDetails || selectedOrder).paymentMethod)}
               </span>
               <span className="rounded-full bg-[var(--color-surface-muted)] px-3 py-1 text-xs font-semibold text-[var(--color-text)]">
-                {selectedOrder.paymentStatus || 'unpaid'}
+                {(selectedOrderDetails || selectedOrder).paymentStatus || 'unpaid'}
               </span>
-              <span className="text-sm text-[var(--color-text-muted)]">{formatDate(selectedOrder.createdAt)}</span>
+              <span className="text-sm text-[var(--color-text-muted)]">{formatDate((selectedOrderDetails || selectedOrder).createdAt)}</span>
             </div>
 
-            <Card className="p-4">
-              <p className="text-sm font-semibold text-[var(--color-text)]">Items</p>
-              <div className="mt-3 space-y-3">
-                {(selectedOrder.items || []).map((item, idx) => (
-                  <div key={`${selectedOrder.id}-detail-${idx}`} className="flex items-start justify-between gap-3 text-sm">
-                    <p className="min-w-0 flex-1 break-words text-[var(--color-text)]">
-                      {item.quantity}x {item.name}
-                    </p>
-                    <span className="shrink-0 text-[var(--color-text-muted)]">
-                      {formatCurrency((item.unitPrice || item.price) * item.quantity)}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </Card>
+            {detailsLoading ? (
+              <Card className="p-6">
+                <div className="flex min-h-[8rem] items-center justify-center">
+                  <Loader className="h-6 w-6 animate-spin text-[var(--color-primary)]" />
+                </div>
+              </Card>
+            ) : (
+              <Card className="p-4">
+                <p className="text-sm font-semibold text-[var(--color-text)]">Items</p>
+                <div className="mt-3 space-y-3">
+                  {((selectedOrderDetails || selectedOrder).items || []).map((item, idx) => (
+                    <div key={`${selectedOrder.id}-detail-${idx}`} className="flex items-start justify-between gap-3 text-sm">
+                      <div className="min-w-0 flex-1">
+                        <p className="break-words text-[var(--color-text)]">
+                          {item.quantity}x {item.name}
+                        </p>
+                        {item.modifiers?.length ? <p className="mt-1 text-xs text-[var(--color-text-muted)]">{item.modifiers.join(', ')}</p> : null}
+                        {item.note ? <p className="mt-1 text-xs text-[var(--color-text-muted)]">Note: {item.note}</p> : null}
+                      </div>
+                      <span className="shrink-0 text-[var(--color-text-muted)]">
+                        {formatCurrency((item.unitPrice || item.price || 0) * (item.quantity || 0))}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </Card>
+            )}
 
             <div className="flex items-center justify-between rounded-2xl bg-[var(--color-surface-muted)] p-4">
               <span className="font-semibold text-[var(--color-text)]">Total</span>
               <span className="font-bold text-[var(--color-text)]">
-                {formatCurrency(selectedOrder.totalAmount || selectedOrder.total || 0)}
+                {formatCurrency((selectedOrderDetails || selectedOrder).totalAmount || (selectedOrderDetails || selectedOrder).total || 0)}
               </span>
             </div>
           </div>

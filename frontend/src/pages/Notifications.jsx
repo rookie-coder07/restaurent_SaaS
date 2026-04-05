@@ -114,6 +114,7 @@ export default function Notifications() {
   const notifications = useMemo(() => {
     const liveNotifications = buildSmartNotifications({ orders, lowStockItems, approvedDiscounts });
     const extraNotifications = [];
+    const assignedWaiterByTableId = new Map();
     const tableNumberMap = new Map(
       tables.flatMap((table) => {
         const keys = [table.id, table._id].filter(Boolean).map((value) => String(value));
@@ -121,6 +122,34 @@ export default function Notifications() {
       })
     );
     const staffNameMap = new Map(staff.map((member) => [member.id, getFriendlyStaffName(member.name || member.email)]));
+
+    staff
+      .filter((member) => member.role === 'staff')
+      .forEach((member) => {
+        (member.assignedTables || []).forEach((tableId) => {
+          assignedWaiterByTableId.set(String(tableId), member);
+        });
+      });
+
+    orders
+      .filter((order) => order.status === 'awaiting_waiter_approval' && order.tableId && order.origin === 'qr')
+      .forEach((order) => {
+        const assignedWaiter = assignedWaiterByTableId.get(String(order.tableId));
+        extraNotifications.push({
+          id: `waiter-routing-${order.id}`,
+          title: assignedWaiter
+            ? `New order for Table ${order.tableNumber || 'N/A'}`
+            : `Manager attention needed for Table ${order.tableNumber || 'N/A'}`,
+          detail: assignedWaiter
+            ? `Routed to ${getFriendlyStaffName(assignedWaiter.name || assignedWaiter.email)} for waiter approval.`
+            : 'No waiter is assigned to this table yet, so the manager should review it.',
+          timestamp: order.updatedAt || order.createdAt,
+          priority: assignedWaiter ? 'warning' : 'critical',
+          category: 'orders',
+          sourceRole: assignedWaiter ? 'waiter' : 'manager',
+          status: 'live',
+        });
+      });
 
     Object.entries(waiterActivity || {}).forEach(([waiterId, activity]) => {
       if (!activity?.tableId) {
@@ -269,34 +298,14 @@ export default function Notifications() {
     }
   };
 
-  useEffect(() => {
-    const intervalId = window.setInterval(() => {
-      refreshNow().catch(() => {
-        // The page already shows partial-data states.
-      });
-    }, 15000);
-
-    return () => window.clearInterval(intervalId);
-  }, []);
-
   return (
     <div className="space-y-4 sm:space-y-6">
-      <Card className="p-4 sm:p-6">
-        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <div className="min-w-0">
-            <p className="text-sm font-semibold text-[var(--text-secondary)]">Notifications</p>
-            <h1 className="mt-1 text-2xl font-bold text-[var(--text-primary)] sm:text-3xl">Simple live updates for the owner</h1>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-[var(--text-secondary)]">
-              See important alerts, recent activity, and resolved updates in one clear list.
-            </p>
-          </div>
-
-          <Button variant="secondary" onClick={refreshNow} className={refreshing ? 'animate-pulse' : ''}>
-            <RefreshCw className="h-4 w-4" />
-            Refresh
-          </Button>
-        </div>
-      </Card>
+      <div className="flex justify-end">
+        <Button variant="secondary" onClick={refreshNow} className={refreshing ? 'animate-pulse' : ''}>
+          <RefreshCw className="h-4 w-4" />
+          Refresh
+        </Button>
+      </div>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <SummaryCard

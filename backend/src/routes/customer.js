@@ -13,6 +13,10 @@ const tableSchema = Joi.object({
   qrCodeData: Joi.string().required(),
 });
 
+function normalizeTableLabel(value) {
+  return String(value || '').trim();
+}
+
 // Get public menu items (no auth required)
 // This endpoint is called by customers who scanned a QR code
 // Pass ?table=X to get the menu for that table's restaurant
@@ -39,7 +43,7 @@ router.get('/menu/items', async (req, res) => {
       query = query.eq('id', tableId);
     } else {
       console.log(`🔍 Looking up table by number ${table}...`);
-      query = query.eq('table_number', parseInt(table, 10));
+      query = query.eq('table_number', normalizeTableLabel(table));
     }
 
     const { data: tableData, error: tableError } = await query.single();
@@ -130,6 +134,8 @@ router.get('/menu/:qrCodeData/items', validateParams(tableSchema), async (req, r
 // This handles table resolution from tableNumber to tableId
 router.post('/orders', optionalAuth, async (req, res, next) => {
   try {
+    req.orderOrigin = 'qr';
+
     if (req.body.tableId) {
       const { data: table, error: tableError } = await supabase
         .from('tables')
@@ -154,7 +160,7 @@ router.post('/orders', optionalAuth, async (req, res, next) => {
       const { data: table, error: tableError } = await supabase
         .from('tables')
         .select('id, restaurant_id')
-        .eq('table_number', parseInt(req.body.tableNumber, 10))
+        .eq('table_number', normalizeTableLabel(req.body.tableNumber))
         .single();
 
       if (tableError || !table) {
@@ -205,7 +211,10 @@ router.get('/orders/:orderId', async (req, res, next) => {
       });
     }
 
-    if (req.query.table && parseInt(req.query.table, 10) !== order.tables?.table_number) {
+    if (
+      req.query.table &&
+      normalizeTableLabel(req.query.table) !== normalizeTableLabel(order.tables?.table_number)
+    ) {
       return res.status(403).json({
         statusCode: 403,
         success: false,
@@ -229,7 +238,7 @@ router.get('/orders/table/:tableNumber', async (req, res) => {
     const { data: table, error: tableError } = await supabase
       .from('tables')
       .select('id, restaurant_id')
-      .eq('table_number', parseInt(req.params.tableNumber, 10))
+      .eq('table_number', normalizeTableLabel(req.params.tableNumber))
       .single();
 
     if (tableError || !table) {

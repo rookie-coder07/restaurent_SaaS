@@ -41,10 +41,6 @@ const PAGE_META = {
     section: 'Settings',
     title: 'Workspace Settings',
   },
-  '/admin/qr-tools': {
-    section: 'QR Tools',
-    title: 'QR Tools',
-  },
   '/manager': {
     section: 'Manager',
     title: 'Operations Dashboard',
@@ -111,7 +107,7 @@ export function AdminLayoutInner({ children, portal = 'admin' }) {
         />
 
         <main className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
-          <div className="mx-auto flex max-w-7xl flex-col gap-4 p-4 sm:p-6 lg:p-6">{children}</div>
+          <div className="mx-auto flex max-w-7xl flex-col gap-4 p-4 sm:p-5 lg:p-6">{children}</div>
         </main>
       </div>
     </div>

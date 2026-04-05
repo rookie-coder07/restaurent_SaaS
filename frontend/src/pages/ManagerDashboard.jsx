@@ -12,6 +12,7 @@ import {
 import { useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
+import useAutoRefresh from '../hooks/useAutoRefresh';
 import { inventoryAPI, kitchenAPI, orderAPI, restaurantAPI, tableAPI } from '../services/apiEndpoints';
 import { formatCurrency, formatDisplayOrderNumber } from '../utils/formatters';
 import {
@@ -35,13 +36,15 @@ const QUICK_ACTIONS = [
 ];
 
 export default function ManagerDashboard() {
-  const { data: ordersData = {}, loading } = useApi(() => orderAPI.getOrders({ limit: 150 }));
-  const { data: tablesData = {} } = useApi(() => tableAPI.getTables({ limit: 200 }));
-  const { data: kitchenTickets = [] } = useApi(kitchenAPI.getActiveOrders);
-  const { data: inventorySummary = {} } = useApi(inventoryAPI.getSummary);
-  const { data: staffData = {} } = useApi(() => restaurantAPI.getStaff({ limit: 100, skip: 0, isActive: true }));
+  const { data: ordersData = {}, loading, refetch: refetchOrders } = useApi(() => orderAPI.getOrders({ limit: 150 }));
+  const { data: tablesData = {}, refetch: refetchTables } = useApi(() => tableAPI.getTables({ limit: 200 }));
+  const { data: kitchenTickets = [], refetch: refetchKitchen } = useApi(kitchenAPI.getActiveOrders);
+  const { data: inventorySummary = {}, refetch: refetchInventory } = useApi(inventoryAPI.getSummary);
+  const { data: staffData = {}, refetch: refetchStaff } = useApi(() => restaurantAPI.getStaff({ limit: 100, skip: 0, isActive: true }));
   const tableAssignments = useManagerStore((state) => state.tableAssignments);
   const tableClosures = useManagerStore((state) => state.tableClosures);
+  const tableTransfers = useManagerStore((state) => state.tableTransfers);
+  const tableMerges = useManagerStore((state) => state.tableMerges);
   const prioritizedOrders = useManagerStore((state) => state.prioritizedOrders);
 
   const orders = ordersData?.items || [];
@@ -58,39 +61,32 @@ export default function ManagerDashboard() {
   const todayRevenue = todayOrders.filter(isSettled).reduce((sum, order) => sum + Number(order.totalAmount || order.total || 0), 0);
   const runningOrders = orders.filter((order) => ['pending', 'preparing', 'ready', 'served', 'awaiting_waiter_approval'].includes(order.status));
   const delayedOrders = runningOrders.filter((order) => isDelayedOrder(order));
-  const floorTables = tables.map((table) => getTableActivity(table, runningOrders, tableAssignments, tableClosures));
+  const floorTables = tables
+    .map((table) =>
+      getTableActivity(table, runningOrders, tableAssignments, tableClosures, tableTransfers, tableMerges, tables)
+    )
+    .filter((table) => !table.isMergedSecondary);
   const activeTables = floorTables.filter((table) => table.effectiveStatus === 'busy');
   const lowStockItems = inventorySummary?.lowStockItems || [];
   const busyTables = floorTables.filter(isBusyTable);
   const pendingKot = Array.isArray(kitchenTickets) ? kitchenTickets.filter((ticket) => ticket.status === 'pending') : [];
   const priorityOrders = runningOrders.filter((order) => prioritizedOrders[order.id]?.priority === 'high');
 
+  useAutoRefresh(() => Promise.allSettled([refetchOrders(), refetchTables(), refetchKitchen(), refetchInventory(), refetchStaff()]), 12000);
+
   return (
     <div className="space-y-6">
-      <Card className="overflow-hidden bg-[radial-gradient(circle_at_top_right,_rgba(14,165,233,0.14),_transparent_35%),var(--color-surface)]">
-        <div className="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.25em] text-[var(--color-text-subtle)]">Manager Portal</p>
-            <h1 className="mt-3 text-3xl font-bold text-[var(--color-text)]">Daily restaurant operations at a glance</h1>
-            <p className="mt-2 max-w-3xl text-sm text-[var(--color-text-muted)]">
-              Manager controls service flow. Admin controls the system. This workspace is tuned for daily floor, kitchen, billing, and stock decisions.
-            </p>
-          </div>
-
-          <div className="grid gap-3 sm:grid-cols-3">
-            {QUICK_ACTIONS.map((action) => (
-              <Link
-                key={action.href}
-                to={action.href}
-                className="rounded-2xl border border-[var(--border-color)] bg-[var(--color-surface-muted)] px-4 py-4 transition hover:border-[var(--color-primary)] hover:bg-[var(--color-primary-soft)]"
-              >
-                <p className="text-sm font-bold text-[var(--text-primary)]">{action.label}</p>
-                <p className="mt-1 text-xs text-[var(--text-secondary)]">{action.helper}</p>
-              </Link>
-            ))}
-          </div>
-        </div>
-      </Card>
+      <div className="grid gap-3 sm:grid-cols-3">
+        {QUICK_ACTIONS.map((action) => (
+          <Link
+            key={action.href}
+            to={action.href}
+            className="rounded-2xl border border-[var(--border-color)] bg-[var(--color-surface-muted)] px-4 py-4 transition hover:border-[var(--color-primary)] hover:bg-[var(--color-primary-soft)]"
+          >
+            <p className="text-sm font-bold text-[var(--text-primary)]">{action.label}</p>
+          </Link>
+        ))}
+      </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
         <StatCard icon={TableProperties} label="Active Tables" value={activeTables.length} subtitle="Tables with live service" tone="primary" />
@@ -169,17 +165,6 @@ export default function ManagerDashboard() {
                 label="Top selling item"
                 value={topSellingItems[0] ? `${topSellingItems[0].name} (${topSellingItems[0].quantity})` : 'No sales yet'}
               />
-            </div>
-          </Card>
-
-          <Card>
-            <p className="text-sm text-[var(--text-secondary)]">Restrictions</p>
-            <h2 className="mt-1 text-xl font-semibold text-[var(--text-primary)]">Manager guardrails</h2>
-            <div className="mt-4 space-y-2 text-sm text-[var(--text-secondary)]">
-              <p>Cannot access system settings, pricing control, admin logs, or user management.</p>
-              <p>Cannot delete orders, bills, or history.</p>
-              <p>Cannot deeply edit inventory structure or recipes.</p>
-              <p>Discount approvals stay capped within manager limits.</p>
             </div>
           </Card>
 

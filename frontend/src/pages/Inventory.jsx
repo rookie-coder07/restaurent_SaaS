@@ -186,35 +186,15 @@ export default function Inventory() {
 
   return (
     <div className="space-y-6">
-      {success ? (
-        <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-300">
-          {success}
-        </div>
-      ) : null}
+      {success ? <Toast type="success" message={success} /> : null}
+      {error ? <Toast type="error" message={error} /> : null}
 
-      {error ? (
-        <div className="rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-300">
-          {error}
-        </div>
-      ) : null}
-
-      <Card className="overflow-hidden">
-        <div className="absolute inset-y-0 right-0 w-40 bg-gradient-to-l from-amber-400/10 to-transparent" />
-        <div className="relative flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.28em] text-[var(--text-secondary)]">Inventory</p>
-            <h1 className="mt-2 text-2xl font-bold text-[var(--text-primary)] sm:text-3xl">Kitchen Stock Control</h1>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-[var(--text-secondary)]">
-              Track ingredients, set low-stock thresholds, add stock quickly, and keep recipes tied to real kitchen inventory.
-            </p>
-          </div>
-
-          <Button className="w-full sm:w-auto" onClick={openCreateModal}>
-            <Plus className="h-4 w-4" />
-            Add Inventory Item
-          </Button>
-        </div>
-      </Card>
+      <div className="flex justify-end">
+        <Button className="w-full sm:w-auto" onClick={openCreateModal}>
+          <Plus className="h-4 w-4" />
+          Add Inventory Item
+        </Button>
+      </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
         <StatCard label="Inventory Items" value={items.length} subtitle="Active tracked ingredients" iconTone="bg-[var(--color-primary-soft)] text-[var(--color-primary)]" />

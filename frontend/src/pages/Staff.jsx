@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
-import { ChefHat, Loader, Plus, Trash2, User, Users } from 'lucide-react';
+import { ChefHat, Loader, Pencil, Plus, Trash2, User, Users } from 'lucide-react';
 import { useApi } from '../hooks/useApi';
-import { restaurantAPI } from '../services/apiEndpoints';
+import { restaurantAPI, tableAPI } from '../services/apiEndpoints';
+import { compareTableLabels } from '../utils/formatters';
 import Card from '../components/common/Card';
 import Button from '../components/common/Button';
 import Input from '../components/common/Input';
@@ -24,42 +25,52 @@ const ROLE_META = {
     icon: User,
   },
   kitchen_staff: {
-    label: 'KOT Staff',
+    label: 'Kitchen Staff',
     color: 'bg-amber-100 text-amber-700',
     icon: ChefHat,
   },
 };
 
 const STAFF_FILTERS = [
-  { id: 'all', label: 'All Access', description: 'Manager, POS staff, and KOT staff' },
+  { id: 'all', label: 'All Access', description: 'Manager and POS staff access' },
   { id: 'manager', label: 'Manager', description: 'Operations workspace with live service controls' },
   { id: 'staff', label: 'POS Staff', description: 'Waiters and cashiers using the POS portal' },
-  { id: 'kitchen_staff', label: 'KOT Staff', description: 'Kitchen team using the KOT portal' },
 ];
 
 export default function StaffManagement() {
   const { data: staffData = {}, loading, execute: refetch } = useApi(() =>
     restaurantAPI.getStaff({ limit: 100, skip: 0, isActive: true })
   );
+  const { data: tablesData = {} } = useApi(() => tableAPI.getTables({ limit: 200 }));
   const [showForm, setShowForm] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
   const [activeFilter, setActiveFilter] = useState('all');
+  const [editingStaff, setEditingStaff] = useState(null);
   const [formData, setFormData] = useState({
     name: '',
     email: '',
     phone: '',
     role: 'manager',
     password: '',
+    assignedTables: [],
   });
 
   const staff = staffData?.staff || [];
+  const availableTables = useMemo(
+    () => [...(tablesData?.tables || [])].sort((left, right) => compareTableLabels(left.tableNumber, right.tableNumber)),
+    [tablesData]
+  );
+  const tableLabelMap = useMemo(
+    () =>
+      new Map(availableTables.map((table) => [table.id, table.mergedDisplayName || `Table ${table.tableNumber}`])),
+    [availableTables]
+  );
   const managerCount = staff.filter((member) => member.role === 'manager').length;
   const staffCount = staff.filter((member) => member.role === 'staff').length;
-  const kitchenCount = staff.filter((member) => member.role === 'kitchen_staff').length;
   const filteredStaff = useMemo(
-    () => (activeFilter === 'all' ? staff : staff.filter((member) => member.role === activeFilter)),
+    () => (activeFilter === 'all' ? staff.filter((member) => member.role !== 'kitchen_staff') : staff.filter((member) => member.role === activeFilter)),
     [activeFilter, staff]
   );
   const {
@@ -80,18 +91,36 @@ export default function StaffManagement() {
       phone: '',
       role: 'manager',
       password: '',
+      assignedTables: [],
     });
+    setEditingStaff(null);
     setShowForm(false);
   };
 
   const openCreateForm = (role = 'manager') => {
     setError(null);
+    setEditingStaff(null);
     setFormData({
       name: '',
       email: '',
       phone: '',
       role,
       password: '',
+      assignedTables: [],
+    });
+    setShowForm(true);
+  };
+
+  const openEditForm = (member) => {
+    setError(null);
+    setEditingStaff(member);
+    setFormData({
+      name: member.name || '',
+      email: member.email || '',
+      phone: member.phone || '',
+      role: member.role || 'staff',
+      password: '',
+      assignedTables: Array.isArray(member.assignedTables) ? member.assignedTables : [],
     });
     setShowForm(true);
   };
@@ -109,7 +138,7 @@ export default function StaffManagement() {
       return 'Phone number must be exactly 10 digits.';
     }
 
-    if (!formData.password) {
+    if (!editingStaff && !formData.password) {
       return 'Password is required.';
     }
 
@@ -130,17 +159,30 @@ export default function StaffManagement() {
 
     try {
       const targetRole = formData.role;
-      const response = await restaurantAPI.createStaff({
-        ...formData,
+      const payload = {
         name: formData.name.trim(),
         email: formData.email.trim().toLowerCase(),
         phone: formData.phone.trim(),
-      });
+        role: targetRole,
+        assignedTables: targetRole === 'staff' ? formData.assignedTables : [],
+      };
+
+      if (!editingStaff || formData.password) {
+        payload.password = formData.password;
+      }
+
+      const response = editingStaff
+        ? await restaurantAPI.updateStaff(editingStaff.id, payload)
+        : await restaurantAPI.createStaff(payload);
       const createdStaff = response.data?.data;
       const roleLabel = ROLE_META[targetRole]?.label || 'Staff';
 
       setActiveFilter(targetRole);
-      setSuccess(`${roleLabel} login created for ${createdStaff?.email || formData.email.trim().toLowerCase()}`);
+      setSuccess(
+        editingStaff
+          ? `${roleLabel} details updated for ${createdStaff?.email || formData.email.trim().toLowerCase()}`
+          : `${roleLabel} login created for ${createdStaff?.email || formData.email.trim().toLowerCase()}`
+      );
       resetForm();
       await refetch();
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -155,6 +197,30 @@ export default function StaffManagement() {
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const toggleAssignedTable = (tableId) => {
+    setFormData((current) => {
+      const currentSet = new Set(current.assignedTables || []);
+      if (currentSet.has(tableId)) {
+        currentSet.delete(tableId);
+      } else {
+        currentSet.add(tableId);
+      }
+
+      return {
+        ...current,
+        assignedTables: Array.from(currentSet),
+      };
+    });
+  };
+
+  const handleRoleChange = (role) => {
+    setFormData((current) => ({
+      ...current,
+      role,
+      assignedTables: role === 'staff' ? current.assignedTables : [],
+    }));
   };
 
   const handleDeleteStaff = async (staffId) => {
@@ -183,36 +249,20 @@ export default function StaffManagement() {
       {success ? <Toast type="success" message={success} /> : null}
       {error && !showForm ? <Toast type="error" message={error} /> : null}
 
-      <Card className="overflow-hidden bg-[radial-gradient(circle_at_top_right,_rgba(79,70,229,0.14),_transparent_35%),var(--color-surface)]">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.25em] text-[var(--color-text-subtle)]">Staff</p>
-            <h1 className="mt-3 text-3xl font-bold text-[var(--color-text)]">Create POS and KOT staff access</h1>
-            <p className="mt-2 text-sm text-[var(--color-text-muted)]">
-              Create role-based logins for managers, POS staff, and kitchen staff from one clean admin screen.
-            </p>
-          </div>
-          <div className="flex flex-col gap-3 sm:flex-row">
-            <Button variant="secondary" onClick={() => openCreateForm('manager')}>
-              <Plus className="h-4 w-4" />
-              Add Manager
-            </Button>
-            <Button variant="secondary" onClick={() => openCreateForm('staff')}>
-              <Plus className="h-4 w-4" />
-              Add POS Staff
-            </Button>
-            <Button onClick={() => openCreateForm('kitchen_staff')}>
-              <Plus className="h-4 w-4" />
-              Add KOT Staff
-            </Button>
-          </div>
-        </div>
-      </Card>
+      <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
+        <Button variant="secondary" onClick={() => openCreateForm('manager')}>
+          <Plus className="h-4 w-4" />
+          Add Manager
+        </Button>
+        <Button variant="secondary" onClick={() => openCreateForm('staff')}>
+          <Plus className="h-4 w-4" />
+          Add POS Staff
+        </Button>
+      </div>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <StatCard icon={Users} label="Managers" value={managerCount} subtitle="Operations leaders" iconTone="bg-violet-100 text-violet-700" />
         <StatCard icon={User} label="POS Staff" value={staffCount} subtitle="Front-of-house members" iconTone="bg-sky-100 text-sky-700" />
-        <StatCard icon={ChefHat} label="KOT Staff" value={kitchenCount} subtitle="Kitchen team members" iconTone="bg-amber-100 text-amber-700" />
       </div>
 
       <div className="grid gap-3 lg:grid-cols-3">
@@ -281,7 +331,31 @@ export default function StaffManagement() {
                       </div>
                     </div>
 
+                    {member.role === 'staff' ? (
+                      <div className="rounded-2xl bg-[var(--color-surface-muted)] p-4">
+                        <p className="text-xs uppercase tracking-[0.2em] text-[var(--color-text-subtle)]">Assigned Tables</p>
+                        {Array.isArray(member.assignedTables) && member.assignedTables.length > 0 ? (
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            {member.assignedTables.map((tableId) => (
+                              <span
+                                key={`${member.id}-${tableId}`}
+                                className="rounded-full bg-[var(--color-panel)] px-3 py-1 text-xs font-semibold text-[var(--color-text)]"
+                              >
+                                {tableLabelMap.get(tableId) || 'Assigned table'}
+                              </span>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="mt-2 text-sm text-[var(--color-text-muted)]">No tables assigned yet.</p>
+                        )}
+                      </div>
+                    ) : null}
+
                     <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
+                      <Button variant="secondary" onClick={() => openEditForm(member)} className="w-full sm:w-auto">
+                        <Pencil className="h-4 w-4" />
+                        Edit
+                      </Button>
                       <Button variant="danger" onClick={() => handleDeleteStaff(member.id)} className="w-full sm:w-auto">
                         <Trash2 className="h-4 w-4" />
                         Remove
@@ -307,10 +381,10 @@ export default function StaffManagement() {
 
       <Modal
         title={
-          formData.role === 'manager'
-            ? 'Create Manager Login'
-            : formData.role === 'kitchen_staff'
-              ? 'Create KOT Staff Login'
+          editingStaff
+            ? 'Edit Staff Details'
+            : formData.role === 'manager'
+              ? 'Create Manager Login'
               : 'Create POS Staff Login'
         }
         isOpen={showForm}
@@ -352,21 +426,58 @@ export default function StaffManagement() {
 
           <label className="space-y-2">
             <span className="text-sm font-medium text-[var(--color-text)]">Role</span>
-            <select value={formData.role} onChange={(e) => setFormData({ ...formData, role: e.target.value })} className="input" required>
+            <select value={formData.role} onChange={(e) => handleRoleChange(e.target.value)} className="input" required>
               <option value="manager">Manager</option>
               <option value="staff">POS Staff</option>
-              <option value="kitchen_staff">KOT Staff</option>
             </select>
           </label>
 
+          {formData.role === 'staff' ? (
+            <div className="space-y-3">
+              <div>
+                <p className="text-sm font-medium text-[var(--color-text)]">Assign Tables</p>
+                <p className="mt-1 text-xs text-[var(--color-text-muted)]">
+                  Optional. You can assign table numbers now or leave them empty and update later.
+                </p>
+              </div>
+              <div className="max-h-56 space-y-2 overflow-y-auto rounded-2xl border border-[var(--border-color)] bg-[var(--color-surface-muted)] p-3">
+                {availableTables.length === 0 ? (
+                  <p className="text-sm text-[var(--color-text-muted)]">Create tables first to assign them to waiters.</p>
+                ) : (
+                  availableTables.map((table) => {
+                    const isChecked = (formData.assignedTables || []).includes(table.id);
+
+                    return (
+                      <label
+                        key={table.id}
+                        className="flex items-center gap-3 rounded-xl bg-[var(--color-panel)] px-3 py-2 text-sm text-[var(--color-text)]"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={() => toggleAssignedTable(table.id)}
+                          className="h-4 w-4 accent-[var(--color-primary)]"
+                        />
+                        <span>{table.mergedDisplayName || `Table ${table.tableNumber}`}</span>
+                      </label>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          ) : null}
+
           <Input
-            label="Temporary Password"
+            label={editingStaff ? 'New Password' : 'Temporary Password'}
             type="password"
             autoComplete="new-password"
             value={formData.password}
             onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-            required
+            required={!editingStaff}
           />
+          {editingStaff ? (
+            <p className="text-xs text-[var(--color-text-muted)]">Leave password empty to keep the current one.</p>
+          ) : null}
 
           <div className="flex flex-col-reverse gap-3 sm:flex-row">
             <Button type="button" variant="secondary" className="w-full sm:flex-1" onClick={resetForm}>
@@ -374,7 +485,7 @@ export default function StaffManagement() {
             </Button>
             <Button type="submit" className="w-full sm:flex-1" disabled={submitting}>
               {submitting ? <Loader className="h-4 w-4 animate-spin" /> : null}
-              Create Login
+              {editingStaff ? 'Save Changes' : 'Create Login'}
             </Button>
           </div>
         </form>

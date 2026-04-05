@@ -208,6 +208,7 @@ function extractOnlineOrderFields(body = {}) {
 }
 
 export const createOrder = asyncHandler(async (req, res) => {
+  const orderOrigin = req.orderOrigin || (req.user ? 'pos' : 'qr');
   const normalizedOrder = {
     tableId: getTableIdFromBody(req.body) ?? null,
     items: (req.body.items || []).map((item) => ({
@@ -224,6 +225,7 @@ export const createOrder = asyncHandler(async (req, res) => {
     paymentMethod: getOptionalPaymentMethod(req.body),
     notes: getOptionalNotes(req.body) ?? '',
     requiresWaiterApproval: !req.user,
+    origin: orderOrigin,
     online: extractOnlineOrderFields(req.body),
   };
 
@@ -263,7 +265,7 @@ export const getOrderById = asyncHandler(async (req, res) => {
 export const getOrders = asyncHandler(async (req, res) => {
   const filters = {
     status: req.query.status,
-    tableNumber: req.query.tableNumber ? parseInt(req.query.tableNumber) : undefined,
+    tableNumber: req.query.tableNumber ? String(req.query.tableNumber).trim() : undefined,
     startDate: req.query.startDate,
     endDate: req.query.endDate,
     limit: parseInt(req.query.limit) || 50,

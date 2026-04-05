@@ -5,6 +5,7 @@ import Card from '../components/common/Card';
 import Button from '../components/common/Button';
 import Toast from '../components/common/Toast';
 import { orderAPI, restaurantAPI } from '../services/apiEndpoints';
+import '../styles/thermal-print.css';
 
 function resolveReturnPath(pathname = '', fallback = '') {
   if (fallback) {
@@ -29,6 +30,32 @@ function getTicketFromOrder(order, ticketId = '') {
   }
 
   return [...tickets].sort((left, right) => Number(right.sequence || 0) - Number(left.sequence || 0))[0];
+}
+
+function resolvePaperWidthMm(location, restaurant) {
+  const params = new URLSearchParams(location.search || '');
+  const queryValue = Number(params.get('paper') || '');
+  const stateValue = Number(location.state?.paperWidthMm || '');
+  const restaurantValue = Number(
+    restaurant?.receiptWidthMm ||
+    restaurant?.billing?.receiptWidthMm ||
+    restaurant?.printing?.receiptWidthMm ||
+    ''
+  );
+
+  if (queryValue === 58 || queryValue === 80) {
+    return queryValue;
+  }
+
+  if (stateValue === 58 || stateValue === 80) {
+    return stateValue;
+  }
+
+  if (restaurantValue === 58 || restaurantValue === 80) {
+    return restaurantValue;
+  }
+
+  return 80;
 }
 
 export default function KitchenTicket() {
@@ -95,6 +122,10 @@ export default function KitchenTicket() {
     () => location.state?.ticket || getTicketFromOrder(order, initialTicketId),
     [initialTicketId, location.state, order]
   );
+  const paperWidthMm = useMemo(
+    () => resolvePaperWidthMm(location, restaurant),
+    [location, restaurant]
+  );
 
   const handlePrint = () => {
     if (!ticket) {
@@ -142,7 +173,8 @@ export default function KitchenTicket() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="thermal-print-page space-y-6" style={{ '--thermal-width': `${paperWidthMm}mm` }}>
+      <style>{`@page { size: ${paperWidthMm}mm auto; margin: 0; }`}</style>
       {error ? <Toast type="error" message={error} /> : null}
 
       <Card className="kot-print-toolbar">
@@ -170,35 +202,45 @@ export default function KitchenTicket() {
       </Card>
 
       <div id="kot-section" className="kot-print-section">
-        <div className="kot-receipt mx-auto w-full max-w-[80mm] rounded-[18px] border border-black bg-white p-4 text-center text-black shadow-[0_18px_40px_rgba(15,23,42,0.12)]">
-          <div className="border-b border-dashed border-black pb-3">
-            <h1 className="text-base font-extrabold uppercase tracking-[0.12em]">{restaurant?.name || 'Restaurant'}</h1>
-            <p className="mt-2 text-[20px] font-black uppercase tracking-[0.16em]">KOT</p>
-          </div>
+        <div className="thermal-print-root">
+          <div className="kot-receipt thermal-receipt">
+            <div className="thermal-center">
+              <div className="thermal-title">{restaurant?.name || 'Restaurant'}</div>
+              <div className="thermal-subtitle">KOT</div>
+            </div>
 
-          <div className="grid grid-cols-[1fr_auto] gap-x-3 gap-y-1 border-b border-dashed border-black py-3 text-left text-[11px] leading-4">
-            <span className="font-bold">KOT Number</span>
-            <span className="text-right font-bold">{ticket.sequence || '-'}</span>
-            <span className="font-bold">Table Number</span>
-            <span className="text-right font-bold">{ticket.tableNumber || 'Walk-in'}</span>
-            <span className="font-bold">Order Type</span>
-            <span className="text-right font-bold">{String(order.orderType || '').replace('-', ' ') || 'Dine-in'}</span>
-            <span className="font-bold">Time</span>
-            <span className="text-right font-bold">{new Date(ticket.createdAt || order.createdAt || Date.now()).toLocaleString('en-IN')}</span>
-          </div>
+            <div className="thermal-separator">--------------------------------</div>
 
-          <div className="grid grid-cols-[1fr_54px] gap-2 border-b border-black py-2 text-[11px] font-extrabold uppercase tracking-[0.08em]">
-            <span className="text-left">Item</span>
-            <span className="text-right">Qty</span>
-          </div>
+            <div className="thermal-meta">
+              <span>KOT Number</span>
+              <span className="thermal-align-right">{ticket.sequence || '-'}</span>
+              <span>Table Number</span>
+              <span className="thermal-align-right">{ticket.tableNumber || 'Walk-in'}</span>
+              <span>Order Type</span>
+              <span className="thermal-align-right">{String(order.orderType || '').replace('-', ' ') || 'Dine-in'}</span>
+              <span>Time</span>
+              <span className="thermal-align-right">{new Date(ticket.createdAt || order.createdAt || Date.now()).toLocaleString('en-IN')}</span>
+            </div>
 
-          <div className="divide-y divide-dashed divide-black text-left">
-            {(ticket.items || []).map((item, index) => (
-              <div key={`${item.name}-${index}`} className="grid grid-cols-[1fr_54px] gap-2 py-3">
-                <span className="text-[16px] font-extrabold leading-5">{item.name}</span>
-                <span className="text-right text-[16px] font-extrabold leading-5">{item.quantity}</span>
-              </div>
-            ))}
+            <div className="thermal-separator">--------------------------------</div>
+
+            <div className="thermal-kot-head">
+              <span>Item</span>
+              <span className="thermal-align-right">Qty</span>
+            </div>
+
+            <div className="thermal-separator">--------------------------------</div>
+
+            <div className="thermal-items">
+              {(ticket.items || []).map((item, index) => (
+                <div key={`${item.name}-${index}`} className="thermal-kot-row">
+                  <span className="thermal-item-name thermal-strong">{item.name}</span>
+                  <span className="thermal-align-right thermal-strong">{item.quantity}</span>
+                </div>
+              ))}
+            </div>
+
+            <div className="thermal-separator">--------------------------------</div>
           </div>
         </div>
       </div>

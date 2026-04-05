@@ -35,6 +35,54 @@ export const errorHandler = (err, req, res, next) => {
     return sendError(res, 409, `${field} already exists`);
   }
 
+  // Handle Postgres/Supabase invalid type errors from stale schemas
+  if (
+    err?.code === '22P02' &&
+    String(err?.message || '').includes('invalid input syntax for type integer') &&
+    String(err?.message || '').includes('A1')
+  ) {
+    return sendError(
+      res,
+      400,
+      'Your tables schema is still numeric-only. Apply the table label migration to allow values like A1 or C9.'
+    );
+  }
+
+  if (
+    err?.code === '22P02' &&
+    String(err?.message || '').includes('invalid input syntax for type integer') &&
+    String(err?.message || '').includes('table_number')
+  ) {
+    return sendError(
+      res,
+      400,
+      'Your tables schema is still numeric-only. Apply the table label migration to allow alphanumeric table labels.'
+    );
+  }
+
+  if (
+    String(err?.message || '').includes('users.assigned_tables') ||
+    String(err?.message || '').includes("Could not find the 'assigned_tables' column of 'users' in the schema cache")
+  ) {
+    return sendError(
+      res,
+      500,
+      'Your database is missing users.assigned_tables. Apply the staff table-assignment migration and restart the backend.'
+    );
+  }
+
+  if (
+    String(err?.message || '').includes("Could not find the 'menu_item_recipes'") ||
+    String(err?.message || '').includes('menu_item_recipes') ||
+    String(err?.message || '').includes('inventory_items!inventory_item_id')
+  ) {
+    return sendError(
+      res,
+      500,
+      'Your database is missing the menu recipe tables/relations needed by menu management. Apply the inventory/menu recipe migrations and restart the backend.'
+    );
+  }
+
   // Handle custom AppError
   if (err.statusCode) {
     return sendError(res, err.statusCode, err.message);

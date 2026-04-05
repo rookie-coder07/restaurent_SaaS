@@ -3,7 +3,7 @@ import { authMiddleware } from '../middleware/auth.js';
 import { tenantIsolation, checkPermission } from '../middleware/tenantIsolation.js';
 import { validateRequest } from '../middleware/validation.js';
 import { updateRestaurantSchema, updateRestaurantSettingsSchema } from '../schemas/restaurant.schema.js';
-import { createStaffSchema } from '../schemas/auth.schema.js';
+import { createStaffSchema, updateStaffSchema } from '../schemas/auth.schema.js';
 import * as restaurantController from '../controllers/restaurantController.js';
 
 const router = express.Router();
@@ -19,6 +19,7 @@ router.put('/settings', checkPermission(['manage_restaurant']), validateRequest(
 // Staff management (owner only)
 router.post('/staff', checkPermission(['manage_staff']), validateRequest(createStaffSchema), restaurantController.createStaff);
 router.get('/staff', checkPermission(['manage_staff', 'view_staff']), restaurantController.getStaffUsers);
+router.put('/staff/:staffId', checkPermission(['manage_staff']), validateRequest(updateStaffSchema), restaurantController.updateStaff);
 router.delete('/staff/:staffId', checkPermission(['manage_staff']), restaurantController.deactivateStaff);
 
 // Subscription

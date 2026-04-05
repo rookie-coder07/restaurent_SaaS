@@ -14,8 +14,8 @@ const ACCESS_CARDS = [
     icon: Briefcase,
   },
   {
-    title: 'Staff Login',
-    href: '/staff/login',
+    title: 'POS Login',
+    href: '/pos/login',
     icon: Receipt,
   },
 ];

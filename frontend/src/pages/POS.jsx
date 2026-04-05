@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, Bike, Loader, Receipt, ShoppingBag, Store, TableProperties, Utensils } from 'lucide-react';
 import { orderAPI, restaurantAPI } from '../services/apiEndpoints';
@@ -9,9 +9,10 @@ import OnlineOrderInbox from '../components/pos/OnlineOrderInbox';
 import OnlineOrderDetailsPanel from '../components/pos/OnlineOrderDetailsPanel';
 import PaymentPanel from '../components/pos/PaymentPanel';
 import Modal from '../components/common/Modal';
-import { formatCurrency, formatDisplayOrderNumber } from '../utils/formatters';
+import { compareTableLabels, formatCurrency, formatDisplayOrderNumber } from '../utils/formatters';
 import { getPosWorkspaceDraftKey, usePosStore } from '../context/posStore';
 import { useAuthStore } from '../context/authStore';
+import { useManagerStore } from '../context/managerStore';
 import { useApi } from '../hooks/useApi';
 import { buildInvoiceData, calculateInvoiceSummary, getRestaurantBillingSettings } from '../utils/invoice';
 
@@ -71,6 +72,46 @@ function normalizeOrderItemForCart(item) {
 
 function normalizePaymentMethod(value) {
   return String(value || '').toLowerCase() === 'upi' ? 'upi' : 'cash';
+}
+
+function playWaiterQrAlertBuzzer() {
+  try {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) {
+      return;
+    }
+
+    const audioContext = new AudioContextClass();
+    const now = audioContext.currentTime;
+    const tones = [
+      { frequency: 740, start: now, duration: 0.08 },
+      { frequency: 620, start: now + 0.1, duration: 0.08 },
+      { frequency: 740, start: now + 0.2, duration: 0.12 },
+    ];
+
+    tones.forEach((tone) => {
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+
+      oscillator.type = 'square';
+      oscillator.frequency.setValueAtTime(tone.frequency, tone.start);
+
+      gainNode.gain.setValueAtTime(0.0001, tone.start);
+      gainNode.gain.exponentialRampToValueAtTime(0.18, tone.start + 0.01);
+      gainNode.gain.exponentialRampToValueAtTime(0.0001, tone.start + tone.duration);
+
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+      oscillator.start(tone.start);
+      oscillator.stop(tone.start + tone.duration);
+    });
+
+    window.setTimeout(() => {
+      audioContext.close().catch(() => {});
+    }, 600);
+  } catch (error) {
+    console.warn('Waiter QR alert buzzer could not play.', error);
+  }
 }
 
 function createItemsSignature(items = []) {
@@ -187,6 +228,7 @@ function serializePromisedAt(value) {
 export default function POS() {
   const navigate = useNavigate();
   const user = useAuthStore((state) => state.user);
+  const logWaiterActivity = useManagerStore((state) => state.logWaiterActivity);
   const { data: restaurantProfile = {} } = useApi(restaurantAPI.getProfile);
   const [searchParams, setSearchParams] = useSearchParams();
   const menuItemsData = usePosStore((state) => state.menuItemsData);
@@ -198,6 +240,7 @@ export default function POS() {
   const menuError = usePosStore((state) => state.menuError);
   const categoryError = usePosStore((state) => state.categoryError);
   const tableError = usePosStore((state) => state.tableError);
+  const openBillsData = usePosStore((state) => state.openBillsData);
   const cachedOnlineInbox = usePosStore((state) => state.onlineInbox);
   const cachedOnlineInboxError = usePosStore((state) => state.onlineInboxError);
   const onlineInboxLoading = usePosStore((state) => state.onlineInboxLoading);
@@ -246,9 +289,6 @@ export default function POS() {
   const [serviceCharge, setServiceCharge] = useState(initialWorkspace.serviceCharge || '');
   const [deliveryCharge, setDeliveryCharge] = useState(initialWorkspace.deliveryCharge || '');
   const [pinnedOrderId, setPinnedOrderId] = useState(initialWorkspace.pinnedOrderId || '');
-  const [isCancelling, setIsCancelling] = useState(false);
-  const [showCancelModal, setShowCancelModal] = useState(false);
-  const [cancelReason, setCancelReason] = useState('');
   const [editingItemId, setEditingItemId] = useState('');
   const [showItemDetailsModal, setShowItemDetailsModal] = useState(false);
   const [itemNoteDraft, setItemNoteDraft] = useState('');
@@ -268,6 +308,8 @@ export default function POS() {
   const [onlineInboxError, setOnlineInboxError] = useState(cachedOnlineInboxError || '');
   const [updatingOnlineOrderId, setUpdatingOnlineOrderId] = useState('');
   const [isSwitchingTable, setIsSwitchingTable] = useState(false);
+  const qrAlertedOrderIdsRef = useRef(new Set());
+  const hasPrimedQrAlertsRef = useRef(false);
 
   const items = useMemo(
     () => (menuItemsData?.items || []).map(normalizeMenuItem).filter((item) => item.isAvailable),
@@ -279,12 +321,32 @@ export default function POS() {
       (tableData?.tables || [])
         .map(normalizeTable)
         .filter((table) => String(table.status).toLowerCase() !== 'inactive')
-        .sort((left, right) => Number(left.tableNumber || 0) - Number(right.tableNumber || 0)),
+        .sort((left, right) => compareTableLabels(left.tableNumber, right.tableNumber)),
     [tableData]
   );
+  const assignedTableIds = useMemo(
+    () => (Array.isArray(user?.assignedTables) ? user.assignedTables.filter(Boolean) : []),
+    [user?.assignedTables]
+  );
+  const isWaiterAccount = user?.role === 'staff';
+  const waiterTables = useMemo(
+    () => (isWaiterAccount ? tables.filter((table) => assignedTableIds.includes(table.id)) : tables),
+    [assignedTableIds, isWaiterAccount, tables]
+  );
+  const pendingAssignedOrders = useMemo(
+    () =>
+      (Array.isArray(openBillsData) ? openBillsData : []).filter(
+        (order) => order.status === 'awaiting_waiter_approval' && assignedTableIds.includes(order.tableId)
+      ),
+    [assignedTableIds, openBillsData]
+  );
+  const pendingAssignedQrOrders = useMemo(
+    () => pendingAssignedOrders.filter((order) => order.origin === 'qr'),
+    [pendingAssignedOrders]
+  );
   const selectedTable = useMemo(
-    () => tables.find((table) => table.id === selectedTableId) || null,
-    [selectedTableId, tables]
+    () => waiterTables.find((table) => table.id === selectedTableId) || null,
+    [selectedTableId, waiterTables]
   );
 
   useEffect(() => {
@@ -309,6 +371,23 @@ export default function POS() {
     setOnlineInbox(cachedOnlineInbox || []);
     setOnlineInboxError(cachedOnlineInboxError || '');
   }, [cachedOnlineInbox, cachedOnlineInboxError]);
+
+  useEffect(() => {
+    const nextIds = new Set(pendingAssignedQrOrders.map((order) => order.id).filter(Boolean));
+
+    if (!hasPrimedQrAlertsRef.current) {
+      qrAlertedOrderIdsRef.current = nextIds;
+      hasPrimedQrAlertsRef.current = true;
+      return;
+    }
+
+    const hasNewQrAlert = Array.from(nextIds).some((id) => !qrAlertedOrderIdsRef.current.has(id));
+    qrAlertedOrderIdsRef.current = nextIds;
+
+    if (isWaiterAccount && hasNewQrAlert) {
+      playWaiterQrAlertBuzzer();
+    }
+  }, [isWaiterAccount, pendingAssignedQrOrders]);
 
   useEffect(() => {
     if (!incomingTableId) {
@@ -794,8 +873,6 @@ export default function POS() {
     setPackingCharge('');
     setServiceCharge('');
     setDeliveryCharge('');
-    setShowCancelModal(false);
-    setCancelReason('');
     setEditingItemId('');
     setShowItemDetailsModal(false);
     setItemNoteDraft('');
@@ -923,6 +1000,9 @@ export default function POS() {
     setSubmitError(null);
     setSubmitSuccess(null);
     setIsSwitchingTable(true);
+    if (user?.id) {
+      logWaiterActivity({ waiterId: user.id, action: 'selected_table', tableId });
+    }
   };
 
   const handleChangeTable = () => {
@@ -1095,6 +1175,14 @@ export default function POS() {
       if (savedOrder?.tableId) {
         cacheTableOrder(savedOrder.tableId, savedOrder);
       }
+      if (user?.id && savedOrder?.tableId) {
+        logWaiterActivity({
+          waiterId: user.id,
+          action: isEditingActiveBill ? 'updated_order' : 'created_order',
+          tableId: savedOrder.tableId,
+          orderId: savedOrder.id,
+        });
+      }
       refreshTableOverview({ force: true }).catch(() => {
         // Shared store state updates in the background.
       });
@@ -1140,6 +1228,14 @@ export default function POS() {
       applyOrderToWorkspace(updatedOrder);
       if (updatedOrder?.tableId) {
         cacheTableOrder(updatedOrder.tableId, updatedOrder);
+      }
+      if (user?.id && updatedOrder?.tableId) {
+        logWaiterActivity({
+          waiterId: user.id,
+          action: 'sent_to_kitchen',
+          tableId: updatedOrder.tableId,
+          orderId: updatedOrder.id,
+        });
       }
       refreshTableOverview({ force: true }).catch(() => {
         // Shared store state updates in the background.
@@ -1212,6 +1308,14 @@ export default function POS() {
         clearWorkspaceDraft(getPosWorkspaceDraftKey('dine-in', settledTableId));
         clearTableOrderCache(settledTableId);
       }
+      if (user?.id && settledTableId) {
+        logWaiterActivity({
+          waiterId: user.id,
+          action: 'settled_order',
+          tableId: settledTableId,
+          orderId: settledOrder?.id || orderToSettle?.id,
+        });
+      }
       refreshTableOverview({ force: true }).catch(() => {
         // Shared store state updates in the background.
       });
@@ -1237,51 +1341,6 @@ export default function POS() {
     }
   };
 
-  const handleCancelBill = async () => {
-    if (!activeOrder?.id) {
-      return;
-    }
-
-    const trimmedReason = cancelReason.trim();
-    if (!trimmedReason) {
-      setSubmitError('Add a reason before cancelling the bill.');
-      return;
-    }
-
-    setIsCancelling(true);
-    setSubmitError(null);
-    setSubmitSuccess(null);
-
-    try {
-      await orderAPI.updateStatus(activeOrder.id, {
-        status: 'cancelled',
-        cancelReason: trimmedReason,
-      });
-      const cancelledTableId = activeOrder.tableId || '';
-
-      clearBillDraft();
-      setPinnedOrderId('');
-      setOrderType('');
-      setSelectedTableId('');
-      syncBillingSearchParams();
-      if (cancelledTableId) {
-        clearWorkspaceDraft(getPosWorkspaceDraftKey('dine-in', cancelledTableId));
-        clearTableOrderCache(cancelledTableId);
-      }
-      refreshTableOverview({ force: true }).catch(() => {
-        // Shared store state updates in the background.
-      });
-      refreshOnlineInbox();
-      setCancelReason('');
-      setShowCancelModal(false);
-      setSubmitSuccess(`${formatDisplayOrderNumber(activeOrder)} cancelled successfully.`);
-    } catch (error) {
-      setSubmitError(error.response?.data?.message || 'Failed to cancel the bill.');
-    } finally {
-      setIsCancelling(false);
-    }
-  };
-
   const handleCreateOnlineOrder = () => {
     setPinnedOrderId('');
     setSelectedTableId('');
@@ -1296,6 +1355,14 @@ export default function POS() {
     applyOrderToWorkspace(order);
     setSubmitError(null);
     setSubmitSuccess(`${formatDisplayOrderNumber(order)} opened in the POS workspace.`);
+    if (user?.id && order?.tableId) {
+      logWaiterActivity({
+        waiterId: user.id,
+        action: 'opened_order',
+        tableId: order.tableId,
+        orderId: order.id,
+      });
+    }
   };
 
   const handleUpdateOnlineWorkflow = async (order, workflowStatus) => {
@@ -1350,20 +1417,9 @@ export default function POS() {
   ];
 
   return (
-    <div className="space-y-5">
-      <section className="rounded-[2rem] border border-[var(--border-color)] bg-[linear-gradient(135deg,var(--color-primary-soft),rgba(255,255,255,0.02))] p-5 shadow-[var(--shadow-card)]">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[var(--text-secondary)]">Point Of Sale</p>
-            <h1 className="mt-2 text-3xl font-bold text-[var(--text-primary)]">Fast Billing</h1>
-            <p className="mt-2 max-w-2xl text-sm text-[var(--text-secondary)]">
-              Waiter-first flow: choose a table, reopen the running bill if one already exists, keep saving changes on
-              the same bill, send clean KOT actions to kitchen, and settle cleanly with cash or UPI when the guest is
-              ready to pay.
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+    <div className="compact-page space-y-4">
+      <section className="rounded-[var(--radius-card)] border border-[var(--border-color)] bg-[linear-gradient(135deg,var(--color-primary-soft),rgba(255,255,255,0.02))] p-4 sm:p-5 shadow-[var(--shadow-card)]">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <div className="rounded-[1.5rem] bg-[var(--bg-card)] px-4 py-3">
               <div className="flex items-center gap-3">
                 <Store className="h-5 w-5 text-[var(--color-primary)]" />
@@ -1391,7 +1447,6 @@ export default function POS() {
                 </div>
               </div>
             </div>
-          </div>
         </div>
       </section>
 
@@ -1451,7 +1506,7 @@ export default function POS() {
           </div>
         </section>
       ) : shouldChooseTableFirst ? (
-        <section className="rounded-[2rem] border border-[var(--border-color)] bg-[var(--bg-card)] p-5 shadow-[var(--shadow-card)]">
+        <section className="rounded-[var(--radius-card)] border border-[var(--border-color)] bg-[var(--bg-card)] p-4 sm:p-5 shadow-[var(--shadow-card)]">
           <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--text-secondary)]">Step 2</p>
@@ -1472,7 +1527,27 @@ export default function POS() {
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            {tables.map((table) => (
+            {isWaiterAccount && waiterTables.length === 0 ? (
+              <div className="rounded-[1.7rem] border border-dashed border-[var(--border-color)] bg-[var(--bg-card-muted)] p-6 text-left xl:col-span-3">
+                <p className="text-lg font-bold text-[var(--text-primary)]">No tables assigned yet</p>
+                <p className="mt-2 text-sm text-[var(--text-secondary)]">
+                  This waiter account does not have any table numbers assigned yet. Ask the owner to assign tables from the staff screen.
+                </p>
+              </div>
+            ) : null}
+            {pendingAssignedQrOrders.length > 0 ? (
+              <div className="rounded-[1.7rem] border border-amber-500/20 bg-amber-500/10 p-5 xl:col-span-3">
+                <p className="text-sm font-bold uppercase tracking-[0.16em] text-amber-300">New QR orders waiting</p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {pendingAssignedQrOrders.slice(0, 6).map((order) => (
+                    <span key={order.id} className="rounded-full bg-[var(--bg-card)] px-3 py-1 text-sm font-semibold text-[var(--text-primary)]">
+                      Table {order.tableNumber || 'Walk-in'}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+            {waiterTables.map((table) => (
               <button
                 key={table.id}
                 type="button"
@@ -1497,7 +1572,7 @@ export default function POS() {
           </div>
         </section>
       ) : shouldShowBlockingTableLoader ? (
-        <section className="flex min-h-[24rem] items-center justify-center rounded-[2rem] border border-[var(--border-color)] bg-[var(--bg-card)] p-6 shadow-[var(--shadow-card)]">
+        <section className="flex min-h-[20rem] items-center justify-center rounded-[var(--radius-card)] border border-[var(--border-color)] bg-[var(--bg-card)] p-5 shadow-[var(--shadow-card)]">
           <div className="text-center">
             <div className="mx-auto inline-flex h-16 w-16 items-center justify-center rounded-full bg-[var(--color-primary-soft)] text-[var(--color-primary)]">
               <Loader className="h-8 w-8 animate-spin" />
@@ -1520,10 +1595,10 @@ export default function POS() {
               </div>
             </div>
           ) : null}
-        <div className={`grid gap-5 transition-opacity duration-200 xl:grid-cols-[minmax(0,1.55fr)_minmax(24rem,0.95fr)] ${isSwitchingTable ? 'opacity-80' : 'opacity-100'}`}>
-          <div className="space-y-5">
+        <div className={`grid gap-4 transition-opacity duration-200 xl:grid-cols-[minmax(0,1.55fr)_minmax(23rem,0.95fr)] ${isSwitchingTable ? 'opacity-80' : 'opacity-100'}`}>
+          <div className="space-y-4">
             {orderType === 'dine-in' && selectedTable ? (
-              <div className="flex flex-col gap-4 rounded-[1.6rem] border border-[var(--border-color)] bg-[var(--bg-card)] px-4 py-4 shadow-[var(--shadow-card)] lg:flex-row lg:items-center lg:justify-between">
+              <div className="flex flex-col gap-4 rounded-[var(--radius-card)] border border-[var(--border-color)] bg-[var(--bg-card)] px-4 py-4 shadow-[var(--shadow-card)] lg:flex-row lg:items-center lg:justify-between">
                 <div className="space-y-3">
                   <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--text-secondary)]">
                     {orderType.replace('-', ' ')}
@@ -1596,7 +1671,7 @@ export default function POS() {
                 </div>
               </div>
             ) : orderType ? (
-              <div className="flex flex-col gap-4 rounded-[1.6rem] border border-[var(--border-color)] bg-[var(--bg-card)] px-4 py-4 shadow-[var(--shadow-card)] lg:flex-row lg:items-center lg:justify-between">
+              <div className="flex flex-col gap-4 rounded-[var(--radius-card)] border border-[var(--border-color)] bg-[var(--bg-card)] px-4 py-4 shadow-[var(--shadow-card)] lg:flex-row lg:items-center lg:justify-between">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--text-secondary)]">Service Type</p>
                   <p className="mt-1 text-xl font-bold text-[var(--text-primary)]">
@@ -1652,7 +1727,7 @@ export default function POS() {
             />
           </div>
 
-          <div className="flex min-h-[40rem] flex-col gap-5">
+          <div className="flex min-h-0 flex-col gap-4">
             <OrderControls
               orderType={orderType}
               onOrderTypeChange={handleOrderTypeChange}
@@ -1727,11 +1802,9 @@ export default function POS() {
                 onSubmit={handleSubmit}
                 onSendToKitchen={handleSendToKitchen}
                 onSettle={handleSettle}
-                onCancel={isEditingActiveBill ? () => setShowCancelModal(true) : null}
                 isSubmitting={isSubmitting}
                 isSendingToKitchen={isSendingToKitchen}
                 isSettling={isSettling}
-                isCancelling={isCancelling}
                 error={submitError}
                 success={submitSuccess}
                 submitLabel={isEditingActiveBill ? 'SAVE CHANGES' : 'SAVE RUNNING BILL'}
@@ -1753,11 +1826,9 @@ export default function POS() {
                       : 'SETTLE BILL'
                     : 'CREATE & SETTLE BILL'
                 }
-                cancelLabel="CANCEL BILL"
                 isSubmitDisabled={isLoadingTableOrder}
                 isSendToKitchenDisabled={isLoadingTableOrder}
                 isSettleDisabled={isLoadingTableOrder || (paymentMethod === 'cash' && shortfallAmount > 0)}
-                isCancelDisabled={isLoadingTableOrder || !isEditingActiveBill}
               />
             </div>
           </div>
@@ -1825,57 +1896,6 @@ export default function POS() {
         </div>
       </Modal>
 
-      <Modal
-        title={activeOrder ? `Cancel ${formatDisplayOrderNumber(activeOrder)}` : 'Cancel Bill'}
-        isOpen={showCancelModal}
-        onClose={() => {
-          if (isCancelling) {
-            return;
-          }
-
-          setShowCancelModal(false);
-          setCancelReason('');
-        }}
-        maxWidth="max-w-lg"
-      >
-        <div className="space-y-4">
-          <div className="rounded-[1.4rem] border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
-            Cancelling a bill marks it as closed and removes it from the running-bill flow for this table.
-          </div>
-
-          <label className="block space-y-2">
-            <span className="text-sm font-medium text-[var(--text-primary)]">Cancellation Reason</span>
-            <textarea
-              value={cancelReason}
-              onChange={(event) => setCancelReason(event.target.value)}
-              placeholder="Example: guest left, wrong table selected, bill created by mistake."
-              className="min-h-[110px] w-full resize-y rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card-muted)] px-4 py-3 text-sm text-[var(--text-primary)] outline-none transition focus:border-[var(--color-primary)]"
-            />
-          </label>
-
-          <div className="flex flex-col-reverse gap-3 sm:flex-row">
-            <button
-              type="button"
-              onClick={() => {
-                setShowCancelModal(false);
-                setCancelReason('');
-              }}
-              disabled={isCancelling}
-              className="min-h-[3.5rem] w-full rounded-[1.3rem] border border-[var(--border-color)] bg-[var(--bg-card-muted)] px-4 text-sm font-semibold text-[var(--text-primary)] transition hover:bg-[var(--color-primary-soft)] disabled:cursor-not-allowed disabled:opacity-50 sm:flex-1"
-            >
-              Keep Bill
-            </button>
-            <button
-              type="button"
-              onClick={handleCancelBill}
-              disabled={isCancelling}
-              className="min-h-[3.5rem] w-full rounded-[1.3rem] bg-[#dc2626] px-4 text-sm font-semibold text-white transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-60 sm:flex-1"
-            >
-              {isCancelling ? 'Cancelling...' : 'Confirm Cancel'}
-            </button>
-          </div>
-        </div>
-      </Modal>
     </div>
   );
 }

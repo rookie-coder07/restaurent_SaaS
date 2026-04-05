@@ -58,15 +58,33 @@ export const formatTime = (date) => {
   }).format(parsedDate);
 };
 
-const getShortOrderNumber = (order) => {
-  const displayValue = order?.displayOrderNumber || '';
-  const sequenceMatch = displayValue.match(/-(\d+)$/);
+export const compareTableLabels = (left, right) =>
+  String(left || '').localeCompare(String(right || ''), undefined, {
+    numeric: true,
+    sensitivity: 'base',
+  });
 
-  if (sequenceMatch) {
-    return `#${String(Number(sequenceMatch[1])).padStart(2, '0')}`;
+export const formatCompactTableLabel = (value, walkInLabel = '#Walk-in') => {
+  const normalized = String(value || '').trim();
+
+  if (!normalized) {
+    return walkInLabel;
   }
 
-  const numericDisplayValue = String(displayValue).match(/^#?(\d+)$/);
+  return /^\d+$/.test(normalized)
+    ? `#${normalized.padStart(2, '0')}`
+    : `#${normalized}`;
+};
+
+const getShortOrderNumber = (order) => {
+  const displayValue = order?.displayOrderNumber || '';
+  const normalizedDisplayValue = String(displayValue).trim();
+
+  if (/^ORD-\d{8}-\d+$/i.test(normalizedDisplayValue)) {
+    return normalizedDisplayValue.toUpperCase();
+  }
+
+  const numericDisplayValue = normalizedDisplayValue.match(/^#?(\d+)$/);
 
   if (numericDisplayValue) {
     return `#${String(Number(numericDisplayValue[1])).padStart(2, '0')}`;

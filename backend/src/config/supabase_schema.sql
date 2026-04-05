@@ -33,7 +33,9 @@ CREATE TABLE IF NOT EXISTS users (
   name VARCHAR(255) NOT NULL,
   email VARCHAR(255) NOT NULL,
   password_hash VARCHAR(255) NOT NULL,
+  phone VARCHAR(20),
   role VARCHAR(50) DEFAULT 'staff',
+  assigned_tables UUID[] DEFAULT '{}',
   status VARCHAR(50) DEFAULT 'active',
   created_at TIMESTAMP DEFAULT now(),
   updated_at TIMESTAMP DEFAULT now(),
@@ -102,7 +104,7 @@ CREATE TABLE IF NOT EXISTS order_items (
 CREATE TABLE IF NOT EXISTS tables (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   restaurant_id UUID NOT NULL REFERENCES restaurants(id) ON DELETE CASCADE,
-  table_number INT NOT NULL,
+  table_number TEXT NOT NULL,
   capacity INT NOT NULL,
   location VARCHAR(100) DEFAULT 'main',
   status VARCHAR(50) DEFAULT 'available',

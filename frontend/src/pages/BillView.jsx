@@ -7,6 +7,7 @@ import Toast from '../components/common/Toast';
 import { orderAPI, restaurantAPI } from '../services/apiEndpoints';
 import { buildInvoiceData } from '../utils/invoice';
 import { formatCurrency, formatDisplayOrderNumber } from '../utils/formatters';
+import '../styles/thermal-print.css';
 
 function resolveReturnPath(pathname = '', fallback = '') {
   if (fallback) {
@@ -18,6 +19,32 @@ function resolveReturnPath(pathname = '', fallback = '') {
   }
 
   return '/pos';
+}
+
+function resolvePaperWidthMm(location, restaurant) {
+  const params = new URLSearchParams(location.search || '');
+  const queryValue = Number(params.get('paper') || '');
+  const stateValue = Number(location.state?.paperWidthMm || '');
+  const restaurantValue = Number(
+    restaurant?.receiptWidthMm ||
+    restaurant?.billing?.receiptWidthMm ||
+    restaurant?.printing?.receiptWidthMm ||
+    ''
+  );
+
+  if (queryValue === 58 || queryValue === 80) {
+    return queryValue;
+  }
+
+  if (stateValue === 58 || stateValue === 80) {
+    return stateValue;
+  }
+
+  if (restaurantValue === 58 || restaurantValue === 80) {
+    return restaurantValue;
+  }
+
+  return 80;
 }
 
 export default function BillView() {
@@ -99,6 +126,10 @@ export default function BillView() {
       '',
     [order, restaurant]
   );
+  const paperWidthMm = useMemo(
+    () => resolvePaperWidthMm(location, restaurant),
+    [location, restaurant]
+  );
 
   const handlePrint = () => {
     if (!invoice) {
@@ -146,7 +177,8 @@ export default function BillView() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="compact-page thermal-print-page space-y-4" style={{ '--thermal-width': `${paperWidthMm}mm` }}>
+      <style>{`@page { size: ${paperWidthMm}mm auto; margin: 0; }`}</style>
       {error ? <Toast type="error" message={error} /> : null}
 
       <Card className="bill-print-toolbar">
@@ -175,89 +207,102 @@ export default function BillView() {
         </div>
       </Card>
 
-      <div id="bill-section" className="bill-print-section">
-        <div className="bill-receipt mx-auto w-full max-w-[80mm] rounded-[18px] border border-black bg-white p-4 text-black shadow-[0_18px_40px_rgba(15,23,42,0.12)]">
-          <div className="border-b border-dashed border-black pb-3 text-center">
-            <h1 className="text-base font-bold uppercase tracking-[0.08em]">{invoice.restaurantName}</h1>
-            {invoice.address ? <p className="mt-1 text-[11px] leading-4">{invoice.address}</p> : null}
-            {(invoice.phone || invoice.gstin) ? (
-              <p className="mt-1 text-[11px] leading-4">
-                {invoice.phone ? `Ph: ${invoice.phone}` : ''}
-                {invoice.phone && invoice.gstin ? ' | ' : ''}
-                {invoice.gstin ? `GSTIN: ${invoice.gstin}` : ''}
-              </p>
-            ) : null}
-          </div>
-
-          <div className="grid grid-cols-[1fr_auto] gap-x-3 gap-y-1 border-b border-dashed border-black py-3 text-[11px] leading-4">
-            <span className="font-semibold">Invoice No</span>
-            <span className="text-right">{invoice.invoiceNumber}</span>
-            <span className="font-semibold">Date & Time</span>
-            <span className="text-right">{new Date(invoice.invoiceDate).toLocaleString('en-IN')}</span>
-            <span className="font-semibold">Order Type</span>
-            <span className="text-right">{String(invoice.orderType || '').replace('-', ' ')}</span>
-            <span className="font-semibold">Table</span>
-            <span className="text-right">{invoice.tableNumber || 'Walk-in'}</span>
-            <span className="font-semibold">Cashier</span>
-            <span className="text-right">{invoice.cashierName || 'Cashier'}</span>
-            {invoice.kotReference ? (
-              <>
-                <span className="font-semibold">KOT Ref</span>
-                <span className="text-right">{invoice.kotReference}</span>
-              </>
-            ) : null}
-          </div>
-
-          <div className="py-3">
-            <div className="grid grid-cols-[1fr_34px_54px_64px] gap-2 border-b border-black pb-2 text-[11px] font-bold uppercase tracking-[0.08em]">
-              <span>Item</span>
-              <span className="text-right">Qty</span>
-              <span className="text-right">Rate</span>
-              <span className="text-right">Amount</span>
+      <div id="bill-section" className="bill-print-section overflow-x-auto">
+        <div className="thermal-print-root">
+          <div className="bill-receipt thermal-receipt">
+            <div className="thermal-center">
+              <div className="thermal-title">{invoice.restaurantName}</div>
+              {invoice.address ? <div className="thermal-muted">{invoice.address}</div> : null}
+              {(invoice.phone || invoice.gstin) ? (
+                <div className="thermal-muted">
+                  {invoice.phone ? `Ph: ${invoice.phone}` : ''}
+                  {invoice.phone && invoice.gstin ? ' | ' : ''}
+                  {invoice.gstin ? `GSTIN: ${invoice.gstin}` : ''}
+                </div>
+              ) : null}
             </div>
-            <div className="divide-y divide-dashed divide-black">
+
+            <div className="thermal-separator">--------------------------------</div>
+
+            <div className="thermal-meta">
+              <span>Invoice No</span>
+              <span className="thermal-align-right">{invoice.invoiceNumber}</span>
+              <span>Date & Time</span>
+              <span className="thermal-align-right">{new Date(invoice.invoiceDate).toLocaleString('en-IN')}</span>
+              <span>Order Type</span>
+              <span className="thermal-align-right">{String(invoice.orderType || '').replace('-', ' ')}</span>
+              <span>Table</span>
+              <span className="thermal-align-right">{invoice.tableNumber || 'Walk-in'}</span>
+              <span>Cashier</span>
+              <span className="thermal-align-right">{invoice.cashierName || 'Cashier'}</span>
+              {invoice.kotReference ? (
+                <>
+                  <span>KOT Ref</span>
+                  <span className="thermal-align-right">{invoice.kotReference}</span>
+                </>
+              ) : null}
+            </div>
+
+            <div className="thermal-separator">--------------------------------</div>
+
+            <div className="thermal-bill-head">
+              <span>Item</span>
+              <span className="thermal-align-right">Qty</span>
+              <span className="thermal-align-right">Rate</span>
+              <span className="thermal-align-right">Amt</span>
+            </div>
+
+            <div className="thermal-separator">--------------------------------</div>
+
+            <div className="thermal-items">
               {invoice.items.map((item, index) => (
-                <div key={`${item.name}-${index}`} className="grid grid-cols-[1fr_34px_54px_64px] gap-2 py-2 text-[11px] leading-4">
-                  <span className="pr-2">{item.name}</span>
-                  <span className="text-right">{item.quantity}</span>
-                  <span className="text-right">{formatCurrency(item.price)}</span>
-                  <span className="text-right font-semibold">{formatCurrency(item.total)}</span>
+                <div key={`${item.name}-${index}`} className="thermal-bill-row">
+                  <span className="thermal-item-name">{item.name}</span>
+                  <span className="thermal-align-right">{item.quantity}</span>
+                  <span className="thermal-align-right">{formatCurrency(item.price)}</span>
+                  <span className="thermal-align-right thermal-strong">{formatCurrency(item.total)}</span>
                 </div>
               ))}
             </div>
-          </div>
 
-          <div className="space-y-1 border-t border-dashed border-black pt-3 text-[11px] leading-4">
-            <div className="flex items-center justify-between"><span>Subtotal</span><span>{formatCurrency(invoice.summary.subtotal)}</span></div>
-            <div className="flex items-center justify-between"><span>Discount</span><span>-{formatCurrency(invoice.summary.orderDiscountAmount + invoice.summary.managerDiscountAmount)}</span></div>
-            <div className="flex items-center justify-between"><span>Taxable Amount</span><span>{formatCurrency(invoice.summary.taxableAmount)}</span></div>
-            <div className="flex items-center justify-between"><span>CGST ({invoice.summary.cgstRate}%)</span><span>{formatCurrency(invoice.summary.cgstAmount)}</span></div>
-            <div className="flex items-center justify-between"><span>SGST ({invoice.summary.sgstRate}%)</span><span>{formatCurrency(invoice.summary.sgstAmount)}</span></div>
-            {invoice.summary.chargesTotal > 0 ? (
-              <div className="flex items-center justify-between"><span>Charges</span><span>{formatCurrency(invoice.summary.chargesTotal)}</span></div>
+            <div className="thermal-separator">--------------------------------</div>
+
+            <div className="thermal-summary">
+              <div className="thermal-summary-row"><span>Subtotal</span><span>{formatCurrency(invoice.summary.subtotal)}</span></div>
+              <div className="thermal-summary-row"><span>Discount</span><span>-{formatCurrency(invoice.summary.orderDiscountAmount + invoice.summary.managerDiscountAmount)}</span></div>
+              <div className="thermal-summary-row"><span>Taxable</span><span>{formatCurrency(invoice.summary.taxableAmount)}</span></div>
+              <div className="thermal-summary-row"><span>CGST ({invoice.summary.cgstRate}%)</span><span>{formatCurrency(invoice.summary.cgstAmount)}</span></div>
+              <div className="thermal-summary-row"><span>SGST ({invoice.summary.sgstRate}%)</span><span>{formatCurrency(invoice.summary.sgstAmount)}</span></div>
+              {invoice.summary.chargesTotal > 0 ? (
+                <div className="thermal-summary-row"><span>Charges</span><span>{formatCurrency(invoice.summary.chargesTotal)}</span></div>
+              ) : null}
+              <div className="thermal-summary-row"><span>Total</span><span>{formatCurrency(invoice.summary.payableBeforeRound)}</span></div>
+              <div className="thermal-summary-row"><span>Round Off</span><span>{formatCurrency(invoice.summary.roundOff)}</span></div>
+              <div className="thermal-summary-row thermal-strong"><span>Final Amount</span><span>{formatCurrency(invoice.summary.grandTotal)}</span></div>
+            </div>
+
+            <div className="thermal-separator">--------------------------------</div>
+
+            <div className="thermal-summary">
+              <div className="thermal-summary-row"><span>Payment Mode</span><span>{String(invoice.paymentMode || 'cash').toUpperCase()}</span></div>
+              <div className="thermal-summary-row"><span>Paid Amount</span><span>{formatCurrency(invoice.paidAmount)}</span></div>
+            </div>
+
+            {qrCodeImage ? (
+              <>
+                <div className="thermal-separator">--------------------------------</div>
+                <div className="thermal-center">
+                  <img src={qrCodeImage} alt="Payment QR" className="mx-auto h-28 w-28 object-contain" />
+                </div>
+              </>
             ) : null}
-            <div className="flex items-center justify-between border-t border-black pt-2 font-bold uppercase tracking-[0.06em]"><span>Total</span><span>{formatCurrency(invoice.summary.payableBeforeRound)}</span></div>
-            <div className="flex items-center justify-between"><span>Round Off</span><span>{formatCurrency(invoice.summary.roundOff)}</span></div>
-            <div className="flex items-center justify-between border-t border-black pt-2 text-[14px] font-extrabold uppercase">
-              <span>Final Amount</span>
-              <span>{formatCurrency(invoice.summary.grandTotal)}</span>
+
+            <div className="thermal-separator">--------------------------------</div>
+
+            <div className="thermal-center">
+              <div>Thank you for dining with us</div>
+              <div className="thermal-muted">Visit Again</div>
             </div>
-          </div>
-
-          <div className="mt-3 border-t border-dashed border-black pt-3 text-[11px] leading-4">
-            <div className="flex items-center justify-between"><span>Payment Mode</span><span>{String(invoice.paymentMode || 'cash').toUpperCase()}</span></div>
-            <div className="mt-1 flex items-center justify-between"><span>Paid Amount</span><span>{formatCurrency(invoice.paidAmount)}</span></div>
-          </div>
-
-          {qrCodeImage ? (
-            <div className="mt-4 border-t border-dashed border-black pt-3 text-center">
-              <img src={qrCodeImage} alt="Payment QR" className="mx-auto h-28 w-28 object-contain" />
-            </div>
-          ) : null}
-
-          <div className="mt-4 border-t border-dashed border-black pt-3 text-center text-[11px] leading-4">
-            <p>Thank you for dining with us</p>
-            <p className="mt-1">Visit Again</p>
           </div>
         </div>
       </div>

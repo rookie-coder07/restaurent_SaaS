@@ -32,4 +32,14 @@ export const createStaffSchema = Joi.object({
   phone: Joi.string().pattern(/^\d{10}$/).required(),
   password: Joi.string().required(),
   role: Joi.string().valid('manager', 'kitchen_staff', 'staff').required(),
+  assignedTables: Joi.array().items(Joi.string().uuid()).default([]),
+});
+
+export const updateStaffSchema = Joi.object({
+  name: Joi.string().trim().min(2).optional(),
+  email: Joi.string().email().lowercase().optional(),
+  phone: Joi.string().pattern(/^\d{10}$/).optional(),
+  password: Joi.string().optional(),
+  role: Joi.string().valid('manager', 'kitchen_staff', 'staff').optional(),
+  assignedTables: Joi.array().items(Joi.string().uuid()).optional(),
 });

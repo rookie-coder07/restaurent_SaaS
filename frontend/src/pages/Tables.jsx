@@ -14,10 +14,12 @@ import {
 import { useLocation, useNavigate } from 'react-router-dom';
 import { orderAPI, tableAPI } from '../services/apiEndpoints';
 import { useAuthStore } from '../context/authStore';
+import { useManagerStore } from '../context/managerStore';
 import { usePosStore } from '../context/posStore';
+import { getTableActivity } from '../utils/managerPortal';
 import QRCodeModal from '../components/QRCodeModal';
 import { generateBulkQRCodes } from '../utils/qrCodeGenerator';
-import { formatCurrency, formatDate } from '../utils/formatters';
+import { compareTableLabels, formatCurrency, formatDate } from '../utils/formatters';
 import { formatDisplayOrderNumber } from '../utils/formatters';
 import Card from '../components/common/Card';
 import Button from '../components/common/Button';
@@ -29,16 +31,14 @@ import StatCard from '../components/common/StatCard';
 import PaginationControls from '../components/common/PaginationControls';
 import useResponsivePagination from '../hooks/useResponsivePagination';
 
-const ACTIVE_ORDER_STATUSES = new Set(['awaiting_waiter_approval', 'pending', 'preparing', 'ready', 'served']);
-
 const TABLE_STATUS_META = {
-  available: {
+  open: {
     label: 'Available',
     card: 'border-emerald-500/20 bg-emerald-500/8',
     badge: 'border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300',
     dot: 'bg-emerald-500',
   },
-  occupied: {
+  busy: {
     label: 'In Use',
     card: 'border-rose-500/20 bg-rose-500/8',
     badge: 'border-rose-500/25 bg-rose-500/10 text-rose-700 dark:text-rose-300',
@@ -50,23 +50,18 @@ const TABLE_STATUS_META = {
     badge: 'border-amber-500/25 bg-amber-500/10 text-amber-700 dark:text-amber-300',
     dot: 'bg-amber-500',
   },
+  closed: {
+    label: 'Closed',
+    card: 'border-slate-500/20 bg-slate-500/10',
+    badge: 'border-slate-500/25 bg-slate-500/10 text-slate-700 dark:text-slate-300',
+    dot: 'bg-slate-500',
+  },
 };
-
-function getEffectiveTableStatus(table, activeOrders) {
-  if ((activeOrders || []).length > 0) {
-    return 'occupied';
-  }
-
-  if (table.status === 'reserved' || table.reservedBy) {
-    return 'reserved';
-  }
-
-  return 'available';
-}
 
 export default function Tables() {
   const location = useLocation();
   const navigate = useNavigate();
+  const currentUser = useAuthStore((state) => state.user);
   const userRole = useAuthStore((state) => state.user?.role);
   const currentPortal = location.pathname.startsWith('/admin') ? 'admin' : 'pos';
   const canManageTableConfig = userRole === 'owner';
@@ -80,6 +75,10 @@ export default function Tables() {
   const preloadCoreData = usePosStore((state) => state.preloadCoreData);
   const refreshTableOverview = usePosStore((state) => state.refreshTableOverview);
   const setPendingBillingTarget = usePosStore((state) => state.setPendingBillingTarget);
+  const tableAssignments = useManagerStore((state) => state.tableAssignments);
+  const tableClosures = useManagerStore((state) => state.tableClosures);
+  const tableTransfers = useManagerStore((state) => state.tableTransfers);
+  const tableMerges = useManagerStore((state) => state.tableMerges);
 
   const [showForm, setShowForm] = useState(false);
   const [editingTable, setEditingTable] = useState(null);
@@ -102,57 +101,58 @@ export default function Tables() {
   });
 
   const tables = useMemo(
-    () => [...(tablesData?.tables || [])].sort((a, b) => Number(a.tableNumber || 0) - Number(b.tableNumber || 0)),
+    () => [...(tablesData?.tables || [])].sort((a, b) => compareTableLabels(a.tableNumber, b.tableNumber)),
     [tablesData]
   );
   const orders = Array.isArray(openBillsData) ? openBillsData : [];
 
-  const activeOrdersByTableId = useMemo(() => {
-    const map = new Map();
-
-    orders
-      .filter((order) => ACTIVE_ORDER_STATUSES.has(order.status) && order.paymentStatus !== 'paid')
-      .forEach((order) => {
-        if (!order.tableId) {
-          return;
-        }
-
-        const existing = map.get(order.tableId) || [];
-        existing.push(order);
-        map.set(order.tableId, existing);
-      });
-
-    return map;
-  }, [orders]);
-
   const enrichedTables = useMemo(
     () =>
       tables.map((table) => {
-        const activeOrders = activeOrdersByTableId.get(table.id) || [];
-        const currentOrder = [...activeOrders].sort(
+        const tableActivity = getTableActivity(
+          table,
+          orders,
+          tableAssignments,
+          tableClosures,
+          tableTransfers,
+          tableMerges,
+          tables
+        );
+        const currentOrder = [...(tableActivity.activeOrders || [])].sort(
           (left, right) =>
             new Date(right.updatedAt || right.createdAt || 0) -
             new Date(left.updatedAt || left.createdAt || 0)
         )[0] || null;
 
         return {
-          ...table,
-          activeOrders,
+          ...tableActivity,
           currentOrder,
-          effectiveStatus: getEffectiveTableStatus(table, activeOrders),
         };
       }),
-    [activeOrdersByTableId, tables]
+    [orders, tableAssignments, tableClosures, tableMerges, tableTransfers, tables]
+  );
+
+  const visibleTables = useMemo(
+    () => {
+      const baseTables = enrichedTables.filter((table) => !table.isMergedSecondary);
+      if (currentPortal === 'pos' && userRole === 'staff') {
+        const assignedTableIds = Array.isArray(currentUser?.assignedTables) ? currentUser.assignedTables : [];
+        return baseTables.filter((table) => assignedTableIds.includes(table.id));
+      }
+
+      return baseTables;
+    },
+    [currentPortal, currentUser?.assignedTables, enrichedTables, userRole]
   );
 
   const selectedTableData = useMemo(
-    () => enrichedTables.find((table) => table.id === selectedTable?.id) || selectedTable,
-    [enrichedTables, selectedTable]
+    () => visibleTables.find((table) => table.id === selectedTable?.id) || selectedTable,
+    [selectedTable, visibleTables]
   );
 
-  const availableCount = enrichedTables.filter((table) => table.effectiveStatus === 'available').length;
-  const occupiedCount = enrichedTables.filter((table) => table.effectiveStatus === 'occupied').length;
-  const reservedCount = enrichedTables.filter((table) => table.effectiveStatus === 'reserved').length;
+  const availableCount = visibleTables.filter((table) => table.effectiveStatus === 'open').length;
+  const occupiedCount = visibleTables.filter((table) => table.effectiveStatus === 'busy').length;
+  const reservedCount = visibleTables.filter((table) => table.effectiveStatus === 'reserved').length;
   const loadError = tablesError || openBillsError || null;
   const {
     paginatedItems: paginatedTables,
@@ -163,7 +163,7 @@ export default function Tables() {
     goPrevious,
     goNext,
     hasPagination,
-  } = useResponsivePagination(enrichedTables, { mobileItemsPerPage: 8, desktopItemsPerPage: 18 });
+  } = useResponsivePagination(visibleTables, { mobileItemsPerPage: 8, desktopItemsPerPage: 18 });
 
   const resetTableForm = () => {
     setFormData({
@@ -213,19 +213,14 @@ export default function Tables() {
     });
   }, [preloadCoreData, refreshTableOverview]);
 
-  useEffect(() => {
-    const intervalId = window.setInterval(() => {
-      syncData().catch(() => {
-        // Toast state is already handled by request flows when needed.
-      });
-    }, 8000);
-
-    return () => window.clearInterval(intervalId);
-  }, [preloadCoreData, refreshTableOverview]);
-
   const openBilling = (table, order = null) => {
     if (!canOpenBilling) {
       setError('Open billing from the POS portal to continue with this table.');
+      return;
+    }
+
+    if (table.isClosed || table.effectiveStatus === 'closed') {
+      setError('This table is closed in the manager workspace. Reopen it before billing.');
       return;
     }
 
@@ -252,10 +247,14 @@ export default function Tables() {
 
     try {
       const payload = {
-        tableNumber: Number(formData.tableNumber),
+        tableNumber: String(formData.tableNumber || '').trim(),
         seatCapacity: Number(formData.seatCapacity),
-        location: (editingTable?.location || formData.location || '').trim(),
       };
+
+      const normalizedLocation = (editingTable?.location || formData.location || '').trim();
+      if (normalizedLocation) {
+        payload.location = normalizedLocation;
+      }
 
       if (editingTable) {
         await tableAPI.updateTable(editingTable.id, payload);
@@ -395,32 +394,20 @@ export default function Tables() {
         </Card>
       ) : null}
 
-      <Card className="overflow-hidden bg-[radial-gradient(circle_at_top_right,_rgba(14,165,233,0.16),_transparent_35%),var(--color-surface)]">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.25em] text-[var(--color-text-subtle)]">Tables</p>
-            <h1 className="mt-3 text-3xl font-bold text-[var(--color-text)]">Live floor view</h1>
-            <p className="mt-2 max-w-3xl text-sm text-[var(--color-text-muted)]">
-              See tables in order, tap any table to check reservation status, active orders, and what is currently being served.
-            </p>
-          </div>
-
-          <div className="flex flex-col gap-3 sm:flex-row">
-            {canManageTableConfig && enrichedTables.length > 0 ? (
-              <Button variant="secondary" onClick={handleBulkExportQR}>
-                <Download className="h-4 w-4" />
-                Export All QR
-              </Button>
-            ) : null}
-            {canManageTableConfig ? (
-              <Button onClick={openCreateForm}>
-                <Plus className="h-4 w-4" />
-                Add Table
-              </Button>
-            ) : null}
-          </div>
-        </div>
-      </Card>
+      <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
+        {canManageTableConfig && enrichedTables.length > 0 ? (
+          <Button variant="secondary" onClick={handleBulkExportQR}>
+            <Download className="h-4 w-4" />
+            Export All QR
+          </Button>
+        ) : null}
+        {canManageTableConfig ? (
+          <Button onClick={openCreateForm}>
+            <Plus className="h-4 w-4" />
+            Add Table
+          </Button>
+        ) : null}
+      </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <StatCard label="Available" value={availableCount} subtitle="Ready for guests" tone="success" />
@@ -449,8 +436,12 @@ export default function Tables() {
         ) : (
           <EmptyState
             icon={TableProperties}
-            title="No tables configured"
-            description="Create your first table to start managing the floor."
+            title={currentPortal === 'pos' && userRole === 'staff' ? 'No tables assigned' : 'No tables configured'}
+            description={
+              currentPortal === 'pos' && userRole === 'staff'
+                ? 'This waiter account has no assigned tables yet. Ask the owner to assign table numbers from the staff screen.'
+                : 'Create your first table to start managing the floor.'
+            }
             action={canManageTableConfig ? (
               <Button onClick={openCreateForm}>
                 <Plus className="h-4 w-4" />
@@ -463,7 +454,7 @@ export default function Tables() {
         <>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
             {paginatedTables.map((table) => {
-              const meta = TABLE_STATUS_META[table.effectiveStatus] || TABLE_STATUS_META.available;
+              const meta = TABLE_STATUS_META[table.effectiveStatus] || TABLE_STATUS_META.open;
               const duplicateBillCount = Math.max(0, table.activeOrders.length - 1);
 
               return (
@@ -479,6 +470,11 @@ export default function Tables() {
                     <div>
                       <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--text-secondary)]">Table</p>
                       <h2 className="mt-1.5 text-2xl font-black text-[var(--text-primary)]">{table.tableNumber}</h2>
+                      {table.mergedTableNumbers?.length > 1 ? (
+                        <p className="mt-1 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--color-primary)]">
+                          {table.mergedDisplayName}
+                        </p>
+                      ) : null}
                     </div>
                     <span className={`inline-flex w-fit max-w-full items-center gap-2 self-start whitespace-normal break-words rounded-full border px-3 py-1 text-[11px] font-bold uppercase tracking-[0.12em] ${meta.badge}`}>
                       <span className={`h-2.5 w-2.5 rounded-full ${meta.dot}`} />
@@ -515,7 +511,7 @@ export default function Tables() {
       )}
 
       <Modal
-        title={selectedTableData ? `Table ${selectedTableData.tableNumber}` : 'Table Details'}
+        title={selectedTableData?.mergedDisplayName || (selectedTableData ? `Table ${selectedTableData.tableNumber}` : 'Table Details')}
         isOpen={Boolean(selectedTableData)}
         onClose={() => setSelectedTable(null)}
         maxWidth="max-w-3xl"
@@ -565,10 +561,10 @@ export default function Tables() {
           <form onSubmit={handleSubmit} className="space-y-4">
             <Input
               label="Table Number"
-              type="number"
+              type="text"
               value={formData.tableNumber}
               onChange={(event) => setFormData({ ...formData, tableNumber: event.target.value })}
-              min="1"
+              placeholder="e.g. 1, A1, C9"
               required
             />
             <Input
@@ -650,7 +646,7 @@ function TableDetails({
   canManageTableConfig = false,
   canOpenBilling = true,
 }) {
-  const statusMeta = TABLE_STATUS_META[table.effectiveStatus] || TABLE_STATUS_META.available;
+  const statusMeta = TABLE_STATUS_META[table.effectiveStatus] || TABLE_STATUS_META.open;
   const activeOrders = [...(table.activeOrders || [])].sort(
     (left, right) =>
       new Date(right.updatedAt || right.createdAt || 0) - new Date(left.updatedAt || left.createdAt || 0)
@@ -679,6 +675,13 @@ function TableDetails({
         </div>
       </div>
 
+      {table.mergedTableNumbers?.length > 1 ? (
+        <div className="rounded-[1.6rem] border border-[var(--color-primary)]/20 bg-[var(--color-primary-soft)] p-4">
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--text-secondary)]">Merged Tables</p>
+          <p className="mt-3 text-base font-bold text-[var(--text-primary)]">{table.mergedDisplayName}</p>
+        </div>
+      ) : null}
+
       {table.reservedBy ? (
         <div className="rounded-[1.6rem] border border-amber-500/25 bg-amber-500/10 p-4">
           <div className="flex items-center gap-3">
@@ -690,6 +693,22 @@ function TableDetails({
               </p>
             </div>
           </div>
+        </div>
+      ) : null}
+
+      {table.isClosed ? (
+        <div className="rounded-[1.6rem] border border-slate-500/25 bg-slate-500/10 p-4">
+          <p className="font-bold text-[var(--text-primary)]">Closed by manager</p>
+          <p className="mt-1 text-sm text-[var(--text-secondary)]">
+            {table.closureNote || 'This table is temporarily blocked for service.'}
+          </p>
+        </div>
+      ) : null}
+
+      {table.assignedWaiterId ? (
+        <div className="rounded-[1.6rem] border border-[var(--border-color)] bg-[var(--color-panel)] p-4">
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--text-secondary)]">Assigned Waiter</p>
+          <p className="mt-3 text-base font-bold text-[var(--text-primary)]">Assigned from manager portal</p>
         </div>
       ) : null}
 
@@ -712,7 +731,7 @@ function TableDetails({
               <p className="mt-2 text-2xl font-black text-[var(--text-primary)]">{activeOrders.length}</p>
             </div>
             {canOpenBilling ? (
-              <Button onClick={() => onOpenBilling(currentOrder)}>
+              <Button onClick={() => onOpenBilling(currentOrder)} disabled={table.isClosed}>
                 <Receipt className="h-4 w-4" />
                 {currentOrder ? 'Reopen Bill' : 'Start Billing'}
               </Button>

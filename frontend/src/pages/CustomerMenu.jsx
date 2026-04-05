@@ -7,6 +7,7 @@ import {
   ChevronRight,
   Expand,
   Loader,
+  Minus,
   Plus,
   ShoppingCart,
   Sparkles,
@@ -23,8 +24,6 @@ import { useCustomerCartStore } from '../context/customerCartStore';
 
 const PRODUCTION_API_BASE_URL = 'https://restaurent-backend-448t.onrender.com/api';
 const DEVELOPMENT_API_BASE_URL = 'http://localhost:3000/api';
-const ADDED_STATE_TIMEOUT_MS = 1400;
-
 export default function CustomerMenu() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -34,8 +33,7 @@ export default function CustomerMenu() {
   const tableId = rawTableId?.trim() || '';
   const isValidUuid =
     !tableId || /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(tableId);
-  const parsedTableNumber = tableNumber ? Number(tableNumber) : null;
-  const isValidTableNumber = !tableNumber || (Number.isInteger(parsedTableNumber) && parsedTableNumber > 0);
+  const isValidTableNumber = !tableNumber || /^[A-Za-z0-9][A-Za-z0-9\s-]*$/.test(tableNumber);
   const hasValidQrParams = Boolean(tableNumber || tableId) && isValidUuid && isValidTableNumber;
   const cartKey = tableId || `table-${tableNumber}`;
 
@@ -43,9 +41,7 @@ export default function CustomerMenu() {
   const [isPlacingOrder, setIsPlacingOrder] = useState(false);
   const [orderStatus, setOrderStatus] = useState(null);
   const [orderMessage, setOrderMessage] = useState('');
-  const [recentlyAddedItemId, setRecentlyAddedItemId] = useState(null);
   const [cartToast, setCartToast] = useState('');
-  const [blockedItemIds, setBlockedItemIds] = useState({});
   const [previewItem, setPreviewItem] = useState(null);
   const [activeCategory, setActiveCategory] = useState('all');
   const sectionRefs = useRef({});
@@ -112,24 +108,23 @@ export default function CustomerMenu() {
 
   const cartItemCount = useMemo(() => cart.reduce((sum, item) => sum + item.quantity, 0), [cart]);
   const cartTotal = useMemo(() => cart.reduce((sum, item) => sum + item.price * item.quantity, 0), [cart]);
+  const cartQuantityByItemId = useMemo(
+    () =>
+      cart.reduce((accumulator, item) => {
+        accumulator[item.id] = item.quantity;
+        return accumulator;
+      }, {}),
+    [cart]
+  );
 
   useEffect(() => {
     if (!cartToast) {
       return undefined;
     }
 
-    const timer = window.setTimeout(() => setCartToast(''), ADDED_STATE_TIMEOUT_MS);
+    const timer = window.setTimeout(() => setCartToast(''), 1400);
     return () => window.clearTimeout(timer);
   }, [cartToast]);
-
-  useEffect(() => {
-    if (!recentlyAddedItemId) {
-      return undefined;
-    }
-
-    const timer = window.setTimeout(() => setRecentlyAddedItemId(null), ADDED_STATE_TIMEOUT_MS);
-    return () => window.clearTimeout(timer);
-  }, [recentlyAddedItemId]);
 
   useEffect(() => {
     if (cartItemCount === 0) {
@@ -209,7 +204,7 @@ export default function CustomerMenu() {
   }
 
   const handleAddToCart = (item) => {
-    if (!item.isAvailable || blockedItemIds[item.id]) {
+    if (!item.isAvailable) {
       return;
     }
 
@@ -220,17 +215,7 @@ export default function CustomerMenu() {
       description: item.description,
     });
 
-    setRecentlyAddedItemId(item.id);
     setCartToast(`${item.name} added to cart`);
-    setBlockedItemIds((current) => ({ ...current, [item.id]: true }));
-
-    window.setTimeout(() => {
-      setBlockedItemIds((current) => {
-        const next = { ...current };
-        delete next[item.id];
-        return next;
-      });
-    }, 450);
   };
 
   const handleUpdateQuantity = (itemId, quantity) => {
@@ -240,6 +225,47 @@ export default function CustomerMenu() {
   const handleClearCart = () => {
     clearCart(cartKey);
     setCartToast('Cart cleared');
+  };
+
+  const playOrderConfirmationBuzzer = () => {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) {
+      return;
+    }
+
+    try {
+      const audioContext = new AudioContextClass();
+      const now = audioContext.currentTime;
+      const pattern = [
+        { frequency: 880, start: 0, duration: 0.1 },
+        { frequency: 660, start: 0.14, duration: 0.1 },
+        { frequency: 990, start: 0.28, duration: 0.16 },
+      ];
+
+      pattern.forEach((tone) => {
+        const oscillator = audioContext.createOscillator();
+        const gainNode = audioContext.createGain();
+
+        oscillator.type = 'square';
+        oscillator.frequency.setValueAtTime(tone.frequency, now + tone.start);
+
+        gainNode.gain.setValueAtTime(0.0001, now + tone.start);
+        gainNode.gain.exponentialRampToValueAtTime(0.12, now + tone.start + 0.02);
+        gainNode.gain.exponentialRampToValueAtTime(0.0001, now + tone.start + tone.duration);
+
+        oscillator.connect(gainNode);
+        gainNode.connect(audioContext.destination);
+
+        oscillator.start(now + tone.start);
+        oscillator.stop(now + tone.start + tone.duration + 0.02);
+      });
+
+      window.setTimeout(() => {
+        audioContext.close().catch(() => {});
+      }, 900);
+    } catch (error) {
+      console.warn('Order confirmation buzzer could not play.', error);
+    }
   };
 
   const handlePlaceOrder = async () => {
@@ -253,7 +279,7 @@ export default function CustomerMenu() {
     try {
       const orderData = {
         ...(tableId ? { tableId } : {}),
-        ...(tableNumber ? { tableNumber: parsedTableNumber } : {}),
+        ...(tableNumber ? { tableNumber } : {}),
         items: cart.map((item) => ({
           menuItemId: item.id,
           quantity: item.quantity,
@@ -268,6 +294,7 @@ export default function CustomerMenu() {
 
       setOrderStatus('success');
       setOrderMessage('Order placed successfully! A waiter will review it shortly before it is sent to the kitchen.');
+      playOrderConfirmationBuzzer();
       removeCart(cartKey);
       setShowCart(false);
 
@@ -412,21 +439,21 @@ export default function CustomerMenu() {
         <FloatingCartButton itemCount={cartItemCount} onClick={() => setShowCart(true)} />
       )}
 
-      <header className="sticky top-0 z-30 border-b border-white/10 bg-[rgba(11,19,32,0.86)] backdrop-blur-xl">
+      <header className="sticky top-0 z-30 border-b border-[var(--border-color)] bg-[color-mix(in_srgb,var(--bg-panel)_92%,transparent)] backdrop-blur-xl">
         <div className="mx-auto max-w-6xl px-4 py-4 sm:px-6">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <p className="text-xs font-semibold uppercase tracking-[0.32em] text-orange-300">Scan to Order</p>
-              <h1 className="mt-2 break-words text-xl font-bold text-white sm:text-2xl">{restaurantName}</h1>
+              <p className="text-xs font-semibold uppercase tracking-[0.32em] text-[var(--color-warning)]">Scan to Order</p>
+              <h1 className="mt-2 break-words text-xl font-bold text-[var(--text-primary)] sm:text-2xl">{restaurantName}</h1>
               <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-[var(--text-secondary)]">
-                <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1">Table {tableNumber || 'Guest'}</span>
-                <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1">{menuItems.length} dishes</span>
+                <span className="rounded-full border border-[var(--border-color)] bg-[var(--bg-card-muted)] px-3 py-1">Table {tableNumber || 'Guest'}</span>
+                <span className="rounded-full border border-[var(--border-color)] bg-[var(--bg-card-muted)] px-3 py-1">{menuItems.length} dishes</span>
               </div>
             </div>
 
             <button
               onClick={() => setShowCart(true)}
-              className="relative rounded-full border border-white/10 bg-white/10 p-3 text-white transition hover:scale-[1.02] hover:bg-white/15"
+              className="relative rounded-full border border-[var(--border-color)] bg-[var(--bg-card-muted)] p-3 text-[var(--text-primary)] transition hover:scale-[1.02] hover:bg-[var(--color-primary-soft)]"
             >
               <ShoppingCart className="h-6 w-6" />
               {cartItemCount > 0 && (
@@ -444,30 +471,30 @@ export default function CustomerMenu() {
           <div className="absolute inset-y-0 right-0 w-40 bg-gradient-to-l from-orange-400/10 via-cyan-400/10 to-transparent" />
           <div className="relative flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div className="min-w-0">
-              <div className="inline-flex items-center gap-2 rounded-full bg-orange-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.28em] text-orange-300">
+              <div className="inline-flex items-center gap-2 rounded-full bg-orange-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.28em] text-[var(--color-warning)]">
                 <Sparkles className="h-3.5 w-3.5" />
                 Premium Ordering
               </div>
-              <h2 className="mt-4 text-2xl font-bold text-white sm:text-3xl">Fresh picks for your table</h2>
+              <h2 className="mt-4 text-2xl font-bold text-[var(--text-primary)] sm:text-3xl">Fresh picks for your table</h2>
               <p className="mt-2 max-w-2xl text-sm leading-6 text-[var(--text-secondary)]">
                 Discover the menu by category, preview dishes in full view, and add favorites to your cart with one tap.
               </p>
             </div>
 
             <div className="grid grid-cols-2 gap-3 sm:w-auto">
-              <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
+              <div className="rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card-muted)] px-4 py-3">
                 <p className="text-xs uppercase tracking-[0.22em] text-[var(--text-secondary)]">Categories</p>
-                <p className="mt-2 text-xl font-bold text-white">{groupedCategories.length}</p>
+                <p className="mt-2 text-xl font-bold text-[var(--text-primary)]">{groupedCategories.length}</p>
               </div>
-              <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
+              <div className="rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card-muted)] px-4 py-3">
                 <p className="text-xs uppercase tracking-[0.22em] text-[var(--text-secondary)]">Cart Total</p>
-                <p className="mt-2 text-xl font-bold text-white">{formatCurrency(cartTotal)}</p>
+                <p className="mt-2 text-xl font-bold text-[var(--text-primary)]">{formatCurrency(cartTotal)}</p>
               </div>
             </div>
           </div>
         </section>
 
-        <div className="sticky top-[88px] z-20 -mx-4 mt-6 border-y border-white/10 bg-[rgba(11,19,32,0.92)] px-4 py-3 backdrop-blur-xl sm:-mx-6 sm:px-6">
+        <div className="sticky top-[88px] z-20 -mx-4 mt-6 border-y border-[var(--border-color)] bg-[color-mix(in_srgb,var(--bg-panel)_94%,transparent)] px-4 py-3 backdrop-blur-xl sm:-mx-6 sm:px-6">
           <label className="block w-full sm:max-w-xs">
             <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.24em] text-[var(--text-secondary)]">
               Browse Category
@@ -490,7 +517,7 @@ export default function CustomerMenu() {
         {groupedCategories.length === 0 ? (
           <div className="glass-panel mt-8 rounded-3xl border-dashed px-6 py-16 text-center">
             <ShoppingCart className="mx-auto mb-4 h-12 w-12 text-[var(--text-secondary)]" />
-            <h2 className="text-xl font-semibold text-white">No dishes available</h2>
+            <h2 className="text-xl font-semibold text-[var(--text-primary)]">No dishes available</h2>
             <p className="mt-2 text-[var(--text-secondary)]">Please check back in a bit or ask the restaurant staff for help.</p>
           </div>
         ) : (
@@ -506,11 +533,11 @@ export default function CustomerMenu() {
               >
                 <div className="mb-4 mt-6 flex items-center justify-between gap-3">
                   <div className="min-w-0">
-                    <div className="inline-flex items-center gap-2 rounded-full bg-white/5 px-3 py-1 text-xs font-medium text-[var(--text-secondary)]">
-                      <Star className="h-3.5 w-3.5 text-orange-300" />
+                    <div className="inline-flex items-center gap-2 rounded-full bg-[var(--bg-card-muted)] px-3 py-1 text-xs font-medium text-[var(--text-secondary)]">
+                      <Star className="h-3.5 w-3.5 text-[var(--color-warning)]" />
                       Featured Category
                     </div>
-                    <h2 className="mt-3 text-2xl font-bold text-white">{category.name}</h2>
+                    <h2 className="mt-3 text-2xl font-bold text-[var(--text-primary)]">{category.name}</h2>
                     <p className="text-sm text-[var(--text-secondary)]">
                       {category.items.length > 0 ? `${category.items.length} dishes available` : 'No items available'}
                     </p>
@@ -525,14 +552,13 @@ export default function CustomerMenu() {
                 ) : (
                   <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
                     {category.items.map((item) => {
-                      const buttonAdded = recentlyAddedItemId === item.id;
-                      const buttonBlocked = blockedItemIds[item.id];
                       const itemImageUrl = getMenuItemImageUrl(item);
+                      const itemQuantity = cartQuantityByItemId[item.id] || 0;
 
                       return (
                         <article
                           key={item.id}
-                          className="overflow-hidden rounded-xl border border-white/10 bg-[var(--bg-card)] shadow-md transition-all duration-300 hover:-translate-y-1 hover:shadow-[var(--shadow-floating)]"
+                          className="overflow-hidden rounded-xl border border-[var(--border-color)] bg-[var(--bg-card)] shadow-md transition-all duration-300 hover:-translate-y-1 hover:shadow-[var(--shadow-floating)]"
                         >
                           <button
                             type="button"
@@ -557,9 +583,9 @@ export default function CustomerMenu() {
                               <div className="flex items-center justify-between gap-3">
                                 <div className="min-w-0">
                                   <p className="truncate text-sm font-semibold text-white">{item.name}</p>
-                                  <p className="text-xs text-white/80">Tap to view</p>
+                                  <p className="text-xs text-slate-200">Tap to view</p>
                                 </div>
-                                <span className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-white backdrop-blur">
+                                <span className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-slate-950/35 text-white backdrop-blur">
                                   <Expand className="h-4 w-4" />
                                 </span>
                               </div>
@@ -569,32 +595,56 @@ export default function CustomerMenu() {
                           <div className="p-4">
                             <div className="flex items-start justify-between gap-3">
                               <div className="min-w-0">
-                                <h3 className="break-words text-lg font-bold text-white">{item.name}</h3>
+                                <h3 className="break-words text-lg font-bold text-[var(--text-primary)]">{item.name}</h3>
                                 <p className="mt-2 line-clamp-2 text-sm leading-6 text-[var(--text-secondary)]">
                                   {item.description || 'A delicious dish prepared fresh for your table.'}
                                 </p>
                               </div>
-                              <span className="shrink-0 rounded-full bg-white/10 px-3 py-1 text-sm font-semibold text-white">
+                              <span className="shrink-0 rounded-full bg-[var(--bg-card-muted)] px-3 py-1 text-sm font-semibold text-[var(--text-primary)]">
                                 {formatCurrency(item.price)}
                               </span>
                             </div>
 
                             <div className="mt-4 flex items-center justify-between gap-3">
-                              <span className={`text-sm font-medium ${item.isAvailable ? 'text-emerald-300' : 'text-red-300'}`}>
+                              <span
+                                className="text-sm font-medium"
+                                style={{ color: item.isAvailable ? 'var(--color-success)' : 'var(--color-danger)' }}
+                              >
                                 {item.isAvailable ? 'Available now' : 'Unavailable'}
                               </span>
-                              <button
-                                onClick={() => handleAddToCart(item)}
-                                disabled={!item.isAvailable || buttonBlocked}
-                                className={`inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition ${
-                                  buttonAdded
-                                    ? 'bg-emerald-500 text-white'
-                                    : 'bg-[var(--color-primary)] text-white hover:brightness-110'
-                                } disabled:cursor-not-allowed disabled:opacity-50`}
-                              >
-                                {buttonAdded ? <Check className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
-                                {buttonAdded ? 'Added' : 'Add'}
-                              </button>
+                              {itemQuantity > 0 ? (
+                                <div className="inline-flex items-center rounded-full border border-[var(--border-color)] bg-[var(--bg-panel)] shadow-sm">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleUpdateQuantity(item.id, itemQuantity - 1)}
+                                    className="rounded-full p-2 text-[var(--text-secondary)] transition hover:bg-[var(--bg-card-muted)] hover:text-[var(--text-primary)]"
+                                    aria-label={`Decrease quantity for ${item.name}`}
+                                  >
+                                    <Minus className="h-4 w-4" />
+                                  </button>
+                                  <span className="min-w-10 text-center text-sm font-semibold text-[var(--text-primary)]">
+                                    {itemQuantity}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleAddToCart(item)}
+                                    disabled={!item.isAvailable}
+                                    className="rounded-full p-2 text-[var(--text-secondary)] transition hover:bg-[var(--bg-card-muted)] hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-50"
+                                    aria-label={`Increase quantity for ${item.name}`}
+                                  >
+                                    <Plus className="h-4 w-4" />
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  onClick={() => handleAddToCart(item)}
+                                  disabled={!item.isAvailable}
+                                  className="inline-flex items-center justify-center gap-2 rounded-lg bg-[var(--color-primary)] px-3 py-2 text-sm font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                  <Plus className="h-4 w-4" />
+                                  Add
+                                </button>
+                              )}
                             </div>
                           </div>
                         </article>
@@ -609,10 +659,10 @@ export default function CustomerMenu() {
       </div>
 
       {cartItemCount > 0 && !showCart && (
-        <div className="fixed inset-x-0 bottom-0 z-30 border-t border-white/10 bg-[rgba(11,19,32,0.94)] px-4 py-3 backdrop-blur-xl md:px-6">
+        <div className="fixed inset-x-0 bottom-0 z-30 border-t border-[var(--border-color)] bg-[color-mix(in_srgb,var(--bg-panel)_96%,transparent)] px-4 py-3 backdrop-blur-xl md:px-6">
           <div className="mx-auto flex max-w-6xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="min-w-0">
-              <p className="text-sm font-semibold text-white">
+              <p className="text-sm font-semibold text-[var(--text-primary)]">
                 {cartItemCount} {cartItemCount === 1 ? 'item' : 'items'} in cart
               </p>
               <p className="text-sm text-[var(--text-secondary)]">{formatCurrency(cartTotal)}</p>

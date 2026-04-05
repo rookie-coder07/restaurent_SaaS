@@ -99,7 +99,139 @@ export class OrderService {
   }
 
   static formatDisplayOrderNumber(dateKey, sequence) {
-    return `ORD-${dateKey.replace(/-/g, '')}-${String(sequence).padStart(3, '0')}`;
+    return `ORD-${String(dateKey || '').replace(/-/g, '')}-${String(sequence).padStart(3, '0')}`;
+  }
+
+  static buildFallbackDisplayOrderNumber(orderId) {
+    return `ORD-${String(orderId || '').slice(-6).toUpperCase() || '------'}`;
+  }
+
+  static extractDisplayOrderSequence(displayOrderNumber, dateKey = '') {
+    const normalizedDateKey = String(dateKey || '').replace(/-/g, '');
+    const pattern = normalizedDateKey
+      ? new RegExp(`^ORD-${normalizedDateKey}-(\\d+)$`)
+      : /^ORD-\d{8}-(\d+)$/;
+    const match = String(displayOrderNumber || '').trim().match(pattern);
+    return match ? Number.parseInt(match[1], 10) : 0;
+  }
+
+  static getDisplayOrderDateKey(value = new Date().toISOString(), timezone = 'Asia/Kolkata') {
+    const normalizedValue = this.normalizeTimestamp(value) || new Date().toISOString();
+    const parsedDate = new Date(normalizedValue);
+
+    if (Number.isNaN(parsedDate.getTime())) {
+      return new Intl.DateTimeFormat('en-CA', {
+        timeZone: timezone,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      }).format(new Date());
+    }
+
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: timezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(parsedDate);
+
+    const partMap = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+    return `${partMap.year}-${partMap.month}-${partMap.day}`;
+  }
+
+  static isUniqueConstraintError(error) {
+    const combined = `${error?.code || ''} ${error?.message || ''} ${error?.details || ''}`.toLowerCase();
+    return combined.includes('23505') || combined.includes('duplicate key') || combined.includes('unique');
+  }
+
+  static async getRestaurantTimezone(restaurantId) {
+    const { data: restaurant, error } = await supabase
+      .from('restaurants')
+      .select('timezone')
+      .eq('id', restaurantId)
+      .single();
+
+    if (error || !restaurant) {
+      throw error || new Error('Restaurant not found');
+    }
+
+    return restaurant.timezone || 'Asia/Kolkata';
+  }
+
+  static async reserveDisplayOrderNumber(restaurantId, timezone = 'Asia/Kolkata', createdAt = new Date().toISOString()) {
+    const dateKey = this.getDisplayOrderDateKey(createdAt, timezone);
+    const prefix = `ORD-${dateKey.replace(/-/g, '')}-`;
+    const { data, error } = await supabase
+      .from('orders')
+      .select('display_order_number')
+      .eq('restaurant_id', restaurantId)
+      .like('display_order_number', `${prefix}%`)
+      .order('display_order_number', { ascending: false })
+      .limit(1);
+
+    if (error) {
+      throw error;
+    }
+
+    const latestSequence = this.extractDisplayOrderSequence(data?.[0]?.display_order_number, dateKey);
+    return this.formatDisplayOrderNumber(dateKey, latestSequence + 1);
+  }
+
+  static async assignDisplayOrderNumber(restaurantId, orderId, createdAt, timezone = 'Asia/Kolkata') {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const displayOrderNumber = await this.reserveDisplayOrderNumber(restaurantId, timezone, createdAt);
+      const { data, error } = await supabase
+        .from('orders')
+        .update({ display_order_number: displayOrderNumber })
+        .eq('id', orderId)
+        .eq('restaurant_id', restaurantId)
+        .is('display_order_number', null)
+        .select('id, display_order_number')
+        .single();
+
+      if (!error && data?.display_order_number) {
+        return data.display_order_number;
+      }
+
+      if (error && !this.isUniqueConstraintError(error) && error.code !== 'PGRST116') {
+        throw error;
+      }
+
+      const { data: existingOrder, error: existingError } = await supabase
+        .from('orders')
+        .select('display_order_number')
+        .eq('id', orderId)
+        .eq('restaurant_id', restaurantId)
+        .single();
+
+      if (existingError) {
+        throw existingError;
+      }
+
+      if (existingOrder?.display_order_number) {
+        return existingOrder.display_order_number;
+      }
+    }
+
+    throw new Error('Unable to reserve a unique display order number');
+  }
+
+  static async backfillMissingDisplayOrderNumbers(restaurantId, timezone = 'Asia/Kolkata') {
+    const { data: missingOrders, error } = await supabase
+      .from('orders')
+      .select('id, created_at')
+      .eq('restaurant_id', restaurantId)
+      .is('display_order_number', null)
+      .order('created_at', { ascending: true })
+      .order('id', { ascending: true });
+
+    if (error) {
+      throw error;
+    }
+
+    for (const order of missingOrders || []) {
+      await this.assignDisplayOrderNumber(restaurantId, order.id, order.created_at, timezone);
+    }
   }
 
   static async attachDisplayNumbers(restaurantId, orders) {
@@ -107,49 +239,39 @@ export class OrderService {
       return orders || [];
     }
 
-    const dateKeys = Array.from(
-      new Set(
-        orders
-          .map((order) => order.createdAt || order.created_at)
-          .filter(Boolean)
-          .map((value) => this.normalizeTimestamp(value))
-          .filter(Boolean)
-          .map((value) => value.slice(0, 10))
-      )
-    );
+    const missingDisplayNumbers = orders.some((order) => !order?.displayOrderNumber);
 
-    const perDateResults = await Promise.all(
-      dateKeys.map(async (dateKey) => {
-        const start = `${dateKey}T00:00:00.000Z`;
-        const end = `${dateKey}T23:59:59.999Z`;
-        const { data, error } = await supabase
-          .from('orders')
-          .select('id, created_at')
-          .eq('restaurant_id', restaurantId)
-          .gte('created_at', start)
-          .lte('created_at', end)
-          .order('created_at', { ascending: true })
-          .order('id', { ascending: true });
+    if (missingDisplayNumbers) {
+      const timezone = await this.getRestaurantTimezone(restaurantId);
+      await this.backfillMissingDisplayOrderNumbers(restaurantId, timezone);
+    }
 
-        if (error) {
-          throw error;
-        }
-
-        return { dateKey, rows: data || [] };
-      })
-    );
-
+    const orderIds = orders.map((order) => order.id).filter(Boolean);
     const displayMap = new Map();
 
-    perDateResults.forEach(({ dateKey, rows }) => {
-      rows.forEach((row, index) => {
-        displayMap.set(row.id, this.formatDisplayOrderNumber(dateKey, index + 1));
+    if (orderIds.length > 0) {
+      const { data, error } = await supabase
+        .from('orders')
+        .select('id, display_order_number')
+        .in('id', orderIds);
+
+      if (error) {
+        throw error;
+      }
+
+      (data || []).forEach((row) => {
+        if (row.display_order_number) {
+          displayMap.set(row.id, row.display_order_number);
+        }
       });
-    });
+    }
 
     return orders.map((order) => ({
       ...order,
-      displayOrderNumber: displayMap.get(order.id) || order.displayOrderNumber || `ORD-${String(order.id).slice(-6).toUpperCase()}`,
+      displayOrderNumber:
+        displayMap.get(order.id) ||
+        order.displayOrderNumber ||
+        this.buildFallbackDisplayOrderNumber(order.id),
     }));
   }
 
@@ -203,6 +325,7 @@ export class OrderService {
       id: order.id,
       restaurantId: order.restaurant_id,
       tableId: order.table_id,
+      origin: kotMeta.system?.orderOrigin || (normalizedStatus === 'awaiting_waiter_approval' ? 'qr' : 'pos'),
       status: normalizedStatus,
       orderType: online.fulfillmentType || order.order_type || (order.table_id ? 'dine-in' : 'takeaway'),
       totalAmount: order.total_amount,
@@ -963,6 +1086,9 @@ export class OrderService {
         throw new Error('Restaurant ID is required or table ID must be provided');
       }
 
+      const restaurantTimezone = await this.getRestaurantTimezone(finalRestaurantId);
+      const createdAt = new Date().toISOString();
+
       const normalizedItems = await this.validateOrderItems(finalRestaurantId, orderData.items, {
         enforceMenuPrice: options.actorRole === 'manager',
       });
@@ -974,6 +1100,9 @@ export class OrderService {
       });
       const initialKotMeta = {
         lineDetails: this.buildLineDetailsMap(normalizedItems),
+        system: {
+          orderOrigin: orderData.origin === 'qr' ? 'qr' : 'pos',
+        },
         online: initialOnlineMeta,
         kitchen: {
           lastSentSnapshot: [],
@@ -981,19 +1110,44 @@ export class OrderService {
         },
       };
 
-      const { data: order, error } = await supabase
-        .from('orders')
-        .insert([{
-          restaurant_id: finalRestaurantId,
-          table_id: orderData.tableId,
-          status: initialStatus,
-          total_amount: this.resolvePersistedOrderTotal(orderData.totalAmount, computedTotalAmount),
-          payment_method: this.normalizePaymentMethod(orderData.paymentMethod) || 'cash',
-          payment_status: 'unpaid',
-          notes: composeNotesWithKotMeta(orderData.notes || '', initialKotMeta),
-        }])
-        .select()
-        .single();
+      let order = null;
+      let error = null;
+
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        const reservedDisplayOrderNumber = await this.reserveDisplayOrderNumber(
+          finalRestaurantId,
+          restaurantTimezone,
+          createdAt
+        );
+
+        const insertResult = await supabase
+          .from('orders')
+          .insert([{
+            restaurant_id: finalRestaurantId,
+            table_id: orderData.tableId,
+            status: initialStatus,
+            total_amount: this.resolvePersistedOrderTotal(orderData.totalAmount, computedTotalAmount),
+            display_order_number: reservedDisplayOrderNumber,
+            payment_method: this.normalizePaymentMethod(orderData.paymentMethod) || 'cash',
+            payment_status: 'unpaid',
+            notes: composeNotesWithKotMeta(orderData.notes || '', initialKotMeta),
+            created_at: createdAt,
+            updated_at: createdAt,
+          }])
+          .select()
+          .single();
+
+        order = insertResult.data;
+        error = insertResult.error;
+
+        if (!error) {
+          break;
+        }
+
+        if (!this.isUniqueConstraintError(error)) {
+          throw error;
+        }
+      }
 
       if (error) throw error;
 

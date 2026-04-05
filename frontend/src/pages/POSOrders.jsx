@@ -125,38 +125,20 @@ export default function POSOrders() {
 
   return (
     <div className="space-y-5">
-      <section className="rounded-[2rem] border border-[var(--border-color)] bg-[linear-gradient(135deg,var(--color-primary-soft),rgba(255,255,255,0.02))] p-5 shadow-[var(--shadow-card)]">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[var(--text-secondary)]">FOH Orders</p>
-            <h1 className="mt-2 text-3xl font-bold text-[var(--text-primary)]">Unified Online Orders</h1>
-            <p className="mt-2 max-w-3xl text-sm text-[var(--text-secondary)]">
-              One queue for direct, phone, website, Swiggy, and Zomato orders. Open any order in POS to edit items, send to kitchen, or settle.
-            </p>
-          </div>
+      <div className="flex justify-end">
+        <button
+          type="button"
+          onClick={loadOrders}
+          disabled={loading}
+          className="inline-flex min-h-[3.5rem] items-center gap-2 rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card)] px-4 text-sm font-semibold text-[var(--text-primary)] transition hover:bg-[var(--bg-card-muted)] disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+          Refresh
+        </button>
+      </div>
 
-          <button
-            type="button"
-            onClick={loadOrders}
-            disabled={loading}
-            className="inline-flex min-h-[3.5rem] items-center gap-2 rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card)] px-4 text-sm font-semibold text-[var(--text-primary)] transition hover:bg-[var(--bg-card-muted)] disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-            Refresh
-          </button>
-        </div>
-      </section>
-
-      {success ? (
-        <section className="rounded-[1.6rem] border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
-          {success}
-        </section>
-      ) : null}
-      {error ? (
-        <section className="rounded-[1.6rem] border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
-          {error}
-        </section>
-      ) : null}
+      {success ? <Toast type="success" message={success} /> : null}
+      {error ? <Toast type="error" message={error} /> : null}
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <div className="rounded-[1.6rem] border border-[var(--border-color)] bg-[var(--bg-card)] p-4 shadow-[var(--shadow-card)]">

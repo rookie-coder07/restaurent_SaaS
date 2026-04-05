@@ -14,14 +14,6 @@ import Toast from '../components/common/Toast';
 const PORTAL_CONFIG = {
   admin: {
     badge: 'Admin Portal',
-    title: 'Control business, menu, and reporting.',
-    description:
-      'For owners and restaurant managers handling business control or daily operations with role-based access.',
-    featureCards: [
-      { label: 'Control', value: 'Business overview' },
-      { label: 'Ops', value: 'Live service control' },
-      { label: 'Insights', value: 'Role-based reporting' },
-    ],
     modes: [
       { key: 'owner', label: 'Owner', helper: 'Restaurant account login', isStaff: false },
       { key: 'manager', label: 'Manager', helper: 'Operations account login', isStaff: true },
@@ -29,14 +21,6 @@ const PORTAL_CONFIG = {
   },
   pos: {
     badge: 'POS Portal',
-    title: 'Fast billing for waiters and cashiers.',
-    description:
-      'For table selection, order taking, cart review, and quick billing during service.',
-    featureCards: [
-      { label: 'Tables', value: 'Live floor view' },
-      { label: 'Billing', value: 'Quick order flow' },
-      { label: 'Service', value: 'Dine-in & takeaway' },
-    ],
     modes: [
       { key: 'staff', label: 'Waiter / Cashier', helper: 'Staff account login', isStaff: true },
     ],
@@ -60,13 +44,6 @@ export default function Login({ portal = 'admin', initialModeKey = '' }) {
       ? {
           ...config,
           badge: 'Manager Portal',
-          title: 'Control daily restaurant operations.',
-          description: 'For restaurant managers handling tables, orders, kitchen flow, billing, and floor execution.',
-          featureCards: [
-            { label: 'Floor', value: 'Live table control' },
-            { label: 'Kitchen', value: 'Service flow watch' },
-            { label: 'Billing', value: 'Daily bill handling' },
-          ],
         }
       : config;
 
@@ -129,39 +106,16 @@ export default function Login({ portal = 'admin', initialModeKey = '' }) {
 
   return (
     <div className="min-h-screen bg-[var(--color-bg)] px-4 py-6 sm:px-6 lg:px-8">
-      <div className="mx-auto grid min-h-[calc(100vh-3rem)] w-full max-w-6xl grid-cols-1 gap-6 lg:grid-cols-[1.05fr,0.95fr]">
-        <Card className="flex flex-col justify-between overflow-hidden bg-[radial-gradient(circle_at_top_left,_rgba(79,70,229,0.18),_transparent_35%),var(--color-surface)]">
-          <div>
+      <div className="mx-auto flex min-h-[calc(100vh-3rem)] w-full max-w-5xl items-center justify-center">
+        <Card className="w-full max-w-xl">
+          <div className="mx-auto w-full max-w-md">
             <Link to="/" className="inline-flex items-center gap-2 text-sm font-semibold text-[var(--color-primary)]">
               <ArrowLeft className="h-4 w-4" />
               Back to Home
             </Link>
-            <div className="mt-5 inline-flex items-center gap-2 rounded-full bg-[var(--color-primary-soft)] px-3 py-1 text-sm font-semibold text-[var(--color-primary)]">
-              <Sparkles className="h-4 w-4" />
-              {effectiveConfig.badge}
-            </div>
-            <h1 className="mt-6 text-4xl font-bold tracking-tight text-[var(--color-text)] sm:text-5xl">
-              {effectiveConfig.title}
-            </h1>
-            <p className="mt-5 max-w-xl text-base leading-7 text-[var(--color-text-muted)]">
-              {effectiveConfig.description}
-            </p>
-          </div>
 
-          <div className="mt-8 grid gap-3 sm:grid-cols-3">
-            {effectiveConfig.featureCards.map((card) => (
-              <div key={card.label} className="rounded-[1.5rem] bg-[var(--color-surface-muted)] p-4">
-                <p className="text-xs uppercase tracking-[0.2em] text-[var(--color-text-subtle)]">{card.label}</p>
-                <p className="mt-2 text-lg font-semibold text-[var(--color-text)]">{card.value}</p>
-              </div>
-            ))}
-          </div>
-        </Card>
-
-        <Card className="flex flex-col justify-center">
-          <div className="mx-auto w-full max-w-md">
             <div className="mb-6">
-              <div className="inline-flex items-center gap-2 rounded-full bg-[var(--color-primary-soft)] px-3 py-1 text-sm font-semibold text-[var(--color-primary)]">
+              <div className="mt-5 inline-flex items-center gap-2 rounded-full bg-[var(--color-primary-soft)] px-3 py-1 text-sm font-semibold text-[var(--color-primary)]">
                 <ShieldCheck className="h-4 w-4" />
                 Secure login
               </div>

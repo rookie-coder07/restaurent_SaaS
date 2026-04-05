@@ -13,6 +13,15 @@ const delay = (ms) => new Promise((resolve) => {
 export const useAuth = () => {
   const navigate = useNavigate();
   const authStore = useAuthStore();
+  const normalizeLogoutPortal = (portal) => (portal === 'manager' ? 'admin' : portal);
+  const resolveLogoutPath = (portal) => {
+    if (portal === 'manager') {
+      return '/manager/login';
+    }
+
+    const normalizedPortal = normalizeLogoutPortal(portal);
+    return normalizedPortal === 'admin' ? PORTAL_LOGIN.admin : PORTAL_LOGIN[normalizedPortal] || PORTAL_LOGIN.admin;
+  };
 
   const normalizeUser = (restaurant, user, isStaff) => {
     if (user) {
@@ -131,10 +140,8 @@ export const useAuth = () => {
         return;
       }
 
-      authStore.logout(portal);
-      navigate(
-        portal === 'admin' ? PORTAL_LOGIN.admin : PORTAL_LOGIN[portal] || PORTAL_LOGIN.admin
-      );
+      authStore.logout(normalizeLogoutPortal(portal));
+      navigate(resolveLogoutPath(portal));
     }
   };
 

@@ -25,21 +25,12 @@ export default function Loyalty() {
 
   return (
     <div className="space-y-6">
-      <Card className="overflow-hidden bg-[radial-gradient(circle_at_top_right,_rgba(251,191,36,0.16),_transparent_35%),var(--color-surface)]">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.25em] text-[var(--color-text-subtle)]">Loyalty</p>
-            <h1 className="mt-3 text-3xl font-bold text-[var(--color-text)]">Customer loyalty, repeat visits, and reward usage</h1>
-            <p className="mt-2 max-w-3xl text-sm text-[var(--color-text-muted)]">
-              Keep an eye on loyal guests, how many points are being issued, and how much value the program is returning.
-            </p>
-          </div>
-          <Button variant="secondary" onClick={() => refetch()}>
-            <RefreshCcw className="h-4 w-4" />
-            Refresh
-          </Button>
-        </div>
-      </Card>
+      <div className="flex justify-end">
+        <Button variant="secondary" onClick={() => refetch()}>
+          <RefreshCcw className="h-4 w-4" />
+          Refresh
+        </Button>
+      </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard icon={Users} label="Active Members" value={summary.activeMembers || 0} subtitle="Customers with loyalty history" iconTone="bg-[var(--color-primary-soft)] text-[var(--color-primary)]" />

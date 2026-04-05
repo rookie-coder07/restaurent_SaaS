@@ -22,7 +22,6 @@ const CustomerMenu = lazy(() => import('./pages/CustomerMenu'));
 const OrderStatus = lazy(() => import('./pages/OrderStatus'));
 const Tables = lazy(() => import('./pages/Tables'));
 const Staff = lazy(() => import('./pages/Staff'));
-const QRTest = lazy(() => import('./pages/QRTest'));
 const NotFound = lazy(() => import('./pages/NotFound'));
 const Settings = lazy(() => import('./pages/Settings'));
 const Inventory = lazy(() => import('./pages/Inventory'));
@@ -38,6 +37,7 @@ const ManagerWaiters = lazy(() => import('./pages/ManagerWaiters'));
 const ManagerInventory = lazy(() => import('./pages/ManagerInventory'));
 const ManagerBills = lazy(() => import('./pages/ManagerBills'));
 import { useAuthStore } from './context/authStore';
+import { useManagerStore } from './context/managerStore';
 import { readPortalSession } from './utils/authStorage';
 import { canAccessPortal, resolvePortalHome } from './utils/portalRouting';
 import { AuthSessionRedirectListener } from './components/shared/AuthSessionRedirectListener';
@@ -83,10 +83,22 @@ function TablesEntryRedirect() {
 function App() {
   const initializeAuth = useAuthStore((state) => state.initializeAuth);
   const isHydrated = useAuthStore((state) => state.isHydrated);
+  const restaurantId = useAuthStore((state) => state.restaurantId);
+  const setManagerRestaurantContext = useManagerStore((state) => state.setRestaurantContext);
+  const clearManagerTenantState = useManagerStore((state) => state.clearTenantState);
 
   useEffect(() => {
     initializeAuth(window.location.pathname);
   }, [initializeAuth]);
+
+  useEffect(() => {
+    if (restaurantId) {
+      setManagerRestaurantContext(restaurantId);
+      return;
+    }
+
+    clearManagerTenantState();
+  }, [clearManagerTenantState, restaurantId, setManagerRestaurantContext]);
 
   if (!isHydrated) {
     return null;
@@ -126,7 +138,6 @@ function App() {
             <Route path="/admin/loyalty" element={withSuspense(<Loyalty />)} />
             <Route path="/admin/analytics" element={withSuspense(<Analytics />)} />
             <Route path="/admin/tables" element={withSuspense(<Tables />)} />
-            <Route path="/admin/qr-tools" element={withSuspense(<QRTest />)} />
             <Route path="/admin/settings" element={withSuspense(<Settings />)} />
           </Route>
 
@@ -158,7 +169,6 @@ function App() {
           <Route path="/orders" element={<Navigate to="/admin/orders" replace />} />
           <Route path="/analytics" element={<Navigate to="/admin/analytics" replace />} />
           <Route path="/staff" element={<Navigate to="/admin/staff" replace />} />
-          <Route path="/qr-test" element={<Navigate to="/admin/qr-tools" replace />} />
           <Route path="/settings" element={<Navigate to="/admin/settings" replace />} />
           <Route path="/tables" element={<TablesEntryRedirect />} />
           <Route path="/kitchen" element={<Navigate to="/kot" replace />} />

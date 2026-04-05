@@ -1,4 +1,5 @@
 import OrderService from '../src/services/orderService.js';
+import TableService from '../src/services/tableService.js';
 
 describe('OrderService stability', () => {
   test('resolveOrderItemUnitPrice falls back to the menu price when the request sends zero', () => {
@@ -44,5 +45,25 @@ describe('OrderService stability', () => {
     expect(transformed.billing.grandTotal).toBe(67);
     expect(transformed.billing.paymentMode).toBe('cash');
     expect(transformed.billing.paidAmount).toBe(67);
+  });
+
+  test('getDisplayOrderDateKey uses the restaurant timezone instead of raw UTC date slices', () => {
+    expect(OrderService.getDisplayOrderDateKey('2026-04-04T19:44:00.000Z', 'Asia/Kolkata')).toBe('2026-04-05');
+    expect(OrderService.getDisplayOrderDateKey('2026-04-05T18:45:00.000Z', 'Asia/Kolkata')).toBe('2026-04-06');
+  });
+
+  test('extractDisplayOrderSequence only counts numbers from the same business date', () => {
+    expect(OrderService.extractDisplayOrderSequence('ORD-20260405-009', '2026-04-05')).toBe(9);
+    expect(OrderService.extractDisplayOrderSequence('ORD-20260404-009', '2026-04-05')).toBe(0);
+    expect(OrderService.extractDisplayOrderSequence('bad-value', '2026-04-05')).toBe(0);
+  });
+
+  test('buildFallbackDisplayOrderNumber stays readable when a stored order number is missing', () => {
+    expect(OrderService.buildFallbackDisplayOrderNumber('030a2702-a51e-4a65-9fe7-af9484da7fe9')).toBe('ORD-DA7FE9');
+  });
+
+  test('table lifecycle preserves manager-closed tables until a real active order exists', () => {
+    expect(TableService.getEffectiveStatus({ status: 'closed' }, false)).toBe('closed');
+    expect(TableService.getEffectiveStatus({ status: 'closed' }, true)).toBe('occupied');
   });
 });

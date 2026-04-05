@@ -43,12 +43,6 @@ export default function ManagerInventory() {
     <div className="space-y-6">
       {success ? <Toast type="success" message={success} /> : null}
 
-      <Card>
-        <p className="text-xs font-semibold uppercase tracking-[0.25em] text-[var(--color-text-subtle)]">Limited Inventory</p>
-        <h1 className="mt-3 text-3xl font-bold text-[var(--color-text)]">Monitor stock and request refills</h1>
-        <p className="mt-2 text-sm text-[var(--color-text-muted)]">Managers can see current stock and raise refill requests, but cannot change core inventory records.</p>
-      </Card>
-
       <div className="grid gap-4 md:grid-cols-3">
         <Card className="p-5"><p className="text-sm text-[var(--text-secondary)]">Tracked items</p><p className="mt-2 text-3xl font-bold text-[var(--text-primary)]">{items.length}</p></Card>
         <Card className="p-5"><p className="text-sm text-[var(--text-secondary)]">Low stock alerts</p><p className="mt-2 text-3xl font-bold text-red-400">{lowStockItems.length}</p></Card>

@@ -41,6 +41,7 @@ export function createEmptyKotMeta() {
       settledAt: null,
     },
     system: {
+      orderOrigin: null,
       deletion: {
         isDeleted: false,
         deletedAt: null,
@@ -109,6 +110,10 @@ export function normalizeKotMeta(meta = {}) {
       settledAt: meta?.loyalty?.settledAt || null,
     },
     system: {
+      orderOrigin:
+        meta?.system?.orderOrigin === 'qr' || meta?.system?.orderOrigin === 'pos'
+          ? meta.system.orderOrigin
+          : null,
       deletion: {
         isDeleted: Boolean(meta?.system?.deletion?.isDeleted),
         deletedAt: meta?.system?.deletion?.deletedAt || null,
@@ -192,6 +197,7 @@ function hasKotPayload(kotMeta = {}) {
 
       return value !== null && value !== undefined;
     }) ||
+    Boolean(normalized.system.orderOrigin) ||
     normalized.system.deletion.isDeleted ||
     normalized.kitchen.lastSentSnapshot.length > 0 ||
     normalized.kitchen.tickets.length > 0

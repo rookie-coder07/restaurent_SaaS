@@ -10,6 +10,7 @@ import Input from '../components/common/Input';
 import Modal from '../components/common/Modal';
 import EmptyState from '../components/common/EmptyState';
 import StatCard from '../components/common/StatCard';
+import Toast from '../components/common/Toast';
 
 function createEmptyFormData() {
   return {
@@ -26,10 +27,31 @@ function createEmptyFormData() {
   };
 }
 
+function getApiErrorMessage(err, fallbackMessage) {
+  const validationDetails = err?.response?.data?.errors?.details;
+  if (Array.isArray(validationDetails) && validationDetails.length > 0) {
+    return validationDetails.map((detail) => detail.message).join(' ');
+  }
+
+  return err?.response?.data?.message || fallbackMessage;
+}
+
 export default function MenuManagement() {
-  const { data: itemsData = {}, loading, execute: refetchItems } = useApi(() => menuAPI.getItems({ limit: 100 }));
-  const { data: categoriesData = {}, execute: refetchCategories } = useApi(() => menuAPI.getCategories());
-  const { data: inventoryData = {} } = useApi(inventoryAPI.getItems);
+  const {
+    data: itemsData = {},
+    loading,
+    error: itemsError,
+    execute: refetchItems,
+  } = useApi(() => menuAPI.getItems({ limit: 100 }));
+  const {
+    data: categoriesData = {},
+    error: categoriesError,
+    execute: refetchCategories,
+  } = useApi(() => menuAPI.getCategories());
+  const {
+    data: inventoryData = {},
+    error: inventoryError,
+  } = useApi(inventoryAPI.getItems);
 
   const [activeTab, setActiveTab] = useState('items');
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState('all');
@@ -92,6 +114,7 @@ export default function MenuManagement() {
 
   const availableItems = items.filter((item) => item.isAvailable).length;
   const unavailableItems = items.length - availableItems;
+  const fetchError = error || itemsError || categoriesError || inventoryError;
 
   const resetMessages = () => {
     setError(null);
@@ -240,7 +263,7 @@ export default function MenuManagement() {
       closeItemModal();
       await refetchItems();
     } catch (err) {
-      setError(err.response?.data?.message || 'Failed to save item.');
+      setError(getApiErrorMessage(err, 'Failed to save item.'));
     } finally {
       setSubmitting(false);
     }
@@ -256,7 +279,7 @@ export default function MenuManagement() {
       setSuccess('Item deleted successfully.');
       await refetchItems();
     } catch (err) {
-      setError(err.response?.data?.message || 'Failed to delete item.');
+      setError(getApiErrorMessage(err, 'Failed to delete item.'));
     }
   };
 
@@ -272,7 +295,7 @@ export default function MenuManagement() {
       setSuccess('Category created successfully.');
       await refetchCategories();
     } catch (err) {
-      setError(err.response?.data?.message || 'Failed to create category.');
+      setError(getApiErrorMessage(err, 'Failed to create category.'));
     } finally {
       setSubmitting(false);
     }
@@ -288,7 +311,7 @@ export default function MenuManagement() {
       setSuccess('Category deleted successfully.');
       await refetchCategories();
     } catch (err) {
-      setError(err.response?.data?.message || 'Failed to delete category.');
+      setError(getApiErrorMessage(err, 'Failed to delete category.'));
     }
   };
 
@@ -302,46 +325,24 @@ export default function MenuManagement() {
 
   return (
     <div className="space-y-6">
-      {success ? (
-        <div className="flex items-center gap-3 rounded-2xl border border-emerald-500/20 bg-emerald-500/10 p-4 text-emerald-300">
-          <div className="h-2.5 w-2.5 rounded-full bg-emerald-400" />
-          <p className="text-sm font-medium">{success}</p>
-        </div>
-      ) : null}
+      {success ? <Toast type="success" message={success} /> : null}
+      {fetchError ? <Toast type="error" message={fetchError} /> : null}
 
-      {error ? (
-        <div className="flex items-center gap-3 rounded-2xl border border-red-500/20 bg-red-500/10 p-4 text-red-300">
-          <AlertCircle className="h-5 w-5 flex-shrink-0" />
-          <p className="text-sm font-medium">{error}</p>
+      <div className="flex justify-end">
+        <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row">
+          {activeTab === 'items' ? (
+            <Button className="w-full sm:w-auto" onClick={openNewItemModal}>
+              <Plus className="h-4 w-4" />
+              Add Item
+            </Button>
+          ) : (
+            <Button className="w-full sm:w-auto" onClick={() => setShowCategoryModal(true)}>
+              <Plus className="h-4 w-4" />
+              Add Category
+            </Button>
+          )}
         </div>
-      ) : null}
-
-      <Card className="overflow-hidden">
-        <div className="absolute inset-y-0 right-0 w-40 bg-gradient-to-l from-cyan-400/10 to-transparent" />
-        <div className="relative flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-          <div className="min-w-0">
-            <p className="text-xs font-semibold uppercase tracking-[0.28em] text-[var(--text-secondary)]">Menu Studio</p>
-            <h1 className="mt-2 text-2xl font-bold text-[var(--text-primary)] sm:text-3xl">Menu Management</h1>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-[var(--text-secondary)]">
-              Keep dishes, pricing, categories, and images consistent across the customer ordering experience.
-            </p>
-          </div>
-
-          <div className="flex w-full flex-col gap-3 sm:flex-row lg:w-auto">
-            {activeTab === 'items' ? (
-              <Button className="w-full sm:w-auto" onClick={openNewItemModal}>
-                <Plus className="h-4 w-4" />
-                Add Item
-              </Button>
-            ) : (
-              <Button className="w-full sm:w-auto" onClick={() => setShowCategoryModal(true)}>
-                <Plus className="h-4 w-4" />
-                Add Category
-              </Button>
-            )}
-          </div>
-        </div>
-      </Card>
+      </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <StatCard label="Total Items" value={items.length} subtitle="Across your full menu" iconTone="bg-[var(--color-primary-soft)] text-[var(--color-primary)]" />

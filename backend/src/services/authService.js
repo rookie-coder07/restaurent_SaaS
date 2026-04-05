@@ -238,6 +238,7 @@ export class AuthService {
           name: user.name,
           email: user.email,
           role: normalizedRole,
+          assignedTables: Array.isArray(user.assigned_tables) ? user.assigned_tables.filter(Boolean) : [],
         },
         restaurant: {
           id: user.restaurant_id,

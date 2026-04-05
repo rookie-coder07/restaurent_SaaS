@@ -1,5 +1,5 @@
 ALTER TABLE public.tables
-ADD COLUMN IF NOT EXISTS table_number INT;
+ADD COLUMN IF NOT EXISTS table_number TEXT;
 
 ALTER TABLE public.tables
 ADD COLUMN IF NOT EXISTS location VARCHAR(100) DEFAULT 'main';
@@ -29,7 +29,7 @@ BEGIN
       UPDATE public.tables
       SET table_number = COALESCE(
         table_number,
-        NULLIF(regexp_replace(table_name, ''[^0-9]'', '''', ''g''), '''')::INT
+        NULLIF(table_name, '''')
       )
       WHERE table_number IS NULL
     ';

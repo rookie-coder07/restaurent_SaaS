@@ -38,10 +38,38 @@ export class RestaurantService {
       email: user.email,
       phone: user.phone || user.phone_number || '',
       role: user.role,
+      assignedTables: Array.isArray(user.assigned_tables) ? user.assigned_tables.filter(Boolean) : [],
       status: user.status || 'active',
       createdAt: user.created_at,
       updatedAt: user.updated_at,
     };
+  }
+
+  static async validateAssignedTables(restaurantId, assignedTables = []) {
+    const normalizedTableIds = Array.from(
+      new Set((assignedTables || []).map((tableId) => String(tableId || '').trim()).filter(Boolean))
+    );
+
+    if (normalizedTableIds.length === 0) {
+      return [];
+    }
+
+    const { data: tables, error } = await supabase
+      .from('tables')
+      .select('id')
+      .eq('restaurant_id', restaurantId)
+      .in('id', normalizedTableIds);
+
+    if (error) {
+      throw error;
+    }
+
+    const validTableIds = new Set((tables || []).map((table) => table.id));
+    if (validTableIds.size !== normalizedTableIds.length) {
+      throw new Error('One or more selected tables do not belong to this restaurant');
+    }
+
+    return normalizedTableIds;
   }
 
   // ============ RESTAURANT MANAGEMENT ============
@@ -333,12 +361,16 @@ export class RestaurantService {
       }
 
       const passwordHash = await AuthService.hashPassword(staffData.password);
+      const assignedTables = staffData.role === 'staff'
+        ? await this.validateAssignedTables(restaurantId, staffData.assignedTables)
+        : [];
       const staffPayload = {
         restaurant_id: restaurantId,
         name: staffData.name,
         email: staffData.email.toLowerCase(),
         phone: staffData.phone,
         role: staffData.role,
+        assigned_tables: assignedTables,
         password_hash: passwordHash,
         status: 'active',
       };
@@ -353,6 +385,12 @@ export class RestaurantService {
         if (error.code === 'PGRST204' && String(error.message || '').includes("'phone'")) {
           throw new Error(
             "Database schema is missing users.phone. Run: ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(20);"
+          );
+        }
+
+        if (error.code === 'PGRST204' && String(error.message || '').includes("'assigned_tables'")) {
+          throw new Error(
+            "Database schema is missing users.assigned_tables. Run the migration 2026-04-05-add-user-assigned-tables.sql."
           );
         }
 
@@ -398,6 +436,85 @@ export class RestaurantService {
       };
     } catch (error) {
       logger.error('❌ Get staff users error:', error);
+      throw error;
+    }
+  }
+
+  static async updateStaffUser(restaurantId, staffId, updateData) {
+    try {
+      const { data: existingUser, error: existingError } = await supabase
+        .from('users')
+        .select('*')
+        .eq('restaurant_id', restaurantId)
+        .eq('id', staffId)
+        .single();
+
+      if (existingError || !existingUser) {
+        throw existingError || new Error('Staff user not found');
+      }
+
+      const nextRole = updateData.role || existingUser.role;
+      const payload = {
+        updated_at: new Date().toISOString(),
+      };
+
+      if (updateData.name !== undefined) payload.name = updateData.name;
+      if (updateData.phone !== undefined) payload.phone = updateData.phone;
+      if (updateData.role !== undefined) payload.role = updateData.role;
+      if (updateData.email !== undefined) {
+        const normalizedEmail = updateData.email.toLowerCase();
+        if (normalizedEmail !== String(existingUser.email || '').toLowerCase()) {
+          const { data: duplicateUser, error: duplicateError } = await supabase
+            .from('users')
+            .select('id')
+            .eq('restaurant_id', restaurantId)
+            .eq('email', normalizedEmail)
+            .neq('id', staffId)
+            .maybeSingle();
+
+          if (duplicateError) {
+            throw duplicateError;
+          }
+
+          if (duplicateUser) {
+            throw new Error('Staff email already exists for this restaurant');
+          }
+        }
+
+        payload.email = normalizedEmail;
+      }
+
+      if (updateData.password) {
+        payload.password_hash = await AuthService.hashPassword(updateData.password);
+      }
+
+      if (updateData.assignedTables !== undefined || nextRole !== 'staff') {
+        payload.assigned_tables = nextRole === 'staff'
+          ? await this.validateAssignedTables(restaurantId, updateData.assignedTables ?? existingUser.assigned_tables)
+          : [];
+      }
+
+      const { data: user, error } = await supabase
+        .from('users')
+        .update(payload)
+        .eq('restaurant_id', restaurantId)
+        .eq('id', staffId)
+        .select()
+        .single();
+
+      if (error || !user) {
+        if (error?.code === 'PGRST204' && String(error.message || '').includes("'assigned_tables'")) {
+          throw new Error(
+            "Database schema is missing users.assigned_tables. Run the migration 2026-04-05-add-user-assigned-tables.sql."
+          );
+        }
+
+        throw error || new Error('Failed to update staff user');
+      }
+
+      return this.transformStaffUser(user);
+    } catch (error) {
+      logger.error('❌ Update staff user error:', error);
       throw error;
     }
   }

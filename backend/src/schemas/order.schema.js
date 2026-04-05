@@ -21,12 +21,13 @@ const orderItemSchema = Joi.object({
 }).or('menuItemId', 'itemId', 'id').or('quantity', 'qty');
 
 const paymentMethodSchema = Joi.string().trim().lowercase().valid(...PAYMENT_METHOD_VALUES);
+const tableLabelSchema = Joi.string().trim().max(30).pattern(/^[A-Za-z0-9][A-Za-z0-9\s-]*$/);
 
 export const createOrderSchema = Joi.object({
   tableId: Joi.string().uuid().optional().allow(null),
   table_id: Joi.string().uuid().optional().allow(null),
   qrCodeData: Joi.string().trim().optional(),
-  tableNumber: Joi.number().integer().min(1).optional(),
+  tableNumber: tableLabelSchema.optional(),
   items: Joi.array()
     .items(orderItemSchema)
     .min(1)
@@ -138,18 +139,18 @@ export const softDeleteOrderSchema = Joi.object({
 });
 
 export const createTableSchema = Joi.object({
-  tableNumber: Joi.number().integer().min(1).required(),
+  tableNumber: tableLabelSchema.required(),
   seatCapacity: Joi.number().integer().min(1).max(20).required(),
-  location: Joi.string().trim().max(100).optional(),
+  location: Joi.string().trim().max(100).optional().allow(''),
 });
 
 export const batchCreateTablesSchema = Joi.object({
   tables: Joi.array()
     .items(
       Joi.object({
-        tableNumber: Joi.number().integer().min(1).required(),
+        tableNumber: tableLabelSchema.required(),
         seatCapacity: Joi.number().integer().min(1).max(20).required(),
-        location: Joi.string().trim().optional(),
+        location: Joi.string().trim().max(100).optional().allow(''),
       })
     )
     .min(1)

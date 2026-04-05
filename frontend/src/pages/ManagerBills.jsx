@@ -2,6 +2,7 @@ import { BadgePercent, CreditCard, Loader, Receipt, Wallet } from 'lucide-react'
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
+import useAutoRefresh from '../hooks/useAutoRefresh';
 import { orderAPI, restaurantAPI } from '../services/apiEndpoints';
 import { useAuthStore } from '../context/authStore';
 import { useManagerStore } from '../context/managerStore';
@@ -16,8 +17,8 @@ import Toast from '../components/common/Toast';
 
 export default function ManagerBills() {
   const navigate = useNavigate();
-  const { data: ordersData = {}, loading, execute: reloadOrders } = useApi(() => orderAPI.getOrders({ limit: 150 }));
-  const { data: restaurantProfile = {} } = useApi(restaurantAPI.getProfile);
+  const { data: ordersData = {}, loading, execute: reloadOrders, refetch: refetchOrders } = useApi(() => orderAPI.getOrders({ limit: 150 }));
+  const { data: restaurantProfile = {}, refetch: refetchProfile } = useApi(restaurantAPI.getProfile);
   const user = useAuthStore((state) => state.user);
   const approvedDiscounts = useManagerStore((state) => state.approvedDiscounts);
   const approveDiscount = useManagerStore((state) => state.approveDiscount);
@@ -30,6 +31,17 @@ export default function ManagerBills() {
   const [success, setSuccess] = useState('');
   const [error, setError] = useState('');
   const [actioningBillId, setActioningBillId] = useState('');
+
+  useAutoRefresh(() => Promise.allSettled([refetchOrders(), refetchProfile()]), 12000);
+
+  const fetchFreshBill = async (bill) => {
+    if (!bill?.id) {
+      return bill;
+    }
+
+    const response = await orderAPI.getOrder(bill.id);
+    return response.data?.data || bill;
+  };
 
   const bills = ordersData?.items || [];
   const unpaidBills = useMemo(() => bills.filter(isUnpaid), [bills]);
@@ -78,9 +90,10 @@ export default function ManagerBills() {
     setError('');
 
     try {
+      const freshBill = await fetchFreshBill(payingBill);
       await orderAPI.settleOrder(payingBill.id, {
         paymentMethod,
-        amountReceived: paymentMethod === 'cash' ? Number(amountReceived || payingBill.totalAmount || 0) : undefined,
+        amountReceived: paymentMethod === 'cash' ? Number(amountReceived || freshBill.totalAmount || freshBill.total || 0) : undefined,
         discountPercent: approval?.percent || undefined,
         paymentNote: [approval?.note, note.trim()].filter(Boolean).join(' | '),
       });
@@ -116,6 +129,48 @@ export default function ManagerBills() {
     }
   };
 
+  const openPayBill = async (bill) => {
+    setActioningBillId(bill.id);
+    setError('');
+
+    try {
+      const freshBill = await fetchFreshBill(bill);
+      setPayingBill(freshBill);
+      setPaymentMethod('cash');
+      setAmountReceived(String(freshBill.totalAmount || freshBill.total || 0));
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || 'Failed to load the latest bill.');
+    } finally {
+      setActioningBillId('');
+    }
+  };
+
+  const openPrintedBill = async (bill) => {
+    setActioningBillId(bill.id);
+    setError('');
+
+    try {
+      const freshBill = await fetchFreshBill(bill);
+      navigate(`/manager/bills/${freshBill.id}`, {
+        state: {
+          order: freshBill,
+          restaurant: restaurantProfile,
+          invoice: buildInvoiceData({
+            order: freshBill,
+            restaurant: restaurantProfile,
+            cashierName: freshBill.billing?.cashierName || user?.name || user?.email || 'Manager',
+          }),
+          returnTo: '/manager/bills',
+          cashierName: freshBill.billing?.cashierName || user?.name || user?.email || 'Manager',
+        },
+      });
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || 'Failed to load the latest bill details.');
+    } finally {
+      setActioningBillId('');
+    }
+  };
+
   if (loading && bills.length === 0) {
     return <div className="flex h-full items-center justify-center"><Loader className="h-8 w-8 animate-spin text-[var(--color-primary)]" /></div>;
   }
@@ -124,12 +179,6 @@ export default function ManagerBills() {
     <div className="space-y-6">
       {success ? <Toast type="success" message={success} /> : null}
       {error ? <Toast type="error" message={error} /> : null}
-
-      <Card>
-        <p className="text-xs font-semibold uppercase tracking-[0.25em] text-[var(--color-text-subtle)]">Billing Control</p>
-        <h1 className="mt-3 text-3xl font-bold text-[var(--color-text)]">Track live bills, unpaid tables, and manager-approved discounts</h1>
-        <p className="mt-2 text-sm text-[var(--color-text-muted)]">Managers can view every bill, watch table totals, approve limited discounts, and close bills by marking them paid.</p>
-      </Card>
 
       <div className="grid gap-4 md:grid-cols-3">
         <Card className="p-5"><p className="text-sm text-[var(--text-secondary)]">All bills</p><p className="mt-2 text-3xl font-bold text-[var(--text-primary)]">{bills.length}</p></Card>
@@ -191,31 +240,18 @@ export default function ManagerBills() {
                       Approve Discount
                     </Button>
                     {isUnpaid(bill) ? (
-                      <Button onClick={() => { setPayingBill(bill); setPaymentMethod('cash'); setAmountReceived(String(bill.totalAmount || bill.total || 0)); }}>
+                      <Button onClick={() => openPayBill(bill)} disabled={actioningBillId === bill.id}>
                         <Receipt className="h-4 w-4" />
-                        Mark Paid
+                        {actioningBillId === bill.id ? 'Loading...' : 'Mark Paid'}
                       </Button>
                     ) : (
                       <Button
                         variant="secondary"
-                        onClick={() =>
-                          navigate(`/manager/bills/${bill.id}`, {
-                            state: {
-                              order: bill,
-                              restaurant: restaurantProfile,
-                              invoice: buildInvoiceData({
-                                order: bill,
-                                restaurant: restaurantProfile,
-                                cashierName: bill.billing?.cashierName || user?.name || user?.email || 'Manager',
-                              }),
-                              returnTo: '/manager/bills',
-                              cashierName: bill.billing?.cashierName || user?.name || user?.email || 'Manager',
-                            },
-                          })
-                        }
+                        onClick={() => openPrintedBill(bill)}
+                        disabled={actioningBillId === bill.id}
                       >
                         <Receipt className="h-4 w-4" />
-                        Print Bill
+                        {actioningBillId === bill.id ? 'Loading...' : 'Print Bill'}
                       </Button>
                     )}
                   </div>

@@ -1,9 +1,11 @@
 import { Activity, Pencil, PlusCircle, ShieldCheck, Trash2, UserRound, Users } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { useApi } from '../hooks/useApi';
+import useAutoRefresh from '../hooks/useAutoRefresh';
 import { orderAPI, restaurantAPI, tableAPI } from '../services/apiEndpoints';
 import { useManagerStore } from '../context/managerStore';
 import { formatDisplayOrderNumber } from '../utils/formatters';
+import { getTableActivity } from '../utils/managerPortal';
 import Card from '../components/common/Card';
 import Button from '../components/common/Button';
 import Modal from '../components/common/Modal';
@@ -12,12 +14,15 @@ import PaginationControls from '../components/common/PaginationControls';
 import useResponsivePagination from '../hooks/useResponsivePagination';
 
 export default function ManagerWaiters() {
-  const { data: staffData = {} } = useApi(() => restaurantAPI.getStaff({ limit: 100, skip: 0, isActive: true }));
-  const { data: tablesData = {} } = useApi(() => tableAPI.getTables({ limit: 200 }));
-  const { data: ordersData = {} } = useApi(() => orderAPI.getOrders({ limit: 150 }));
+  const { data: staffData = {}, refetch: refetchStaff } = useApi(() => restaurantAPI.getStaff({ limit: 100, skip: 0, isActive: true }));
+  const { data: tablesData = {}, refetch: refetchTables } = useApi(() => tableAPI.getTables({ limit: 200 }));
+  const { data: ordersData = {}, refetch: refetchOrders } = useApi(orderAPI.getOpenBills);
   const tableAssignments = useManagerStore((state) => state.tableAssignments);
   const overrideAccess = useManagerStore((state) => state.overrideAccess);
   const waiterActivity = useManagerStore((state) => state.waiterActivity);
+  const tableClosures = useManagerStore((state) => state.tableClosures);
+  const tableTransfers = useManagerStore((state) => state.tableTransfers);
+  const tableMerges = useManagerStore((state) => state.tableMerges);
   const assignTable = useManagerStore((state) => state.assignTable);
   const unassignTable = useManagerStore((state) => state.unassignTable);
   const toggleOverrideAccess = useManagerStore((state) => state.toggleOverrideAccess);
@@ -29,7 +34,18 @@ export default function ManagerWaiters() {
 
   const waiters = useMemo(() => (staffData?.staff || []).filter((member) => member.role === 'staff'), [staffData]);
   const tables = tablesData?.tables || [];
-  const orders = ordersData?.items || [];
+  const orders = Array.isArray(ordersData) ? ordersData : [];
+  const enrichedTables = useMemo(
+    () =>
+      tables.map((table) =>
+        getTableActivity(table, orders, tableAssignments, tableClosures, tableTransfers, tableMerges, tables)
+      ),
+    [orders, tableAssignments, tableClosures, tableMerges, tableTransfers, tables]
+  );
+  const visibleTables = useMemo(
+    () => enrichedTables.filter((table) => !table.isMergedSecondary),
+    [enrichedTables]
+  );
   const {
     paginatedItems: paginatedWaiters,
     currentPage,
@@ -40,6 +56,8 @@ export default function ManagerWaiters() {
     goNext,
     hasPagination,
   } = useResponsivePagination(waiters, { mobileItemsPerPage: 4, desktopItemsPerPage: 6 });
+
+  useAutoRefresh(() => Promise.allSettled([refetchStaff(), refetchTables(), refetchOrders()]), 12000);
 
   const handleAssignment = (tableId, waiterId) => {
     assignTable(tableId, waiterId);
@@ -96,18 +114,17 @@ export default function ManagerWaiters() {
     <div className="space-y-6">
       {success ? <Toast type="success" message={success} /> : null}
 
-      <Card>
-        <p className="text-xs font-semibold uppercase tracking-[0.25em] text-[var(--color-text-subtle)]">Waiter Control</p>
-        <h1 className="mt-3 text-3xl font-bold text-[var(--color-text)]">Assign tables, override access, and monitor floor activity</h1>
-        <p className="mt-2 text-sm text-[var(--color-text-muted)]">Managers can rebalance waiter coverage and step in on any table when service pressure rises.</p>
-      </Card>
-
       <div className="grid gap-4 xl:grid-cols-2">
         {paginatedWaiters.map((waiter) => {
-          const assignedTables = tables.filter((table) => tableAssignments[table.id] === waiter.id);
-          const waiterOrders = orders.filter((order) => assignedTables.some((table) => table.id === order.tableId));
+          const assignedTables = visibleTables.filter((table) => tableAssignments[table.id] === waiter.id);
+          const waiterOrders = assignedTables.flatMap((table) => table.activeOrders || []);
           const latestActivity = waiterActivity[waiter.id];
-          const availableTables = tables.filter((table) => !tableAssignments[table.id] || tableAssignments[table.id] === waiter.id);
+          const availableTables = visibleTables.filter(
+            (table) =>
+              table.effectiveStatus !== 'closed' &&
+              !table.isMergedPrimary &&
+              (!tableAssignments[table.id] || tableAssignments[table.id] === waiter.id)
+          );
 
           return (
             <Card key={waiter.id} className="p-4">
@@ -163,7 +180,9 @@ export default function ManagerWaiters() {
                           key={`${waiter.id}-${table.id}`}
                           className="inline-flex items-center gap-1.5 rounded-full border border-[var(--border-color)] bg-[var(--color-panel)] px-3 py-1.5"
                         >
-                          <span className="text-sm font-semibold text-[var(--text-primary)]">T{table.tableNumber}</span>
+                          <span className="text-sm font-semibold text-[var(--text-primary)]">
+                            {table.mergedTableNumbers?.length > 1 ? table.mergedDisplayName.replace('Table ', 'T') : `T${table.tableNumber}`}
+                          </span>
                           <button
                             type="button"
                             onClick={() => openAllocationEditor(table, waiter.id)}
@@ -219,7 +238,7 @@ export default function ManagerWaiters() {
                       <option value="">Select a table</option>
                       {availableTables.map((table) => (
                         <option key={table.id} value={table.id}>
-                          Table {table.tableNumber}
+                          {table.mergedDisplayName || `Table ${table.tableNumber}`}
                         </option>
                       ))}
                     </select>

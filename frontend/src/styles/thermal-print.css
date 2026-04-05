@@ -1,0 +1,186 @@
+.thermal-print-page {
+  --thermal-width: 80mm;
+  --thermal-padding: 4mm;
+  --thermal-font-size: 12px;
+  --thermal-line-height: 1.2;
+}
+
+.thermal-print-root {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+}
+
+.thermal-receipt {
+  width: var(--thermal-width);
+  max-width: var(--thermal-width);
+  margin: 0 auto;
+  padding: var(--thermal-padding);
+  border: 1px solid #000;
+  border-radius: 0;
+  box-shadow: none;
+  background: #fff;
+  color: #000;
+  font-family: "Courier New", Courier, monospace;
+  font-size: var(--thermal-font-size);
+  line-height: var(--thermal-line-height);
+  letter-spacing: 0;
+  overflow: visible;
+  word-break: break-word;
+}
+
+.thermal-center {
+  text-align: center;
+}
+
+.thermal-left {
+  text-align: left;
+}
+
+.thermal-title {
+  font-size: 14px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.thermal-subtitle {
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.thermal-meta,
+.thermal-summary {
+  display: grid;
+  gap: 2px;
+}
+
+.thermal-meta {
+  grid-template-columns: 1fr auto;
+}
+
+.thermal-summary-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.thermal-items {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.thermal-kot-head,
+.thermal-kot-row {
+  display: grid;
+  grid-template-columns: 1fr 40px;
+  column-gap: 8px;
+  align-items: start;
+}
+
+.thermal-bill-head,
+.thermal-bill-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 40px 60px 70px;
+  column-gap: 6px;
+  align-items: start;
+}
+
+.thermal-kot-head,
+.thermal-bill-head {
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.thermal-kot-row,
+.thermal-bill-row {
+  padding: 3px 0;
+}
+
+.thermal-item-name {
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.thermal-align-right {
+  text-align: right;
+}
+
+.thermal-muted {
+  opacity: 0.88;
+}
+
+.thermal-strong {
+  font-weight: 700;
+}
+
+.thermal-separator {
+  margin: 6px 0;
+  white-space: nowrap;
+  overflow: hidden;
+  line-height: 1;
+}
+
+@media print {
+  html,
+  body {
+    width: var(--thermal-width);
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #fff !important;
+  }
+
+  body * {
+    visibility: hidden;
+  }
+
+  #bill-section,
+  #bill-section *,
+  #kot-section,
+  #kot-section * {
+    visibility: visible;
+  }
+
+  #bill-section,
+  #kot-section {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: var(--thermal-width);
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+  }
+
+  .bill-print-toolbar,
+  .kot-print-toolbar {
+    display: none !important;
+  }
+
+  .bill-print-section,
+  .kot-print-section,
+  .thermal-print-root {
+    margin: 0 !important;
+    padding: 0 !important;
+    width: var(--thermal-width) !important;
+    max-width: var(--thermal-width) !important;
+  }
+
+  .thermal-receipt,
+  .bill-receipt,
+  .kot-receipt {
+    width: var(--thermal-width) !important;
+    max-width: var(--thermal-width) !important;
+    min-height: auto !important;
+    height: auto !important;
+    margin: 0 !important;
+    padding: var(--thermal-padding) !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+}

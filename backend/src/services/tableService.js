@@ -4,12 +4,23 @@ import supabase from '../config/supabase.js';
 export class TableService {
   static ACTIVE_ORDER_STATUSES = ['awaiting_waiter_approval', 'pending', 'preparing', 'ready', 'served', 'in_progress'];
 
+  static normalizeTableNumber(value) {
+    return String(value ?? '').trim();
+  }
+
+  static compareTableNumbers(left, right) {
+    return this.normalizeTableNumber(left).localeCompare(this.normalizeTableNumber(right), undefined, {
+      numeric: true,
+      sensitivity: 'base',
+    });
+  }
+
   // Helper function to transform snake_case to camelCase
   static transformTable(table) {
     if (!table) return null;
     return {
       id: table.id,
-      tableNumber: table.table_number,
+      tableNumber: this.normalizeTableNumber(table.table_number),
       seatCapacity: table.capacity,
       restaurantId: table.restaurant_id,
       location: table.location,
@@ -26,12 +37,18 @@ export class TableService {
 
   static transformTables(tables) {
     if (!Array.isArray(tables)) return [];
-    return tables.map(table => this.transformTable(table));
+    return tables
+      .map((table) => this.transformTable(table))
+      .sort((left, right) => this.compareTableNumbers(left.tableNumber, right.tableNumber));
   }
 
   static getEffectiveStatus(table, hasActiveOrder = false) {
     if (hasActiveOrder) {
       return 'occupied';
+    }
+
+    if (table.status === 'closed') {
+      return 'closed';
     }
 
     if (table.reserved_by || table.reservedBy || table.status === 'reserved') {
@@ -164,7 +181,7 @@ export class TableService {
         .from('tables')
         .insert([{
           restaurant_id: restaurantId,
-          table_number: tableData.tableNumber,
+          table_number: this.normalizeTableNumber(tableData.tableNumber),
           capacity: tableData.seatCapacity,
           location: tableData.location || 'main',
           status: 'available',
@@ -226,7 +243,7 @@ export class TableService {
         query = query.eq('location', filters.location);
       }
 
-      const { data: tables, error } = await query.order('table_number', { ascending: true });
+      const { data: tables, error } = await query;
 
       if (error) throw error;
 
@@ -266,7 +283,7 @@ export class TableService {
         updated_at: new Date().toISOString(),
       };
 
-      if (updateData.tableNumber !== undefined) payload.table_number = updateData.tableNumber;
+      if (updateData.tableNumber !== undefined) payload.table_number = this.normalizeTableNumber(updateData.tableNumber);
       if (updateData.seatCapacity !== undefined) payload.capacity = updateData.seatCapacity;
       if (updateData.location !== undefined) payload.location = updateData.location;
       if (updateData.status !== undefined) payload.status = updateData.status;
@@ -337,7 +354,7 @@ export class TableService {
         query = query.gte('capacity', capacity);
       }
 
-      const { data: tables, error } = await query.order('table_number', { ascending: true });
+      const { data: tables, error } = await query;
 
       if (error) throw error;
 
@@ -436,6 +453,7 @@ export class TableService {
         available: statuses?.filter(t => t.status === 'available').length || 0,
         occupied: statuses?.filter(t => t.status === 'occupied').length || 0,
         reserved: statuses?.filter(t => t.status === 'reserved').length || 0,
+        closed: statuses?.filter(t => t.status === 'closed').length || 0,
       };
 
       return stats;
@@ -460,8 +478,7 @@ export class TableService {
         query = query.eq('is_active', filters.isActive);
       }
 
-      const { data: tables, error } = await query
-        .order('table_number', { ascending: true });
+      const { data: tables, error } = await query;
 
       if (error) throw error;
 
@@ -488,7 +505,7 @@ export class TableService {
     try {
       const tablesToInsert = tables.map(table => ({
         restaurant_id: restaurantId,
-        table_number: table.tableNumber,
+        table_number: this.normalizeTableNumber(table.tableNumber),
         capacity: table.seatCapacity,
         location: table.location || 'main',
         status: 'available',

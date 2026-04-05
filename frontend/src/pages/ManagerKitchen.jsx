@@ -1,17 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, ShieldAlert } from 'lucide-react';
 import { kitchenAPI } from '../services/apiEndpoints';
-import { parseServerDate } from '../utils/formatters';
+import { formatDate, formatDisplayOrderNumber, formatShortDisplayOrderNumber, parseServerDate } from '../utils/formatters';
 import { printKitchenTicket } from '../utils/kotPrint';
 import { useManagerStore } from '../context/managerStore';
 import Card from '../components/common/Card';
 import Button from '../components/common/Button';
+import Modal from '../components/common/Modal';
 import Toast from '../components/common/Toast';
 import KOTHeader from '../components/kot/KOTHeader';
 import ViewToggle from '../components/kot/ViewToggle';
 import OrderCard from '../components/kot/OrderCard';
 
-const POLLING_INTERVAL_MS = 5000;
 const STATUS_LANES = [
   { key: 'pending', title: 'Pending', subtitle: 'New KOTs and delta actions waiting to start', empty: 'No pending KOTs' },
   { key: 'preparing', title: 'Preparing', subtitle: 'Currently in progress', empty: 'Nothing is being prepared' },
@@ -98,9 +98,13 @@ export default function ManagerKitchen() {
   const [printingTicketId, setPrintingTicketId] = useState(null);
   const [newTicketIds, setNewTicketIds] = useState([]);
   const [view, setView] = useState('order');
+  const [activeMobileLane, setActiveMobileLane] = useState('pending');
   const [lastUpdatedAt, setLastUpdatedAt] = useState(null);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [selectedTicket, setSelectedTicket] = useState(null);
+  const [detailOrder, setDetailOrder] = useState(null);
+  const [detailLoading, setDetailLoading] = useState(false);
   const knownTicketIdsRef = useRef(new Set());
   const fetchInFlightRef = useRef(false);
   const prioritizedOrders = useManagerStore((state) => state.prioritizedOrders);
@@ -150,27 +154,9 @@ export default function ManagerKitchen() {
   };
 
   useEffect(() => {
-    let isMounted = true;
-
-    const safeFetch = async (showLoader = false) => {
-      try {
-        await fetchOrders(showLoader);
-      } catch {
-        // handled in state
-      }
-    };
-
-    safeFetch(true);
-    const intervalId = window.setInterval(() => {
-      if (isMounted) {
-        safeFetch(false);
-      }
-    }, POLLING_INTERVAL_MS);
-
-    return () => {
-      isMounted = false;
-      window.clearInterval(intervalId);
-    };
+    fetchOrders(true).catch(() => {
+      // handled in state
+    });
   }, []);
 
   const groups = useMemo(
@@ -209,6 +195,25 @@ export default function ManagerKitchen() {
 
     return Array.from(grouped.values()).sort((a, b) => b.quantity - a.quantity);
   }, [tickets]);
+
+  useEffect(() => {
+    if (view !== 'order') {
+      return;
+    }
+
+    const laneKeys = STATUS_LANES.map((lane) => lane.key);
+    const currentLaneHasTickets = (groups[activeMobileLane] || []).length > 0;
+
+    if (currentLaneHasTickets) {
+      return;
+    }
+
+    const nextAvailableLane = laneKeys.find((laneKey) => (groups[laneKey] || []).length > 0);
+
+    if (nextAvailableLane && nextAvailableLane !== activeMobileLane) {
+      setActiveMobileLane(nextAvailableLane);
+    }
+  }, [activeMobileLane, groups, view]);
 
   const handleAdvanceStatus = async (ticket) => {
     const nextStatus = NEXT_STATUS[ticket.status];
@@ -293,20 +298,100 @@ export default function ManagerKitchen() {
     }
   };
 
+  const openTicketDetails = async (ticket) => {
+    setSelectedTicket(ticket);
+    setDetailOrder(null);
+    setDetailLoading(true);
+    setError('');
+
+    try {
+      const response = await kitchenAPI.getOrderDetail(ticket.orderId);
+      setDetailOrder(response.data?.data || null);
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || 'Failed to load kitchen order details.');
+    } finally {
+      setDetailLoading(false);
+    }
+  };
+
+  const closeTicketDetails = () => {
+    setSelectedTicket(null);
+    setDetailOrder(null);
+    setDetailLoading(false);
+  };
+
+  const renderLane = (lane) => (
+    <section
+      key={lane.key}
+      className="rounded-[1.4rem] border border-[var(--border-color)] bg-[var(--color-surface)] p-3 shadow-[var(--shadow-card)] sm:rounded-[1.9rem] sm:p-4"
+    >
+      <div className="mb-3 flex items-start justify-between gap-3 sm:mb-4">
+        <div>
+          <h2 className="text-lg font-black text-[var(--text-primary)] sm:text-xl">{lane.title}</h2>
+          <p className="mt-1 hidden text-sm text-[var(--text-secondary)] sm:block">{lane.subtitle}</p>
+        </div>
+        <span className="rounded-2xl bg-[var(--bg-card-muted)] px-3 py-2 text-base font-black text-[var(--color-primary)] sm:text-lg">
+          {groups[lane.key].length}
+        </span>
+      </div>
+
+      {groups[lane.key].length === 0 ? (
+        <div className="flex min-h-[9rem] items-center justify-center rounded-[1.2rem] border border-dashed border-[var(--border-color)] bg-[var(--color-panel)] px-4 text-center text-sm font-semibold text-[var(--text-secondary)] sm:min-h-[12rem] sm:rounded-[1.5rem]">
+          {lane.empty}
+        </div>
+      ) : (
+        <div className="space-y-3 sm:space-y-4">
+          {groups[lane.key]
+            .slice()
+            .sort((left, right) => {
+              const leftPriority = prioritizedOrders[left.orderId]?.priority === 'high' ? 1 : 0;
+              const rightPriority = prioritizedOrders[right.orderId]?.priority === 'high' ? 1 : 0;
+              if (leftPriority !== rightPriority) {
+                return rightPriority - leftPriority;
+              }
+              return getAgeMinutes(right.createdAt) - getAgeMinutes(left.createdAt);
+            })
+            .map((ticket) => {
+              const isPriority = prioritizedOrders[ticket.orderId]?.priority === 'high';
+
+              return (
+                <div key={ticket.id} className="space-y-3">
+                  <OrderCard
+                    ticket={ticket}
+                    laneLabel={lane.title}
+                    elapsedLabel={formatElapsed(ticket.createdAt)}
+                    ageTone={getAgeTone(ticket.createdAt)}
+                    isNewTicket={newTicketIds.includes(ticket.id)}
+                    onViewDetails={openTicketDetails}
+                    onAdvanceStatus={handleAdvanceStatus}
+                    onReprint={handleReprint}
+                    onRefire={handleRefire}
+                    isUpdating={updatingTicketId === ticket.id}
+                    isPrinting={printingTicketId === ticket.id}
+                  />
+                  <Button
+                    variant={isPriority ? 'danger' : 'secondary'}
+                    onClick={() => {
+                      setOrderPriority(ticket.orderId, isPriority ? 'normal' : 'high');
+                      setSuccess(isPriority ? 'Kitchen priority cleared.' : 'Kitchen priority applied.');
+                    }}
+                    className="w-full"
+                  >
+                    <ShieldAlert className="h-4 w-4" />
+                    {isPriority ? 'Clear Priority' : 'Prioritize Order'}
+                  </Button>
+                </div>
+              );
+            })}
+        </div>
+      )}
+    </section>
+  );
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6">
       {success ? <Toast type="success" message={success} /> : null}
       {error ? <Toast type="error" message={error} /> : null}
-
-      <Card>
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.25em] text-[var(--color-text-subtle)]">Kitchen Control</p>
-            <h1 className="mt-3 text-3xl font-bold text-[var(--color-text)]">Unified kitchen operations</h1>
-            <p className="mt-2 text-sm text-[var(--color-text-muted)]">Live KOT queue, item view, reprint, re-fire, delays, and manager priority controls in one kitchen workspace.</p>
-          </div>
-        </div>
-      </Card>
 
       <KOTHeader
         totalCount={tickets.length}
@@ -320,111 +405,66 @@ export default function ManagerKitchen() {
         }}
       />
 
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+      <div className="flex flex-col gap-3 sm:gap-4 lg:flex-row lg:items-center lg:justify-between">
         <ViewToggle activeView={view} onChange={setView} />
-        <div className="rounded-[1.25rem] border border-[var(--border-color)] bg-[var(--color-surface)] px-4 py-3 text-sm font-semibold text-[var(--text-secondary)] shadow-[var(--shadow-card)]">
+        <div className="w-full rounded-[1rem] border border-[var(--border-color)] bg-[var(--color-surface)] px-4 py-3 text-center text-sm font-semibold text-[var(--text-secondary)] shadow-[var(--shadow-card)] lg:w-auto lg:rounded-[1.25rem] lg:text-left">
           Auto refresh every 5 seconds
         </div>
       </div>
 
-      {error ? (
-        <div className="flex items-center gap-3 rounded-[1.5rem] border border-rose-500/30 bg-rose-500/10 px-4 py-4 text-sm font-semibold text-rose-700 dark:text-rose-200">
-          <AlertCircle className="h-5 w-5 flex-shrink-0" />
-          {error}
-        </div>
-      ) : null}
-
       {loading ? (
-        <div className="grid gap-4 xl:grid-cols-3">
+        <div className="grid gap-3 sm:gap-4 xl:grid-cols-3">
           {Array.from({ length: 6 }).map((_, index) => (
-            <div key={index} className="h-[22rem] animate-pulse rounded-[1.9rem] border border-[var(--border-color)] bg-[var(--color-surface)]" />
+            <div key={index} className="h-[18rem] animate-pulse rounded-[1.4rem] border border-[var(--border-color)] bg-[var(--color-surface)] sm:h-[22rem] sm:rounded-[1.9rem]" />
           ))}
         </div>
       ) : view === 'order' ? (
         tickets.length === 0 ? (
           <EmptyState />
         ) : (
-          <div className="grid gap-4 xl:grid-cols-3">
-            {STATUS_LANES.map((lane) => (
-              <section
-                key={lane.key}
-                className="rounded-[1.9rem] border border-[var(--border-color)] bg-[var(--color-surface)] p-4 shadow-[var(--shadow-card)]"
-              >
-                <div className="mb-4 flex items-start justify-between gap-3">
-                  <div>
-                    <h2 className="text-xl font-black text-[var(--text-primary)]">{lane.title}</h2>
-                    <p className="mt-1 text-sm text-[var(--text-secondary)]">{lane.subtitle}</p>
-                  </div>
-                  <span className="rounded-2xl bg-[var(--bg-card-muted)] px-3 py-2 text-lg font-black text-[var(--color-primary)]">
-                    {groups[lane.key].length}
-                  </span>
-                </div>
+          <div className="space-y-3 sm:space-y-4">
+            <div className="grid grid-cols-3 gap-2 sm:hidden">
+              {STATUS_LANES.map((lane) => {
+                const isActive = activeMobileLane === lane.key;
+                return (
+                  <button
+                    key={lane.key}
+                    type="button"
+                    onClick={() => setActiveMobileLane(lane.key)}
+                    className={`rounded-[1rem] border px-3 py-3 text-left transition ${
+                      isActive
+                        ? 'border-[var(--color-primary)] bg-[var(--color-primary-soft)] text-[var(--color-primary)]'
+                        : 'border-[var(--border-color)] bg-[var(--color-surface)] text-[var(--text-secondary)]'
+                    }`}
+                  >
+                    <p className="text-xs font-bold uppercase tracking-[0.18em]">{lane.title}</p>
+                    <p className="mt-1 text-xl font-black">{groups[lane.key].length}</p>
+                  </button>
+                );
+              })}
+            </div>
 
-                {groups[lane.key].length === 0 ? (
-                  <div className="flex min-h-[12rem] items-center justify-center rounded-[1.5rem] border border-dashed border-[var(--border-color)] bg-[var(--color-panel)] px-4 text-center text-sm font-semibold text-[var(--text-secondary)]">
-                    {lane.empty}
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    {groups[lane.key]
-                      .slice()
-                      .sort((left, right) => {
-                        const leftPriority = prioritizedOrders[left.orderId]?.priority === 'high' ? 1 : 0;
-                        const rightPriority = prioritizedOrders[right.orderId]?.priority === 'high' ? 1 : 0;
-                        if (leftPriority !== rightPriority) {
-                          return rightPriority - leftPriority;
-                        }
-                        return getAgeMinutes(right.createdAt) - getAgeMinutes(left.createdAt);
-                      })
-                      .map((ticket) => {
-                        const isPriority = prioritizedOrders[ticket.orderId]?.priority === 'high';
+            <div className="sm:hidden">
+              {renderLane(STATUS_LANES.find((lane) => lane.key === activeMobileLane) || STATUS_LANES[0])}
+            </div>
 
-                        return (
-                          <div key={ticket.id} className="space-y-3">
-                            <OrderCard
-                              ticket={ticket}
-                              laneLabel={lane.title}
-                              elapsedLabel={formatElapsed(ticket.createdAt)}
-                              ageTone={getAgeTone(ticket.createdAt)}
-                              isNewTicket={newTicketIds.includes(ticket.id)}
-                              onAdvanceStatus={handleAdvanceStatus}
-                              onReprint={handleReprint}
-                              onRefire={handleRefire}
-                              isUpdating={updatingTicketId === ticket.id}
-                              isPrinting={printingTicketId === ticket.id}
-                            />
-                            <Button
-                              variant={isPriority ? 'danger' : 'secondary'}
-                              onClick={() => {
-                                setOrderPriority(ticket.orderId, isPriority ? 'normal' : 'high');
-                                setSuccess(isPriority ? 'Kitchen priority cleared.' : 'Kitchen priority applied.');
-                              }}
-                              className="w-full"
-                            >
-                              <ShieldAlert className="h-4 w-4" />
-                              {isPriority ? 'Clear Priority' : 'Prioritize Order'}
-                            </Button>
-                          </div>
-                        );
-                      })}
-                  </div>
-                )}
-              </section>
-            ))}
+            <div className="hidden gap-3 sm:grid sm:gap-4 xl:grid-cols-3">
+              {STATUS_LANES.map((lane) => renderLane(lane))}
+            </div>
           </div>
         )
       ) : itemViewGroups.length === 0 ? (
         <EmptyState />
       ) : (
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <div className="grid gap-3 sm:gap-4 md:grid-cols-2 xl:grid-cols-3">
           {itemViewGroups.map((item) => (
             <article
               key={item.key}
-              className="rounded-[1.9rem] border border-[var(--border-color)] bg-[var(--color-surface)] p-5 shadow-[var(--shadow-card)]"
+              className="rounded-[1.4rem] border border-[var(--border-color)] bg-[var(--color-surface)] p-4 shadow-[var(--shadow-card)] sm:rounded-[1.9rem] sm:p-5"
             >
               <p className="text-xs font-bold uppercase tracking-[0.22em] text-[var(--text-tertiary)]">Combined Item</p>
-              <h2 className="mt-3 text-2xl font-black text-[var(--text-primary)]">{item.name}</h2>
-              <p className="mt-5 text-5xl font-black text-[var(--color-primary)]">{item.quantity}x</p>
+              <h2 className="mt-3 text-xl font-black text-[var(--text-primary)] sm:text-2xl">{item.name}</h2>
+              <p className="mt-4 text-4xl font-black text-[var(--color-primary)] sm:mt-5 sm:text-5xl">{item.quantity}x</p>
               <p className="mt-4 text-sm font-semibold text-[var(--text-primary)]">{item.ticketIds.size} tickets</p>
               <p className="mt-2 text-sm text-[var(--text-secondary)]">
                 {item.tableNumbers.size > 0
@@ -436,13 +476,113 @@ export default function ManagerKitchen() {
           ))}
         </div>
       )}
+
+      <Modal
+        title={selectedTicket ? `${formatShortDisplayOrderNumber(selectedTicket)} Kitchen Details` : 'Kitchen details'}
+        isOpen={Boolean(selectedTicket)}
+        onClose={closeTicketDetails}
+        maxWidth="max-w-2xl"
+      >
+        {selectedTicket ? (
+          <div className="space-y-4">
+            <div className="grid gap-3 sm:grid-cols-3">
+              <Card className="p-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--text-secondary)]">Order</p>
+                <p className="mt-2 text-base font-bold text-[var(--text-primary)]">
+                  {detailOrder ? formatDisplayOrderNumber(detailOrder) : formatShortDisplayOrderNumber(selectedTicket)}
+                </p>
+              </Card>
+              <Card className="p-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--text-secondary)]">Table</p>
+                <p className="mt-2 text-base font-bold text-[var(--text-primary)]">
+                  {detailOrder?.tableNumber || selectedTicket.tableNumber ? `Table ${detailOrder?.tableNumber || selectedTicket.tableNumber}` : 'Walk-in'}
+                </p>
+              </Card>
+              <Card className="p-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--text-secondary)]">Created</p>
+                <p className="mt-2 text-sm font-semibold text-[var(--text-primary)]">
+                  {formatDate(detailOrder?.createdAt || selectedTicket.createdAt)}
+                </p>
+              </Card>
+            </div>
+
+            {detailLoading ? (
+              <div className="flex min-h-[12rem] items-center justify-center rounded-2xl border border-[var(--border-color)] bg-[var(--color-surface)]">
+                <div className="text-center">
+                  <div className="mx-auto h-7 w-7 animate-spin rounded-full border-2 border-[var(--color-primary)] border-t-transparent" />
+                  <p className="mt-3 text-sm font-medium text-[var(--text-secondary)]">Loading full kitchen details...</p>
+                </div>
+              </div>
+            ) : (
+              <>
+                <Card className="p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-sm font-semibold text-[var(--text-primary)]">Ticket items</p>
+                    <span className="rounded-full bg-[var(--color-surface-muted)] px-3 py-1 text-xs font-semibold text-[var(--text-secondary)]">
+                      {selectedTicket.items?.length || 0} line(s)
+                    </span>
+                  </div>
+                  <div className="mt-4 space-y-3">
+                    {(selectedTicket.items || []).map((item, index) => (
+                      <div key={`${selectedTicket.id}-detail-item-${index}`} className="rounded-2xl bg-[var(--color-surface-muted)] p-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="break-words font-semibold text-[var(--text-primary)]">{item.quantity}x {item.name}</p>
+                            <p className="mt-1 text-xs font-semibold uppercase tracking-[0.14em] text-[var(--text-secondary)]">{item.station || 'Main Kitchen'}</p>
+                          </div>
+                          <span className="rounded-full border border-[var(--border-color)] px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--text-secondary)]">
+                            {item.action || 'add'}
+                          </span>
+                        </div>
+                        {item.modifiers?.length ? (
+                          <p className="mt-2 text-sm text-[var(--text-secondary)]">{item.modifiers.join(', ')}</p>
+                        ) : null}
+                        {item.note ? <p className="mt-2 text-sm text-[var(--text-secondary)]">Note: {item.note}</p> : null}
+                      </div>
+                    ))}
+                  </div>
+                </Card>
+
+                <div className="grid gap-4 lg:grid-cols-[1.1fr,0.9fr]">
+                  <Card className="p-4">
+                    <p className="text-sm font-semibold text-[var(--text-primary)]">Kitchen timeline</p>
+                    <div className="mt-4 space-y-3">
+                      {((detailOrder?.kitchenTickets || []).length > 0 ? detailOrder.kitchenTickets : [selectedTicket]).map((ticket) => (
+                        <div key={ticket.id} className="rounded-2xl bg-[var(--color-surface-muted)] p-3">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <p className="font-semibold text-[var(--text-primary)]">KOT #{ticket.sequence || 1}</p>
+                            <span className="rounded-full px-2.5 py-1 text-xs font-semibold capitalize bg-[var(--color-panel)] text-[var(--text-secondary)]">
+                              {ticket.status}
+                            </span>
+                          </div>
+                          <p className="mt-2 text-sm text-[var(--text-secondary)]">{formatDate(ticket.createdAt)}</p>
+                          <p className="mt-1 text-sm text-[var(--text-secondary)]">{ticket.summary || 'Kitchen action'}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </Card>
+
+                  <Card className="p-4">
+                    <p className="text-sm font-semibold text-[var(--text-primary)]">Order notes</p>
+                    <div className="mt-4 rounded-2xl bg-[var(--color-surface-muted)] p-3">
+                      <p className="text-sm leading-6 text-[var(--text-secondary)]">
+                        {detailOrder?.notes || selectedTicket.summary || 'No additional notes for this kitchen order.'}
+                      </p>
+                    </div>
+                  </Card>
+                </div>
+              </>
+            )}
+          </div>
+        ) : null}
+      </Modal>
     </div>
   );
 }
 
 function EmptyState() {
   return (
-    <div className="flex min-h-[18rem] items-center justify-center rounded-[1.9rem] border border-dashed border-[var(--border-color)] bg-[var(--color-surface)] px-6 text-center shadow-[var(--shadow-card)]">
+    <div className="flex min-h-[14rem] items-center justify-center rounded-[1.4rem] border border-dashed border-[var(--border-color)] bg-[var(--color-surface)] px-5 text-center shadow-[var(--shadow-card)] sm:min-h-[18rem] sm:rounded-[1.9rem] sm:px-6">
       <div>
         <p className="text-base font-black text-[var(--text-primary)]">No active kitchen tickets</p>
         <p className="mt-2 text-sm font-semibold text-[var(--text-secondary)]">

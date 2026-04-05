@@ -83,27 +83,16 @@ export default function Analytics() {
 
   return (
     <div className="space-y-6">
-      <Card className="overflow-hidden bg-[radial-gradient(circle_at_top_right,_rgba(6,182,212,0.16),_transparent_35%),var(--color-surface)]">
-        <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.25em] text-[var(--color-text-subtle)]">Analytics</p>
-            <h1 className="mt-3 text-3xl font-bold text-[var(--color-text)]">Revenue clarity, service patterns, and daily business insight</h1>
-            <p className="mt-2 max-w-3xl text-sm text-[var(--color-text-muted)]">
-              Track performance with cleaner sections, faster filters, discount visibility, peak-hour behavior, and the latest end-of-day summary.
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-3">
-            <Button variant="secondary" onClick={() => setIsEodOpen(true)} disabled={!eodData}>
-              <BarChart3 className="h-4 w-4" />
-              Latest EOD
-            </Button>
-            <Button variant="secondary" onClick={exportReport}>
-              <Download className="h-4 w-4" />
-              Export CSV
-            </Button>
-          </div>
-        </div>
-      </Card>
+      <div className="flex flex-wrap justify-end gap-3">
+        <Button variant="secondary" onClick={() => setIsEodOpen(true)} disabled={!eodData}>
+          <BarChart3 className="h-4 w-4" />
+          Latest EOD
+        </Button>
+        <Button variant="secondary" onClick={exportReport}>
+          <Download className="h-4 w-4" />
+          Export CSV
+        </Button>
+      </div>
 
       <Card>
         <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">

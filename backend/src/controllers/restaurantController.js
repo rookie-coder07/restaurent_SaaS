@@ -48,6 +48,13 @@ export const deactivateStaff = asyncHandler(async (req, res) => {
   return sendSuccess(res, 200, user, 'Staff user deleted successfully');
 });
 
+export const updateStaff = asyncHandler(async (req, res) => {
+  const { staffId } = req.params;
+  const user = await RestaurantService.updateStaffUser(req.restaurantId, staffId, req.body);
+
+  return sendSuccess(res, 200, user, 'Staff user updated successfully');
+});
+
 export const updateSubscription = asyncHandler(async (req, res) => {
   const restaurant = await RestaurantService.updateSubscription(req.user.restaurantId, req.body);
 

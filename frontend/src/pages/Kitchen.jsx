@@ -9,8 +9,8 @@ import {
   X,
 } from 'lucide-react';
 import { usePolling } from '../hooks/usePolling';
-import { orderAPI } from '../services/apiEndpoints';
-import { formatCurrency, formatDate } from '../utils/formatters';
+import { kitchenAPI, orderAPI } from '../services/apiEndpoints';
+import { formatCompactTableLabel, formatCurrency, formatDate } from '../utils/formatters';
 
 const POLLING_INTERVAL_MS = 5000;
 
@@ -68,6 +68,8 @@ export default function Kitchen() {
     POLLING_INTERVAL_MS
   );
   const [selectedOrder, setSelectedOrder] = useState(null);
+  const [selectedOrderDetails, setSelectedOrderDetails] = useState(null);
+  const [detailsLoading, setDetailsLoading] = useState(false);
   const [updating, setUpdating] = useState(null);
   const [actionError, setActionError] = useState(null);
   const [success, setSuccess] = useState(null);
@@ -127,6 +129,29 @@ export default function Kitchen() {
     } finally {
       setUpdating(null);
     }
+  };
+
+  const openOrderDetails = async (order) => {
+    setSelectedOrder(order);
+    setSelectedOrderDetails(order);
+    setDetailsLoading(true);
+    setActionError(null);
+
+    try {
+      const response = await kitchenAPI.getOrderDetail(order.id);
+      setSelectedOrderDetails(response.data?.data || order);
+    } catch (err) {
+      setSelectedOrderDetails(order);
+      setActionError(err.response?.data?.message || 'Failed to load kitchen order details.');
+    } finally {
+      setDetailsLoading(false);
+    }
+  };
+
+  const closeOrderDetails = () => {
+    setSelectedOrder(null);
+    setSelectedOrderDetails(null);
+    setDetailsLoading(false);
   };
 
   return (
@@ -218,7 +243,7 @@ export default function Kitchen() {
                         key={order.id}
                         order={order}
                         updating={updating}
-                        onOpen={() => setSelectedOrder(order)}
+                        onOpen={() => openOrderDetails(order)}
                         onStatusUpdate={handleStatusUpdate}
                       />
                     ))}
@@ -233,8 +258,10 @@ export default function Kitchen() {
       {selectedOrder && (
         <OrderDetailModal
           order={selectedOrder}
+          orderDetails={selectedOrderDetails || selectedOrder}
+          loadingDetails={detailsLoading}
           updating={updating}
-          onClose={() => setSelectedOrder(null)}
+          onClose={closeOrderDetails}
           onStatusUpdate={handleStatusUpdate}
         />
       )}
@@ -246,7 +273,7 @@ function OrderCard({ order, onOpen, onStatusUpdate, updating }) {
   const nextStatus = STATUS_FLOW[order.status];
   const meta = STATUS_META[order.status] || STATUS_META.pending;
   const elapsedTime = getElapsedMinutes(order.createdAt);
-  const tableLabel = order.tableNumber ? `#${String(order.tableNumber).padStart(2, '0')}` : '#Walk-in';
+  const tableLabel = formatCompactTableLabel(order.tableNumber);
   const nextActionLabel =
     nextStatus === 'preparing'
       ? 'Start Preparing'
@@ -325,10 +352,11 @@ function OrderCard({ order, onOpen, onStatusUpdate, updating }) {
   );
 }
 
-function OrderDetailModal({ order, updating, onClose, onStatusUpdate }) {
-  const nextStatus = STATUS_FLOW[order.status];
-  const meta = STATUS_META[order.status] || STATUS_META.pending;
-  const tableLabel = order.tableNumber ? `#${String(order.tableNumber).padStart(2, '0')}` : '#Walk-in';
+function OrderDetailModal({ order, orderDetails, loadingDetails, updating, onClose, onStatusUpdate }) {
+  const detailSource = orderDetails || order;
+  const nextStatus = STATUS_FLOW[detailSource.status];
+  const meta = STATUS_META[detailSource.status] || STATUS_META.pending;
+  const tableLabel = formatCompactTableLabel(detailSource.tableNumber);
   const nextActionLabel =
     nextStatus === 'preparing'
       ? 'Start Preparing'
@@ -363,41 +391,50 @@ function OrderDetailModal({ order, updating, onClose, onStatusUpdate }) {
               {getStatusIcon(order.status)}
               {meta.label}
             </span>
-            <p className="text-sm text-[var(--text-secondary)]">{formatDate(order.createdAt)}</p>
+            <p className="text-sm text-[var(--text-secondary)]">{formatDate(detailSource.createdAt)}</p>
           </div>
 
-          <div className="rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card-muted)] p-4">
-            <p className="text-sm font-semibold text-[var(--text-primary)]">Items in this order</p>
-            <div className="mt-3 space-y-3">
-              {order.items?.map((item, idx) => (
-                <div key={`${order.id}-detail-${idx}`} className="flex items-start justify-between gap-3 border-b border-[var(--border-color)] pb-3 last:border-0 last:pb-0">
-                  <div className="min-w-0">
-                    <p className="break-words font-medium text-[var(--text-primary)]">
-                      {item.quantity}x {item.name}
-                    </p>
-                    {item.notes ? <p className="mt-1 text-sm text-[var(--text-secondary)]">{item.notes}</p> : null}
-                  </div>
-                  <span className="shrink-0 text-sm text-[var(--text-secondary)]">{item.preparationTime || 20} min</span>
-                </div>
-              ))}
+          {loadingDetails ? (
+            <div className="rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card-muted)] p-8">
+              <div className="flex items-center justify-center">
+                <Loader className="h-6 w-6 animate-spin text-[var(--color-primary)]" />
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card-muted)] p-4">
+              <p className="text-sm font-semibold text-[var(--text-primary)]">Items in this order</p>
+              <div className="mt-3 space-y-3">
+                {detailSource.items?.map((item, idx) => (
+                  <div key={`${order.id}-detail-${idx}`} className="flex items-start justify-between gap-3 border-b border-[var(--border-color)] pb-3 last:border-0 last:pb-0">
+                    <div className="min-w-0">
+                      <p className="break-words font-medium text-[var(--text-primary)]">
+                        {item.quantity}x {item.name}
+                      </p>
+                      {item.modifiers?.length ? <p className="mt-1 text-sm text-[var(--text-secondary)]">{item.modifiers.join(', ')}</p> : null}
+                      {item.notes || item.note ? <p className="mt-1 text-sm text-[var(--text-secondary)]">{item.notes || item.note}</p> : null}
+                    </div>
+                    <span className="shrink-0 text-sm text-[var(--text-secondary)]">{item.preparationTime || 20} min</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card-muted)] p-4">
               <p className="text-xs font-semibold uppercase tracking-[0.25em] text-[var(--text-tertiary)]">Elapsed</p>
-              <p className="mt-2 text-lg font-semibold text-[var(--text-primary)]">{getElapsedMinutes(order.createdAt)} minutes</p>
+              <p className="mt-2 text-lg font-semibold text-[var(--text-primary)]">{getElapsedMinutes(detailSource.createdAt)} minutes</p>
             </div>
             <div className="rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card-muted)] p-4">
               <p className="text-xs font-semibold uppercase tracking-[0.25em] text-[var(--text-tertiary)]">Total amount</p>
-              <p className="mt-2 text-lg font-semibold text-[var(--text-primary)]">{formatCurrency(order.totalAmount || 0)}</p>
+              <p className="mt-2 text-lg font-semibold text-[var(--text-primary)]">{formatCurrency(detailSource.totalAmount || 0)}</p>
             </div>
           </div>
 
-          {order.notes ? (
+          {detailSource.notes ? (
             <div className="rounded-2xl border border-amber-500/20 bg-amber-500/10 p-4">
               <p className="text-xs font-semibold uppercase tracking-[0.25em] text-amber-300">Special requests</p>
-              <p className="mt-2 text-sm leading-6 text-amber-100">{order.notes}</p>
+              <p className="mt-2 text-sm leading-6 text-amber-100">{detailSource.notes}</p>
             </div>
           ) : null}
 
@@ -405,7 +442,7 @@ function OrderDetailModal({ order, updating, onClose, onStatusUpdate }) {
             <button
               type="button"
               onClick={() => onStatusUpdate(order.id, nextStatus)}
-            disabled={updating === order.id}
+              disabled={updating === order.id}
             className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-[var(--color-primary)] to-[var(--color-accent)] px-4 py-3 text-sm font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {updating === order.id ? <Loader className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
