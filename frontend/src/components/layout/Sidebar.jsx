@@ -41,6 +41,7 @@ const managerMenuItems = [
   { icon: Users, label: 'Waiters', href: '/manager/waiters', roles: ['manager'] },
   { icon: PackageSearch, label: 'Inventory', href: '/manager/inventory', roles: ['manager'] },
   { icon: Receipt, label: 'Bills', href: '/manager/bills', roles: ['manager'] },
+  { icon: Palette, label: 'Settings', href: '/manager/settings', roles: ['manager'] },
 ];
 
 const posMenuItems = [

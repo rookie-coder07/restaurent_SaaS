@@ -30,6 +30,7 @@ function CartPanel({
   isSendToKitchenDisabled = false,
   isSettleDisabled = false,
   isCancelDisabled = false,
+  billingMessage = '',
 }) {
   return (
     <section className="flex h-full flex-col rounded-[2rem] border border-[var(--border-color)] bg-[var(--bg-card)] p-4 shadow-[var(--shadow-card)] sm:p-5">
@@ -146,8 +147,12 @@ function CartPanel({
           {invoicePreview ? (
             <>
               <div className="flex items-center justify-between text-[var(--text-secondary)]">
-                <span>GST</span>
-                <span>{formatCurrency(invoicePreview.cgstAmount + invoicePreview.sgstAmount)}</span>
+                <span>CGST</span>
+                <span>{formatCurrency(invoicePreview.cgstAmount)}</span>
+              </div>
+              <div className="flex items-center justify-between text-[var(--text-secondary)]">
+                <span>SGST</span>
+                <span>{formatCurrency(invoicePreview.sgstAmount)}</span>
               </div>
               {invoicePreview.chargesTotal > 0 ? (
                 <div className="flex items-center justify-between text-[var(--text-secondary)]">
@@ -169,29 +174,34 @@ function CartPanel({
           ) : null}
         </div>
 
-        {onSettle ? (
-          <div className="mt-4 space-y-3">
-            <div className="grid gap-3 lg:grid-cols-3">
+        <div className="mt-4 space-y-3">
+          {billingMessage ? (
+            <div className="rounded-[1.3rem] border border-[var(--border-color)] bg-[var(--bg-card-muted)] px-4 py-3 text-sm font-medium text-[var(--text-secondary)]">
+              {billingMessage}
+            </div>
+          ) : null}
+          <div className={`grid gap-3 ${onSettle ? 'lg:grid-cols-3' : 'lg:grid-cols-2'}`}>
+            <button
+              type="button"
+              onClick={onSubmit}
+              disabled={items.length === 0 || isSubmitting || isSendingToKitchen || isSettling || isCancelling || isSubmitDisabled}
+              className="min-h-[4rem] w-full rounded-[1.6rem] border border-[var(--border-color)] bg-[var(--bg-card-muted)] px-4 text-base font-bold text-[var(--text-primary)] transition hover:bg-[var(--color-primary-soft)] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {isSubmitting ? 'Saving...' : submitLabel}
+            </button>
+
+            {onSendToKitchen ? (
               <button
                 type="button"
-                onClick={onSubmit}
-                disabled={items.length === 0 || isSubmitting || isSendingToKitchen || isSettling || isCancelling || isSubmitDisabled}
-                className="min-h-[4rem] w-full rounded-[1.6rem] border border-[var(--border-color)] bg-[var(--bg-card-muted)] px-4 text-base font-bold text-[var(--text-primary)] transition hover:bg-[var(--color-primary-soft)] disabled:cursor-not-allowed disabled:opacity-50"
+                onClick={onSendToKitchen}
+                disabled={items.length === 0 || isSubmitting || isSendingToKitchen || isSettling || isCancelling || isSendToKitchenDisabled}
+                className="min-h-[4rem] w-full rounded-[1.6rem] bg-amber-400 px-4 text-base font-bold text-slate-950 shadow-lg transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {isSubmitting ? 'Saving...' : submitLabel}
+                {isSendingToKitchen ? 'Sending...' : sendToKitchenLabel}
               </button>
+            ) : null}
 
-              {onSendToKitchen ? (
-                <button
-                  type="button"
-                  onClick={onSendToKitchen}
-                  disabled={items.length === 0 || isSubmitting || isSendingToKitchen || isSettling || isCancelling || isSendToKitchenDisabled}
-                  className="min-h-[4rem] w-full rounded-[1.6rem] bg-amber-400 px-4 text-base font-bold text-slate-950 shadow-lg transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {isSendingToKitchen ? 'Sending...' : sendToKitchenLabel}
-                </button>
-              ) : null}
-
+            {onSettle ? (
               <button
                 type="button"
                 onClick={onSettle}
@@ -200,29 +210,20 @@ function CartPanel({
               >
                 {isSettling ? 'Settling...' : settleLabel}
               </button>
-            </div>
-
-            {onCancel ? (
-              <button
-                type="button"
-                onClick={onCancel}
-                disabled={isSubmitting || isSettling || isCancelling || isCancelDisabled}
-                className="min-h-[3.5rem] w-full rounded-[1.3rem] border border-rose-500/30 bg-rose-500/10 px-4 text-sm font-bold uppercase tracking-[0.12em] text-rose-300 transition hover:bg-rose-500/15 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {isCancelling ? 'Cancelling...' : cancelLabel}
-              </button>
             ) : null}
           </div>
-        ) : (
-          <button
-            type="button"
-            onClick={onSubmit}
-            disabled={items.length === 0 || isSubmitting || isSubmitDisabled}
-            className="mt-4 min-h-[4rem] w-full rounded-[1.6rem] bg-[linear-gradient(135deg,var(--color-primary),var(--color-accent))] px-4 text-base font-bold text-white shadow-lg transition hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {isSubmitting ? 'Processing...' : submitLabel}
-          </button>
-        )}
+
+          {onCancel ? (
+            <button
+              type="button"
+              onClick={onCancel}
+              disabled={isSubmitting || isSettling || isCancelling || isCancelDisabled}
+              className="min-h-[3.5rem] w-full rounded-[1.3rem] border border-rose-500/30 bg-rose-500/10 px-4 text-sm font-bold uppercase tracking-[0.12em] text-rose-300 transition hover:bg-rose-500/15 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {isCancelling ? 'Cancelling...' : cancelLabel}
+            </button>
+          ) : null}
+        </div>
       </div>
     </section>
   );

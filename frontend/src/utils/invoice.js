@@ -1,16 +1,24 @@
-const DEFAULT_GST_PERCENT = 5;
+const DEFAULT_CGST_RATE = 2.5;
+const DEFAULT_SGST_RATE = 2.5;
 
 const roundCurrency = (value) => Number(Number(value || 0).toFixed(2));
 
 export const getRestaurantBillingSettings = (restaurant = {}) => {
   const gstEnabled = restaurant?.enableGST !== false;
-  const gstPercent = gstEnabled ? Number(restaurant?.defaultGSTPercent ?? DEFAULT_GST_PERCENT) : 0;
+  const fallbackTotalRate = Number(restaurant?.defaultGSTPercent ?? (DEFAULT_CGST_RATE + DEFAULT_SGST_RATE));
+  const cgstRate = gstEnabled
+    ? Number(restaurant?.defaultCGSTPercent ?? fallbackTotalRate / 2)
+    : 0;
+  const sgstRate = gstEnabled
+    ? Number(restaurant?.defaultSGSTPercent ?? fallbackTotalRate / 2)
+    : 0;
+  const gstPercent = gstEnabled ? cgstRate + sgstRate : 0;
 
   return {
     gstEnabled,
     gstPercent: roundCurrency(gstPercent),
-    cgstRate: roundCurrency(gstPercent / 2),
-    sgstRate: roundCurrency(gstPercent / 2),
+    cgstRate: roundCurrency(cgstRate),
+    sgstRate: roundCurrency(sgstRate),
   };
 };
 
@@ -22,7 +30,9 @@ export const calculateInvoiceSummary = ({
   packingCharge = 0,
   serviceCharge = 0,
   deliveryCharge = 0,
-  gstPercent = DEFAULT_GST_PERCENT,
+  gstPercent,
+  cgstRate = null,
+  sgstRate = null,
 } = {}) => {
   const normalizedSubtotal = roundCurrency(subtotal);
   const normalizedOrderDiscount = roundCurrency(orderDiscountAmount);
@@ -30,10 +40,25 @@ export const calculateInvoiceSummary = ({
   const normalizedManagerDiscountPercent = Math.max(0, Number(managerDiscountPercent || 0));
   const managerDiscountAmount = roundCurrency((discountedSubtotal * normalizedManagerDiscountPercent) / 100);
   const taxableAmount = Math.max(0, roundCurrency(discountedSubtotal - managerDiscountAmount));
-  const cgstRate = roundCurrency(gstPercent / 2);
-  const sgstRate = roundCurrency(gstPercent / 2);
-  const cgstAmount = roundCurrency((taxableAmount * cgstRate) / 100);
-  const sgstAmount = roundCurrency((taxableAmount * sgstRate) / 100);
+  const normalizedGstPercent = gstPercent !== undefined && gstPercent !== null
+    ? Number(gstPercent || 0)
+    : null;
+  const normalizedCgstRate = roundCurrency(
+    cgstRate !== null && cgstRate !== undefined
+      ? cgstRate
+      : normalizedGstPercent !== null
+        ? normalizedGstPercent / 2
+        : DEFAULT_CGST_RATE
+  );
+  const normalizedSgstRate = roundCurrency(
+    sgstRate !== null && sgstRate !== undefined
+      ? sgstRate
+      : normalizedGstPercent !== null
+        ? normalizedGstPercent / 2
+        : DEFAULT_SGST_RATE
+  );
+  const cgstAmount = roundCurrency((taxableAmount * normalizedCgstRate) / 100);
+  const sgstAmount = roundCurrency((taxableAmount * normalizedSgstRate) / 100);
   const normalizedPackingCharge = roundCurrency(packingCharge);
   const normalizedServiceCharge = roundCurrency(serviceCharge);
   const normalizedDeliveryCharge = roundCurrency(deliveryCharge);
@@ -52,9 +77,9 @@ export const calculateInvoiceSummary = ({
     managerDiscountPercent: normalizedManagerDiscountPercent,
     managerDiscountAmount,
     taxableAmount,
-    gstPercent: roundCurrency(gstPercent),
-    cgstRate,
-    sgstRate,
+    gstPercent: roundCurrency(normalizedCgstRate + normalizedSgstRate),
+    cgstRate: normalizedCgstRate,
+    sgstRate: normalizedSgstRate,
     cgstAmount,
     sgstAmount,
     packingCharge: normalizedPackingCharge,
@@ -97,10 +122,15 @@ export const buildInvoiceData = ({
     packingCharge: billing.packingCharge || 0,
     serviceCharge: billing.serviceCharge || 0,
     deliveryCharge: billing.deliveryCharge || 0,
-    gstPercent:
-      billing.gstPercent !== undefined && billing.gstPercent !== null
-        ? billing.gstPercent
-        : restaurantSettings.gstPercent,
+    gstPercent: billing.gstPercent,
+    cgstRate:
+      billing.cgstRate !== undefined && billing.cgstRate !== null
+        ? billing.cgstRate
+        : restaurantSettings.cgstRate,
+    sgstRate:
+      billing.sgstRate !== undefined && billing.sgstRate !== null
+        ? billing.sgstRate
+        : restaurantSettings.sgstRate,
   });
 
   const createdAt = order.updatedAt || order.createdAt || new Date().toISOString();

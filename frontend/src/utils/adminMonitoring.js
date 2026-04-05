@@ -59,6 +59,25 @@ export function buildSmartNotifications({
   approvedDiscounts = {},
 }) {
   const notifications = [];
+  const getDiscountRecipientLabel = (order) => {
+    if (order?.online?.customerName) {
+      return order.online.customerName;
+    }
+
+    if (order?.online?.customerPhone) {
+      return order.online.customerPhone;
+    }
+
+    if (order?.loyalty?.customerPhone) {
+      return order.loyalty.customerPhone;
+    }
+
+    if (order?.tableNumber) {
+      return `Table ${order.tableNumber}`;
+    }
+
+    return 'Walk-in guest';
+  };
 
   lowStockItems.forEach((item) => {
     notifications.push({
@@ -108,6 +127,24 @@ export function buildSmartNotifications({
     });
 
   orders
+    .filter((order) => Number(order?.approvedDiscount?.percent || 0) > 0)
+    .forEach((order) => {
+      const discountPercent = Number(order?.approvedDiscount?.percent || 0);
+      const recipient = getDiscountRecipientLabel(order);
+      notifications.push({
+        id: `discount-approval-${order.id}`,
+        title: `Discount approved on ${formatDisplayOrderNumber(order)}`,
+        detail: `${discountPercent}% approved by ${order?.approvedDiscount?.approvedBy || 'manager'} for ${recipient}${order?.approvedDiscount?.note ? ` • ${order.approvedDiscount.note}` : ''}.`,
+        priority: discountPercent >= 25 ? 'critical' : 'warning',
+        timestamp: order?.approvedDiscount?.approvedAt || order.updatedAt || order.createdAt,
+        category: 'billing',
+        sourceRole: 'manager',
+        sourceType: 'discount_approved',
+        status: isSettledOrder(order) || String(order?.status || '').toLowerCase() === 'cancelled' ? 'resolved' : 'live',
+      });
+    });
+
+  orders
     .filter((order) => isUnpaidOrder(order))
     .forEach((order) => {
       notifications.push({
@@ -123,20 +160,24 @@ export function buildSmartNotifications({
       });
     });
 
-  Object.entries(approvedDiscounts || {})
-    .map(([orderId, discount]) => ({ orderId, ...discount }))
-    .filter((discount) => Number(discount.percent || 0) >= 10)
-    .forEach((discount) => {
+  orders
+    .filter((order) => Number(order?.billing?.managerDiscountPercent || 0) > 0 || Number(order?.billing?.managerDiscountAmount || 0) > 0)
+    .forEach((order) => {
+      const discountPercent = Number(order?.billing?.managerDiscountPercent || 0);
+      const discountAmount = Number(order?.billing?.managerDiscountAmount || 0);
+      const appliedBy = order?.billing?.cashierName || 'manager';
+      const recipient = getDiscountRecipientLabel(order);
+
       notifications.push({
-        id: `discount-${discount.orderId}`,
-        title: `Large discount approved on ${discount.orderId.slice(0, 8)}`,
-        detail: `${discount.percent}% approved by ${discount.approvedBy || 'manager'}.`,
-        priority: Number(discount.percent || 0) >= 15 ? 'critical' : 'warning',
-        timestamp: discount.approvedAt,
+        id: `manager-discount-${order.id}`,
+        title: `Discount applied on ${formatDisplayOrderNumber(order)}`,
+        detail: `${discountPercent}% (${formatCurrency(discountAmount)}) by ${appliedBy} for ${recipient}.`,
+        priority: discountPercent >= 25 || discountAmount >= 1000 ? 'critical' : 'warning',
+        timestamp: order.updatedAt || order.createdAt,
         category: 'billing',
         sourceRole: 'manager',
-        sourceType: 'large_discount',
-        status: 'live',
+        sourceType: 'manager_discount',
+        status: isSettledOrder(order) ? 'resolved' : 'live',
       });
     });
 

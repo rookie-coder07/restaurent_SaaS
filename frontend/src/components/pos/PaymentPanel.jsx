@@ -19,8 +19,6 @@ function PaymentPanel({
   onPaymentNoteChange,
   packingCharge,
   onPackingChargeChange,
-  serviceCharge,
-  onServiceChargeChange,
   deliveryCharge,
   onDeliveryChargeChange,
   invoicePreview,
@@ -123,7 +121,7 @@ function PaymentPanel({
         </div>
       )}
 
-      <div className="mt-5 grid gap-3 sm:grid-cols-3">
+      <div className="mt-5 grid gap-3 sm:grid-cols-2">
         {(orderType === 'takeaway' || orderType === 'delivery') ? (
           <label className="block space-y-2">
             <span className="text-sm font-medium text-[var(--text-primary)]">Packing</span>
@@ -138,18 +136,6 @@ function PaymentPanel({
             />
           </label>
         ) : null}
-        <label className="block space-y-2">
-          <span className="text-sm font-medium text-[var(--text-primary)]">Service</span>
-          <input
-            type="number"
-            min="0"
-            step="0.01"
-            value={serviceCharge}
-            onChange={(event) => onServiceChargeChange(event.target.value)}
-            disabled={disabled}
-            className="min-h-[3.5rem] w-full rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card-muted)] px-4 text-sm font-medium text-[var(--text-primary)] outline-none transition focus:border-[var(--color-primary)] disabled:cursor-not-allowed disabled:opacity-60"
-          />
-        </label>
         {orderType === 'delivery' ? (
           <label className="block space-y-2">
             <span className="text-sm font-medium text-[var(--text-primary)]">Delivery</span>

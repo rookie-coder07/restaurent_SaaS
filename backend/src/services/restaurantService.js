@@ -6,6 +6,31 @@ export class RestaurantService {
   static transformRestaurant(restaurant) {
     if (!restaurant) return null;
 
+    const normalizePrinter = (printer = {}, fallbackEnabled = false) => ({
+      name: typeof printer?.name === 'string' ? printer.name : '',
+      enabled: printer?.enabled ?? fallbackEnabled,
+    });
+
+    const normalizedKotPrinters = Array.isArray(restaurant.kot_printers)
+      ? restaurant.kot_printers
+        .map((printer) => normalizePrinter(printer, true))
+        .filter((printer) => printer.name || printer.enabled)
+      : [];
+
+    const normalizedBillPrinter = normalizePrinter(restaurant.bill_printer, false);
+    const printProvider = restaurant.print_provider || 'browser';
+    const printServiceUrl = restaurant.print_service_url || '';
+    const receiptWidthMm = [58, 80].includes(Number(restaurant.receipt_width_mm))
+      ? Number(restaurant.receipt_width_mm)
+      : 80;
+
+    const defaultCgstPercent =
+      restaurant.default_cgst_percent ??
+      Number(restaurant.default_gst_percent ?? 5) / 2;
+    const defaultSgstPercent =
+      restaurant.default_sgst_percent ??
+      Number(restaurant.default_gst_percent ?? 5) / 2;
+
     return {
       id: restaurant.id,
       name: restaurant.name || restaurant.business_name,
@@ -21,7 +46,26 @@ export class RestaurantService {
       timezone: restaurant.timezone || 'Asia/Kolkata',
       currency: restaurant.currency || 'INR',
       enableGST: restaurant.enable_gst ?? true,
-      defaultGSTPercent: restaurant.default_gst_percent ?? 5,
+      defaultGSTPercent: Number(restaurant.default_gst_percent ?? (defaultCgstPercent + defaultSgstPercent)),
+      defaultCGSTPercent: Number(defaultCgstPercent),
+      defaultSGSTPercent: Number(defaultSgstPercent),
+      defaultServiceCharge: Number(restaurant.default_service_charge ?? 0),
+      printProvider,
+      printServiceUrl,
+      receiptWidthMm,
+      autoPrintKOT: restaurant.auto_print_kot ?? false,
+      autoPrintBill: restaurant.auto_print_bill ?? false,
+      billPrinter: normalizedBillPrinter,
+      kotPrinters: normalizedKotPrinters,
+      printing: {
+        provider: printProvider,
+        serviceUrl: printServiceUrl,
+        receiptWidthMm,
+        autoPrintKOT: restaurant.auto_print_kot ?? false,
+        autoPrintBill: restaurant.auto_print_bill ?? false,
+        billPrinter: normalizedBillPrinter,
+        kotPrinters: normalizedKotPrinters,
+      },
       createdAt: restaurant.created_at,
       updatedAt: restaurant.updated_at,
       role: 'owner',
@@ -320,6 +364,11 @@ export class RestaurantService {
 
   static async updateRestaurantSettings(restaurantId, settings) {
     try {
+      const normalizePrinter = (printer = {}, fallbackEnabled = false) => ({
+        name: typeof printer?.name === 'string' ? printer.name.trim() : '',
+        enabled: printer?.enabled ?? fallbackEnabled,
+      });
+
       const payload = {
         updated_at: new Date().toISOString(),
       };
@@ -328,7 +377,35 @@ export class RestaurantService {
       if (settings.defaultGSTPercent !== undefined) {
         payload.default_gst_percent = settings.defaultGSTPercent;
       }
+      if (settings.defaultCGSTPercent !== undefined) {
+        payload.default_cgst_percent = settings.defaultCGSTPercent;
+      }
+      if (settings.defaultSGSTPercent !== undefined) {
+        payload.default_sgst_percent = settings.defaultSGSTPercent;
+      }
+      if (
+        settings.defaultGSTPercent === undefined &&
+        (settings.defaultCGSTPercent !== undefined || settings.defaultSGSTPercent !== undefined)
+      ) {
+        const nextCgst = Number(settings.defaultCGSTPercent ?? 0);
+        const nextSgst = Number(settings.defaultSGSTPercent ?? 0);
+        payload.default_gst_percent = nextCgst + nextSgst;
+      }
+      if (settings.defaultServiceCharge !== undefined) {
+        payload.default_service_charge = settings.defaultServiceCharge;
+      }
       if (settings.currency !== undefined) payload.currency = settings.currency;
+      if (settings.printProvider !== undefined) payload.print_provider = settings.printProvider;
+      if (settings.printServiceUrl !== undefined) payload.print_service_url = settings.printServiceUrl || null;
+      if (settings.receiptWidthMm !== undefined) payload.receipt_width_mm = settings.receiptWidthMm;
+      if (settings.autoPrintKOT !== undefined) payload.auto_print_kot = settings.autoPrintKOT;
+      if (settings.autoPrintBill !== undefined) payload.auto_print_bill = settings.autoPrintBill;
+      if (settings.billPrinter !== undefined) payload.bill_printer = normalizePrinter(settings.billPrinter, false);
+      if (settings.kotPrinters !== undefined) {
+        payload.kot_printers = (settings.kotPrinters || [])
+          .map((printer) => normalizePrinter(printer, true))
+          .filter((printer) => printer.name || printer.enabled);
+      }
 
       const { data: restaurant, error } = await supabase
         .from('restaurants')
@@ -337,7 +414,31 @@ export class RestaurantService {
         .select()
         .single();
 
-      if (error || !restaurant) throw error || new Error('Restaurant not found');
+      if (error) {
+        if (error.code === 'PGRST204') {
+          const message = String(error.message || '');
+          if (
+            message.includes("'print_provider'") ||
+            message.includes("'print_service_url'") ||
+            message.includes("'receipt_width_mm'") ||
+            message.includes("'auto_print_kot'") ||
+            message.includes("'auto_print_bill'") ||
+            message.includes("'bill_printer'") ||
+            message.includes("'kot_printers'") ||
+            message.includes("'default_service_charge'") ||
+            message.includes("'default_cgst_percent'") ||
+            message.includes("'default_sgst_percent'")
+          ) {
+            throw new Error(
+              'Database schema is missing restaurant settings columns. Run the latest restaurant settings migrations.'
+            );
+          }
+        }
+
+        throw error;
+      }
+
+      if (!restaurant) throw new Error('Restaurant not found');
 
       return this.transformRestaurant(restaurant);
     } catch (error) {

@@ -78,6 +78,13 @@ const api = axios.create({
   },
 });
 
+export { API_BASE_URL };
+
+export function getCurrentPortalAccessToken() {
+  const portal = getPortalKeyFromPathname(window.location.pathname);
+  return readPortalSession(portal)?.accessToken || '';
+}
+
 api.interceptors.request.use(
   (config) => {
     const portal = getPortalKeyFromPathname(window.location.pathname);

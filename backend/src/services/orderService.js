@@ -3,12 +3,12 @@ import logger from '../utils/logger.js';
 import supabase from '../config/supabase.js';
 import TableService from './tableService.js';
 import InventoryService from './inventoryService.js';
-import { MANAGER_MAX_DISCOUNT_PERCENT } from '../constants/index.js';
 import {
   appendPublicNote,
   composeNotesWithKotMeta,
   splitNotesAndKotMeta,
 } from '../utils/kotMetadata.js';
+import { broadcastRestaurantEvent } from '../utils/realtimeEvents.js';
 
 export class OrderService {
   static ACTIVE_ORDER_STATUSES = ['awaiting_waiter_approval', 'pending', 'preparing', 'ready', 'in_progress'];
@@ -70,6 +70,17 @@ export class OrderService {
 
   static isActiveStatus(status) {
     return this.OPEN_BILL_STATUSES.includes(status);
+  }
+
+  static buildExistingOpenBillResult(order) {
+    if (!order) {
+      return null;
+    }
+
+    return {
+      ...order,
+      reusedExistingBill: true,
+    };
   }
 
   static normalizeTimestamp(value) {
@@ -370,6 +381,15 @@ export class OrderService {
       kitchenLastSentAt: kitchenTickets.length > 0 ? kitchenTickets[kitchenTickets.length - 1].createdAt : null,
       online,
       loyalty,
+      approvedDiscount:
+        kotMeta.discountApproval?.percent > 0
+          ? {
+              percent: Number(kotMeta.discountApproval.percent || 0),
+              note: kotMeta.discountApproval.note || '',
+              approvedBy: kotMeta.discountApproval.approvedBy || '',
+              approvedAt: this.normalizeTimestamp(kotMeta.discountApproval.approvedAt),
+            }
+          : null,
     };
   }
 
@@ -851,6 +871,28 @@ export class OrderService {
     return Math.floor(parsedValue);
   }
 
+  static canManageBilling(actorRole) {
+    const normalizedRole = String(actorRole || '').trim().toLowerCase();
+    return normalizedRole === 'manager' || normalizedRole === 'owner' || normalizedRole === 'admin';
+  }
+
+  static assertBillingChangesAllowed(actorRole, requestedTotalAmount, computedTotalAmount) {
+    if (this.canManageBilling(actorRole)) {
+      return;
+    }
+
+    if (requestedTotalAmount === undefined || requestedTotalAmount === null || requestedTotalAmount === '') {
+      return;
+    }
+
+    const normalizedRequestedTotal = Number(requestedTotalAmount);
+    const normalizedComputedTotal = Number(computedTotalAmount || 0);
+
+    if (Number.isFinite(normalizedRequestedTotal) && normalizedRequestedTotal < normalizedComputedTotal) {
+      throw new Error('Unauthorized: Only manager can perform billing actions');
+    }
+  }
+
   static calculateEarnedLoyaltyPoints(amount = 0) {
     const normalizedAmount = Number(amount || 0);
     if (!Number.isFinite(normalizedAmount) || normalizedAmount <= 0) {
@@ -1086,6 +1128,13 @@ export class OrderService {
         throw new Error('Restaurant ID is required or table ID must be provided');
       }
 
+      if (orderData.orderType === 'dine-in' && orderData.tableId) {
+        const existingOpenBill = await this.getActiveOrderByTable(finalRestaurantId, orderData.tableId);
+        if (existingOpenBill) {
+          return this.buildExistingOpenBillResult(existingOpenBill);
+        }
+      }
+
       const restaurantTimezone = await this.getRestaurantTimezone(finalRestaurantId);
       const createdAt = new Date().toISOString();
 
@@ -1093,6 +1142,7 @@ export class OrderService {
         enforceMenuPrice: options.actorRole === 'manager',
       });
       const computedTotalAmount = this.computeOrderTotal(normalizedItems);
+      this.assertBillingChangesAllowed(options.actorRole, orderData.totalAmount, computedTotalAmount);
       const initialStatus = orderData.requiresWaiterApproval ? 'awaiting_waiter_approval' : 'pending';
       const initialOnlineMeta = this.normalizeOnlineMeta(orderData.online, {
         orderType: orderData.orderType,
@@ -1409,9 +1459,6 @@ export class OrderService {
       }
 
       const discountPercent = this.normalizeDiscountPercent(paymentData.discountPercent);
-      if (paymentData.actorRole === 'manager' && discountPercent > MANAGER_MAX_DISCOUNT_PERCENT) {
-        throw new Error(`Manager discounts cannot exceed ${MANAGER_MAX_DISCOUNT_PERCENT}%`);
-      }
 
       const subtotal = this.roundCurrency(
         (existingOrder.order_items || []).reduce(
@@ -1440,9 +1487,14 @@ export class OrderService {
         throw new Error(`Only ${availablePointsBefore} loyalty points are available for this customer`);
       }
 
-      const gstPercent = restaurantSettings.enable_gst === false ? 0 : Number(restaurantSettings.default_gst_percent ?? 5);
-      const cgstRate = this.roundCurrency(gstPercent / 2);
-      const sgstRate = this.roundCurrency(gstPercent / 2);
+      const fallbackTaxPercent = Number(restaurantSettings.default_gst_percent ?? 5);
+      const cgstRate = restaurantSettings.enable_gst === false
+        ? 0
+        : this.roundCurrency(Number(restaurantSettings.default_cgst_percent ?? fallbackTaxPercent / 2));
+      const sgstRate = restaurantSettings.enable_gst === false
+        ? 0
+        : this.roundCurrency(Number(restaurantSettings.default_sgst_percent ?? fallbackTaxPercent / 2));
+      const gstPercent = this.roundCurrency(cgstRate + sgstRate);
       const cgstAmount = this.roundCurrency((taxableAmount * cgstRate) / 100);
       const sgstAmount = this.roundCurrency((taxableAmount * sgstRate) / 100);
       const packingCharge = this.normalizeChargeValue(paymentData.packingCharge);
@@ -1471,19 +1523,23 @@ export class OrderService {
       const amountReceived = rawAmountReceived === undefined || rawAmountReceived === null || rawAmountReceived === ''
         ? null
         : Number(rawAmountReceived);
+      const effectiveAmountReceived =
+        method === 'cash' && finalTotal <= 0 && !Number.isFinite(amountReceived)
+          ? 0
+          : amountReceived;
 
       if (method === 'cash' && finalTotal > 0) {
-        if (!Number.isFinite(amountReceived)) {
+        if (!Number.isFinite(effectiveAmountReceived)) {
           throw new Error('Cash received amount is required for cash settlement');
         }
 
-        if (amountReceived < finalTotal) {
+        if (effectiveAmountReceived < finalTotal) {
           throw new Error('Cash received must be at least the bill total');
         }
       }
 
-      const changeDue = method === 'cash' && Number.isFinite(amountReceived)
-        ? Number((amountReceived - finalTotal).toFixed(2))
+      const changeDue = method === 'cash' && Number.isFinite(effectiveAmountReceived)
+        ? Number((effectiveAmountReceived - finalTotal).toFixed(2))
         : 0;
 
       const nextKotMeta = {
@@ -1511,7 +1567,7 @@ export class OrderService {
             roundOff,
             grandTotal: finalTotal,
             paymentMode: method,
-            paidAmount: Number.isFinite(amountReceived) ? amountReceived : finalTotal,
+            paidAmount: Number.isFinite(effectiveAmountReceived) ? effectiveAmountReceived : finalTotal,
             cashierName: paymentData.actorName || '',
           },
           {
@@ -1545,7 +1601,7 @@ export class OrderService {
         }),
         this.formatSettlementNote({
           method,
-          amountReceived,
+          amountReceived: effectiveAmountReceived,
           changeDue,
           paymentNote: paymentData.paymentNote,
           discountPercent,
@@ -1586,7 +1642,7 @@ export class OrderService {
         ...settledOrder,
         settlement: {
           method,
-          amountReceived,
+          amountReceived: effectiveAmountReceived,
           changeDue,
           originalTotal: storedTotalAmount,
           finalTotal,
@@ -2007,6 +2063,7 @@ export class OrderService {
         enforceMenuPrice: options.actorRole === 'manager',
       });
       const computedTotalAmount = this.computeOrderTotal(normalizedItems);
+      this.assertBillingChangesAllowed(options.actorRole, orderData.totalAmount, computedTotalAmount);
       const resolvedTableId =
         orderData.tableId !== undefined ? orderData.tableId : existingOrder.table_id;
       const { publicNotes: existingPublicNotes, kotMeta: existingKotMeta } = splitNotesAndKotMeta(existingOrder.notes);
@@ -2188,6 +2245,72 @@ export class OrderService {
       });
     } catch (error) {
       logger.error('Get online order inbox error:', error);
+      throw error;
+    }
+  }
+
+  static async approveDiscount(restaurantId, orderId, approval = {}) {
+    try {
+      const { data: existingOrder, error: existingOrderError } = await supabase
+        .from('orders')
+        .select('id, restaurant_id, status, payment_status, notes')
+        .eq('id', orderId)
+        .eq('restaurant_id', restaurantId)
+        .single();
+
+      if (existingOrderError || !existingOrder) {
+        throw existingOrderError || new Error('Order not found');
+      }
+
+      if (existingOrder.status === 'cancelled') {
+        throw new Error('Cancelled orders cannot receive discounts');
+      }
+
+      if (existingOrder.status === 'completed' || existingOrder.payment_status === 'paid') {
+        throw new Error('Settled orders cannot receive discounts');
+      }
+
+      const percent = this.normalizeDiscountPercent(approval.percent);
+      if (!percent || percent <= 0) {
+        throw new Error('Discount percent must be greater than zero');
+      }
+
+      const { publicNotes, kotMeta } = splitNotesAndKotMeta(existingOrder.notes);
+      const nextNotes = composeNotesWithKotMeta(publicNotes, {
+        ...kotMeta,
+        discountApproval: {
+          percent,
+          note: String(approval.note || '').trim(),
+          approvedBy: approval.actorName || '',
+          approvedAt: new Date().toISOString(),
+        },
+      });
+
+      const { error: updateError } = await supabase
+        .from('orders')
+        .update({
+          notes: nextNotes,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', orderId)
+        .eq('restaurant_id', restaurantId);
+
+      if (updateError) {
+        throw updateError;
+      }
+
+      const updatedOrder = await this.getOrderById(restaurantId, orderId);
+
+      broadcastRestaurantEvent(restaurantId, 'notification', {
+        type: 'order.discount_approved',
+        orderId,
+        orderNumber: updatedOrder?.displayOrderNumber || updatedOrder?.id || orderId,
+        approvedDiscount: updatedOrder?.approvedDiscount || null,
+      });
+
+      return updatedOrder;
+    } catch (error) {
+      logger.error('Approve discount error:', error);
       throw error;
     }
   }

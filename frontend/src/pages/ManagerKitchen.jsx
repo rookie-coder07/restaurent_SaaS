@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertCircle, ShieldAlert } from 'lucide-react';
-import { kitchenAPI } from '../services/apiEndpoints';
+import { AlertCircle, BellRing, RefreshCw, ShieldAlert } from 'lucide-react';
+import { kitchenAPI, restaurantAPI } from '../services/apiEndpoints';
 import { formatDate, formatDisplayOrderNumber, formatShortDisplayOrderNumber, parseServerDate } from '../utils/formatters';
-import { printKitchenTicket } from '../utils/kotPrint';
+import { printKotReceipt } from '../utils/printerService';
 import { useManagerStore } from '../context/managerStore';
+import { playLoudBuzzer } from '../utils/alerts';
+import { useApi } from '../hooks/useApi';
 import Card from '../components/common/Card';
 import Button from '../components/common/Button';
 import Modal from '../components/common/Modal';
@@ -91,6 +93,7 @@ function normalizeTicket(ticket) {
 }
 
 export default function ManagerKitchen() {
+  const { data: restaurantProfile = {} } = useApi(restaurantAPI.getProfile);
   const [tickets, setTickets] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -102,6 +105,7 @@ export default function ManagerKitchen() {
   const [lastUpdatedAt, setLastUpdatedAt] = useState(null);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [alertMessage, setAlertMessage] = useState('');
   const [selectedTicket, setSelectedTicket] = useState(null);
   const [detailOrder, setDetailOrder] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -133,6 +137,12 @@ export default function ManagerKitchen() {
 
       if (freshIds.length > 0 && knownTicketIdsRef.current.size > 0) {
         setNewTicketIds((current) => Array.from(new Set([...current, ...freshIds])));
+        playLoudBuzzer('manager');
+        setAlertMessage(
+          freshIds.length > 1
+            ? `${freshIds.length} new kitchen tickets need attention.`
+            : 'A new kitchen ticket needs attention.'
+        );
         window.setTimeout(() => {
           setNewTicketIds((current) => current.filter((id) => !freshIds.includes(id)));
         }, 12000);
@@ -257,12 +267,14 @@ export default function ManagerKitchen() {
       const response = await kitchenAPI.reprintTicket(ticket.orderId, ticket.id);
       const result = response.data?.data || {};
       const printableTicket = normalizeTicket(result.ticket || ticket);
-      const didPrint = printKitchenTicket(printableTicket, {
-        title: `${printableTicket.displayOrderNumber || 'KOT'}${printableTicket.tableNumber ? ` - Table ${printableTicket.tableNumber}` : ''}`,
+      const printResult = await printKotReceipt({
+        ticket: printableTicket,
+        order: result.order || detailOrder || selectedTicket,
+        restaurant: restaurantProfile,
+        fallbackToBrowser: true,
       });
-
-      if (!didPrint) {
-        setError('Ticket updated, but the browser blocked the print window.');
+      if (printResult?.fallback && printResult?.error) {
+        setError('Kitchen printer was unavailable, so browser print opened instead.');
       }
 
       setSuccess('Kitchen ticket reprinted.');
@@ -286,9 +298,15 @@ export default function ManagerKitchen() {
       const response = await kitchenAPI.refireTicket(ticket.orderId, ticket.id);
       const result = response.data?.data || {};
       const printableTicket = normalizeTicket(result.ticket || ticket);
-      printKitchenTicket(printableTicket, {
-        title: `${printableTicket.displayOrderNumber || 'KOT'}${printableTicket.tableNumber ? ` - Table ${printableTicket.tableNumber}` : ''}`,
+      const printResult = await printKotReceipt({
+        ticket: printableTicket,
+        order: result.order || detailOrder || selectedTicket,
+        restaurant: restaurantProfile,
+        fallbackToBrowser: true,
       });
+      if (printResult?.fallback && printResult?.error) {
+        setError('Kitchen printer was unavailable, so browser print opened instead.');
+      }
       setSuccess('Kitchen ticket re-fired.');
       fetchOrders(false, { force: true }).catch(() => {});
     } catch (requestError) {
@@ -390,8 +408,9 @@ export default function ManagerKitchen() {
 
   return (
     <div className="space-y-4 sm:space-y-6">
-      {success ? <Toast type="success" message={success} /> : null}
-      {error ? <Toast type="error" message={error} /> : null}
+      {alertMessage ? <Toast type="warning" message={alertMessage} onClose={() => setAlertMessage('')} autoDismissMs={6200} /> : null}
+      {success ? <Toast type="success" message={success} onClose={() => setSuccess('')} /> : null}
+      {error ? <Toast type="error" message={error} onClose={() => setError('')} /> : null}
 
       <KOTHeader
         totalCount={tickets.length}
@@ -407,8 +426,24 @@ export default function ManagerKitchen() {
 
       <div className="flex flex-col gap-3 sm:gap-4 lg:flex-row lg:items-center lg:justify-between">
         <ViewToggle activeView={view} onChange={setView} />
-        <div className="w-full rounded-[1rem] border border-[var(--border-color)] bg-[var(--color-surface)] px-4 py-3 text-center text-sm font-semibold text-[var(--text-secondary)] shadow-[var(--shadow-card)] lg:w-auto lg:rounded-[1.25rem] lg:text-left">
-          Auto refresh every 5 seconds
+        <div className="flex w-full flex-wrap items-center justify-between gap-3 rounded-[1rem] border border-[var(--border-color)] bg-[var(--color-surface)] px-4 py-3 text-sm shadow-[var(--shadow-card)] lg:w-auto lg:min-w-[22rem] lg:rounded-[1.25rem]">
+          <div className="flex items-start gap-3">
+            <BellRing className="mt-0.5 h-4.5 w-4.5 text-[var(--color-primary)]" />
+            <div>
+              <p className="font-semibold text-[var(--text-primary)]">Kitchen alert queue</p>
+              <p className="text-[var(--text-secondary)]">New KOTs alert here with the louder manager buzzer.</p>
+            </div>
+          </div>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => {
+              fetchOrders(false, { force: true }).catch(() => {});
+            }}
+          >
+            <RefreshCw className="h-4 w-4" />
+            Refresh
+          </Button>
         </div>
       </div>
 

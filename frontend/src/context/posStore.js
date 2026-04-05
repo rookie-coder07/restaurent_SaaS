@@ -115,12 +115,14 @@ export const usePosStore = create((set, get) => ({
     await Promise.all(requests);
   },
 
-  refreshTableOverview: async ({ force = false } = {}) => {
+  refreshTableOverview: async ({ force = false, silent = false, includeTables = true, includeOpenBills = true } = {}) => {
     const state = get();
     const requests = [];
 
-    if (force || !isFresh(state.tableLoadedAt) || !(state.tableData?.tables || []).length) {
-      set({ tableLoading: true, tableError: '' });
+    if (includeTables && (force || !isFresh(state.tableLoadedAt) || !(state.tableData?.tables || []).length)) {
+      if (!silent) {
+        set({ tableLoading: true, tableError: '' });
+      }
       requests.push(
         tableAPI.getTables({ limit: 200 })
           .then((response) => {
@@ -133,12 +135,18 @@ export const usePosStore = create((set, get) => ({
           .catch((error) => {
             set({ tableError: error.response?.data?.message || error.message || 'Failed to load tables.' });
           })
-          .finally(() => set({ tableLoading: false }))
+          .finally(() => {
+            if (!silent) {
+              set({ tableLoading: false });
+            }
+          })
       );
     }
 
-    if (force || !isFresh(state.openBillsLoadedAt) || !Array.isArray(state.openBillsData)) {
-      set({ openBillsLoading: true, openBillsError: '' });
+    if (includeOpenBills && (force || !isFresh(state.openBillsLoadedAt) || !Array.isArray(state.openBillsData))) {
+      if (!silent) {
+        set({ openBillsLoading: true, openBillsError: '' });
+      }
       requests.push(
         orderAPI.getOpenBills()
           .then((response) => {
@@ -151,7 +159,11 @@ export const usePosStore = create((set, get) => ({
           .catch((error) => {
             set({ openBillsError: error.response?.data?.message || error.message || 'Failed to load open bills.' });
           })
-          .finally(() => set({ openBillsLoading: false }))
+          .finally(() => {
+            if (!silent) {
+              set({ openBillsLoading: false });
+            }
+          })
       );
     }
 
@@ -214,11 +226,12 @@ export const usePosStore = create((set, get) => ({
       delete nextCache[tableId];
       return { tableOrderCache: nextCache };
     }),
-  setPendingBillingTarget: ({ tableId = '', orderId = '' } = {}) =>
+  setPendingBillingTarget: ({ tableId = '', orderId = '', message = '' } = {}) =>
     set({
       pendingBillingTarget: {
         tableId,
         orderId,
+        message,
         createdAt: Date.now(),
       },
     }),

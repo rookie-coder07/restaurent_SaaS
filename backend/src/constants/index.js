@@ -23,8 +23,6 @@ export function normalizeRole(role) {
   return ROLE_ALIASES[normalizedRole] || normalizedRole;
 }
 
-export const MANAGER_MAX_DISCOUNT_PERCENT = 15;
-
 export const ROLE_PERMISSIONS = {
   owner: ['create_menu', 'manage_menu', 'manage_orders', 'manage_staff', 'view_staff', 'view_analytics', 'manage_restaurant', 'view_orders', 'update_order_status'],
   manager: ['manage_orders', 'manage_tables', 'view_staff', 'view_analytics', 'view_orders', 'update_order_status'],
@@ -62,7 +60,6 @@ export const RESTAURANT_STATUS = {
 };
 
 export default {
-  MANAGER_MAX_DISCOUNT_PERCENT,
   ROLES,
   ROLE_PERMISSIONS,
   ORDER_STATUS,

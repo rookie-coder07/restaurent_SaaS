@@ -3,8 +3,6 @@ import { compareTableLabels, parseServerDate } from './formatters';
 export const ORDER_STATUS_STEPS = ['pending', 'preparing', 'ready'];
 export const ACTIVE_ORDER_STATUSES = new Set(['awaiting_waiter_approval', 'pending', 'preparing', 'ready', 'served']);
 export const UNPAID_STATUSES = new Set(['unpaid', 'pending', 'partial']);
-export const DISCOUNT_LIMIT_PERCENT = 15;
-export const MANAGER_DISCOUNT_LIMIT = 15;
 
 export function getOrderSourceLabel(order) {
   if (order?.origin === 'qr' || order?.source === 'qr' || order?.orderType === 'qr') {

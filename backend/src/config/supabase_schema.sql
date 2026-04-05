@@ -22,6 +22,15 @@ CREATE TABLE IF NOT EXISTS restaurants (
   currency VARCHAR(10) DEFAULT 'INR',
   enable_gst BOOLEAN DEFAULT true,
   default_gst_percent DECIMAL(5, 2) DEFAULT 5,
+  default_cgst_percent DECIMAL(5, 2) DEFAULT 2.5,
+  default_sgst_percent DECIMAL(5, 2) DEFAULT 2.5,
+  print_provider VARCHAR(50) DEFAULT 'browser',
+  print_service_url TEXT,
+  receipt_width_mm INTEGER DEFAULT 80,
+  auto_print_kot BOOLEAN DEFAULT false,
+  auto_print_bill BOOLEAN DEFAULT false,
+  bill_printer JSONB DEFAULT '{"name":"","enabled":false}'::jsonb,
+  kot_printers JSONB DEFAULT '[]'::jsonb,
   created_at TIMESTAMP DEFAULT now(),
   updated_at TIMESTAMP DEFAULT now()
 );

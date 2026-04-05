@@ -90,6 +90,24 @@ export const requireRole = (allowedRoles = []) => {
   };
 };
 
+export const requireBillingRole = () => {
+  return (req, res, next) => {
+    try {
+      const normalizedRole = normalizeRole(req.user?.role);
+
+      if (normalizedRole !== 'owner' && normalizedRole !== 'manager') {
+        logger.warn(`Billing action denied for user ${req.user?.email} with role ${normalizedRole}`);
+        return sendError(res, 403, 'Unauthorized: Only manager can perform billing actions');
+      }
+
+      next();
+    } catch (error) {
+      logger.error('Billing role check error:', error);
+      return sendError(res, 500, 'Billing role check failed');
+    }
+  };
+};
+
 export const verifyRequestRestaurantId = (req, res, next) => {
   try {
     const requestRestaurantId =

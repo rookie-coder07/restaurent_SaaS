@@ -232,9 +232,12 @@ export default function Tables() {
       searchParams.set('orderId', order.id);
     }
 
+    const activeOrder = order || (table.activeOrders || [])[0] || null;
+
     setPendingBillingTarget({
       tableId: table.id,
-      orderId: order?.id || '',
+      orderId: activeOrder?.id || '',
+      message: activeOrder ? 'Table is currently in use. Opened the existing bill.' : '',
     });
     setSelectedTable(null);
     navigate(`/pos?${searchParams.toString()}`);

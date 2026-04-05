@@ -5,16 +5,19 @@ import {
   Loader,
   RefreshCw,
 } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useApi } from '../hooks/useApi';
+import { API_BASE_URL, getCurrentPortalAccessToken } from '../services/api';
 import { inventoryAPI, orderAPI, restaurantAPI, tableAPI } from '../services/apiEndpoints';
 import { useManagerStore } from '../context/managerStore';
 import { formatDate } from '../utils/formatters';
 import { buildSmartNotifications, getPriorityMeta } from '../utils/adminMonitoring';
+import { playLoudBuzzer } from '../utils/alerts';
 import Card from '../components/common/Card';
 import Button from '../components/common/Button';
 import EmptyState from '../components/common/EmptyState';
 import PaginationControls from '../components/common/PaginationControls';
+import Toast from '../components/common/Toast';
 import useResponsivePagination from '../hooks/useResponsivePagination';
 
 const QUICK_FILTERS = [
@@ -104,6 +107,8 @@ export default function Notifications() {
   const waiterActivity = useManagerStore((state) => state.waiterActivity);
   const [activeFilter, setActiveFilter] = useState('all');
   const [refreshing, setRefreshing] = useState(false);
+  const [alertMessage, setAlertMessage] = useState('');
+  const previousLiveIdsRef = useRef(new Set());
 
   const orders = ordersData?.items || [];
   const lowStockItems = inventorySummary?.lowStockItems || [];
@@ -298,9 +303,89 @@ export default function Notifications() {
     }
   };
 
+  useEffect(() => {
+    const currentLiveIds = new Set(
+      notifications
+        .filter((notification) => notification.status === 'live' || notification.priority === 'critical')
+        .map((notification) => notification.id)
+        .filter(Boolean)
+    );
+
+    if (previousLiveIdsRef.current.size === 0) {
+      previousLiveIdsRef.current = currentLiveIds;
+      return;
+    }
+
+    const newLiveNotifications = notifications.filter(
+      (notification) =>
+        (notification.status === 'live' || notification.priority === 'critical') &&
+        notification.id &&
+        !previousLiveIdsRef.current.has(notification.id)
+    );
+
+    previousLiveIdsRef.current = currentLiveIds;
+
+    if (newLiveNotifications.length > 0) {
+      playLoudBuzzer('manager');
+      setAlertMessage(
+        newLiveNotifications.length > 1
+          ? `${newLiveNotifications.length} new live notifications need attention.`
+          : newLiveNotifications[0].title
+      );
+    }
+  }, [notifications]);
+
+  useEffect(() => {
+    const accessToken = getCurrentPortalAccessToken();
+    if (!accessToken || typeof window.EventSource !== 'function') {
+      return undefined;
+    }
+
+    const streamUrl = new URL(`${API_BASE_URL}/v1/orders/events/stream`);
+    streamUrl.searchParams.set('accessToken', accessToken);
+
+    const eventSource = new window.EventSource(streamUrl.toString());
+
+    const handleNotification = (event) => {
+      try {
+        const payload = JSON.parse(event.data || '{}');
+        if (payload?.type === 'order.discount_approved') {
+          refetchOrders();
+        }
+      } catch {
+        refetchOrders();
+      }
+    };
+
+    eventSource.addEventListener('notification', handleNotification);
+    eventSource.addEventListener('error', () => {});
+
+    return () => {
+      eventSource.removeEventListener('notification', handleNotification);
+      eventSource.close();
+    };
+  }, [refetchOrders]);
+
   return (
     <div className="space-y-4 sm:space-y-6">
-      <div className="flex justify-end">
+      {alertMessage ? <Toast type="warning" message={alertMessage} onClose={() => setAlertMessage('')} autoDismissMs={6200} /> : null}
+      {dataSourceErrors.length > 0 ? (
+        <Toast
+          type="error"
+          message="Live notifications are temporarily unavailable. Please refresh in a moment."
+          onClose={() => {}}
+          autoDismissMs={5200}
+        />
+      ) : null}
+
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-[var(--radius-card)] border border-[var(--border-color)] bg-[var(--bg-card)] px-4 py-3 shadow-[var(--shadow-card)]">
+        <div className="flex items-start gap-3">
+          <BellRing className="mt-0.5 h-5 w-5 text-[var(--color-primary)]" />
+          <div>
+            <p className="text-sm font-semibold text-[var(--text-primary)]">Notification alert queue</p>
+            <p className="text-sm text-[var(--text-secondary)]">Live items stay visible here with the same louder manager buzzer.</p>
+          </div>
+        </div>
         <Button variant="secondary" onClick={refreshNow} className={refreshing ? 'animate-pulse' : ''}>
           <RefreshCw className="h-4 w-4" />
           Refresh

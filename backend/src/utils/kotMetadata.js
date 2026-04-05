@@ -30,6 +30,12 @@ export function createEmptyKotMeta() {
       paidAmount: 0,
       cashierName: '',
     },
+    discountApproval: {
+      percent: 0,
+      note: '',
+      approvedBy: '',
+      approvedAt: null,
+    },
     loyalty: {
       customerPhone: '',
       earnedPoints: 0,
@@ -98,6 +104,12 @@ export function normalizeKotMeta(meta = {}) {
       paymentMode: meta?.billing?.paymentMode || '',
       paidAmount: Number(meta?.billing?.paidAmount || 0),
       cashierName: meta?.billing?.cashierName || '',
+    },
+    discountApproval: {
+      percent: Number(meta?.discountApproval?.percent || 0),
+      note: meta?.discountApproval?.note || '',
+      approvedBy: meta?.discountApproval?.approvedBy || '',
+      approvedAt: meta?.discountApproval?.approvedAt || null,
     },
     loyalty: {
       customerPhone: meta?.loyalty?.customerPhone || '',
@@ -187,6 +199,8 @@ function hasKotPayload(kotMeta = {}) {
     Object.keys(normalized.lineDetails).length > 0 ||
     Boolean(normalized.billing.invoiceNumber) ||
     normalized.billing.grandTotal > 0 ||
+    normalized.discountApproval.percent > 0 ||
+    Boolean(normalized.discountApproval.approvedAt) ||
     Boolean(normalized.loyalty.customerPhone) ||
     normalized.loyalty.earnedPoints > 0 ||
     normalized.loyalty.redeemedPoints > 0 ||

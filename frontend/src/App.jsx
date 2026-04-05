@@ -150,6 +150,7 @@ function App() {
             <Route path="/manager/inventory" element={withSuspense(<ManagerInventory />)} />
             <Route path="/manager/bills" element={withSuspense(<ManagerBills />)} />
             <Route path="/manager/bills/:orderId" element={withSuspense(<BillView />)} />
+            <Route path="/manager/settings" element={withSuspense(<Settings />)} />
           </Route>
 
           <Route element={<ProtectedRoute layout={PosLayout} allowedRoles={['staff']} portal="pos" />}>

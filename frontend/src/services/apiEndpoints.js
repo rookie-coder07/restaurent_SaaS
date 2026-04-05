@@ -51,6 +51,7 @@ export const orderAPI = {
   getActiveOrderForTable: (tableId) => api.get(`/v1/orders/table/${tableId}/active`),
   getOrder: (orderId) => api.get(`/v1/orders/${orderId}`),
   updateOrder: (orderId, data) => api.put(`/v1/orders/${orderId}`, data),
+  approveDiscount: (orderId, data) => api.post(`/v1/orders/${orderId}/discount-approval`, data),
   updateOnlineOrder: (orderId, data) => api.patch(`/v1/orders/${orderId}/online`, data),
   sendToKitchen: (orderId) => api.post(`/v1/orders/${orderId}/send-to-kitchen`),
   settleOrder: (orderId, data) => api.post(`/v1/orders/${orderId}/settle`, data),

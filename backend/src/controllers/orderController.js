@@ -2,6 +2,11 @@ import logger from '../utils/logger.js';
 import { sendSuccess, sendError } from '../utils/apiResponse.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import OrderService from '../services/orderService.js';
+import {
+  attachRestaurantStream,
+  detachRestaurantStream,
+  writeSseEvent,
+} from '../utils/realtimeEvents.js';
 
 function getTableIdFromBody(body = {}) {
   if (Object.prototype.hasOwnProperty.call(body, 'tableId')) {
@@ -239,6 +244,15 @@ export const createOrder = asyncHandler(async (req, res) => {
     { actorRole: req.user?.role }
   );
 
+  if (order?.reusedExistingBill) {
+    return sendSuccess(
+      res,
+      200,
+      order,
+      'Table is currently in use. Opened the existing bill instead.'
+    );
+  }
+
   return sendSuccess(res, 201, order, 'Order created successfully');
 });
 
@@ -301,6 +315,51 @@ export const softDeleteOrder = asyncHandler(async (req, res) => {
 
   return sendSuccess(res, 200, deletedOrder, 'Order deleted safely');
 });
+
+export const approveDiscount = asyncHandler(async (req, res) => {
+  const { orderId } = req.params;
+  const order = await OrderService.approveDiscount(req.user.restaurantId, orderId, {
+    percent: Number(req.body.percent),
+    note: req.body.note || '',
+    actorRole: req.user?.role,
+    actorName: req.user?.name || req.user?.email || 'Unknown user',
+  });
+
+  return sendSuccess(res, 200, order, 'Discount approved successfully');
+});
+
+export const streamEvents = (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+
+  if (typeof res.flushHeaders === 'function') {
+    res.flushHeaders();
+  }
+
+  const client = {
+    id: `${req.user.userId}:${Date.now()}`,
+    res,
+  };
+
+  attachRestaurantStream(req.user.restaurantId, client);
+  writeSseEvent(res, 'connected', {
+    message: 'Realtime notifications connected',
+    restaurantId: req.user.restaurantId,
+    userId: req.user.userId,
+  });
+
+  const heartbeat = setInterval(() => {
+    writeSseEvent(res, 'heartbeat', { timestamp: new Date().toISOString() });
+  }, 25000);
+
+  req.on('close', () => {
+    clearInterval(heartbeat);
+    detachRestaurantStream(req.user.restaurantId, client);
+    res.end();
+  });
+};
 
 export const updateOrder = asyncHandler(async (req, res) => {
   const { orderId } = req.params;

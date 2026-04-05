@@ -16,6 +16,8 @@ import { useAuthStore } from '../context/authStore';
 import { useManagerStore } from '../context/managerStore';
 import { useApi } from '../hooks/useApi';
 import { buildInvoiceData, calculateInvoiceSummary, getRestaurantBillingSettings } from '../utils/invoice';
+import { playLoudBuzzer } from '../utils/alerts';
+import { autoPrintBill, autoPrintKot } from '../utils/printerService';
 
 function formatOrderStatusLabel(status) {
   if (!status) {
@@ -73,46 +75,6 @@ function normalizeOrderItemForCart(item) {
 
 function normalizePaymentMethod(value) {
   return String(value || '').toLowerCase() === 'upi' ? 'upi' : 'cash';
-}
-
-function playWaiterQrAlertBuzzer() {
-  try {
-    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-    if (!AudioContextClass) {
-      return;
-    }
-
-    const audioContext = new AudioContextClass();
-    const now = audioContext.currentTime;
-    const tones = [
-      { frequency: 740, start: now, duration: 0.08 },
-      { frequency: 620, start: now + 0.1, duration: 0.08 },
-      { frequency: 740, start: now + 0.2, duration: 0.12 },
-    ];
-
-    tones.forEach((tone) => {
-      const oscillator = audioContext.createOscillator();
-      const gainNode = audioContext.createGain();
-
-      oscillator.type = 'square';
-      oscillator.frequency.setValueAtTime(tone.frequency, tone.start);
-
-      gainNode.gain.setValueAtTime(0.0001, tone.start);
-      gainNode.gain.exponentialRampToValueAtTime(0.18, tone.start + 0.01);
-      gainNode.gain.exponentialRampToValueAtTime(0.0001, tone.start + tone.duration);
-
-      oscillator.connect(gainNode);
-      gainNode.connect(audioContext.destination);
-      oscillator.start(tone.start);
-      oscillator.stop(tone.start + tone.duration);
-    });
-
-    window.setTimeout(() => {
-      audioContext.close().catch(() => {});
-    }, 600);
-  } catch (error) {
-    console.warn('Waiter QR alert buzzer could not play.', error);
-  }
 }
 
 function createItemsSignature(items = []) {
@@ -226,6 +188,12 @@ function serializePromisedAt(value) {
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
+function isOrderClosedForBilling(order) {
+  const status = String(order?.status || '').toLowerCase();
+  const paymentStatus = String(order?.paymentStatus || '').toLowerCase();
+  return status === 'cancelled' || status === 'completed' || paymentStatus === 'paid';
+}
+
 export default function POS() {
   const navigate = useNavigate();
   const user = useAuthStore((state) => state.user);
@@ -261,6 +229,7 @@ export default function POS() {
   const [pendingBillingTarget] = useState(() => usePosStore.getState().pendingBillingTarget);
   const incomingTableId = requestedTableId || pendingBillingTarget?.tableId || currentWorkspace.selectedTableId || '';
   const incomingOrderId = requestedOrderId || pendingBillingTarget?.orderId || currentWorkspace.pinnedOrderId || '';
+  const incomingBillingMessage = pendingBillingTarget?.message || '';
   const initialWorkspace = {
     ...currentWorkspace,
     orderType:
@@ -287,7 +256,6 @@ export default function POS() {
   const [cashReceived, setCashReceived] = useState(initialWorkspace.cashReceived || '');
   const [paymentNote, setPaymentNote] = useState(initialWorkspace.paymentNote || '');
   const [packingCharge, setPackingCharge] = useState(initialWorkspace.packingCharge || '');
-  const [serviceCharge, setServiceCharge] = useState(initialWorkspace.serviceCharge || '');
   const [deliveryCharge, setDeliveryCharge] = useState(initialWorkspace.deliveryCharge || '');
   const [pinnedOrderId, setPinnedOrderId] = useState(initialWorkspace.pinnedOrderId || '');
   const [editingItemId, setEditingItemId] = useState('');
@@ -331,6 +299,7 @@ export default function POS() {
     [user?.assignedTables]
   );
   const isWaiterAccount = user?.role === 'staff';
+  const canManageBilling = user?.role === 'manager' || user?.role === 'owner';
   const waiterTables = useMemo(
     () => (isWaiterAccount ? tables.filter((table) => assignedTableIds.includes(table.id)) : tables),
     [assignedTableIds, isWaiterAccount, tables]
@@ -350,12 +319,33 @@ export default function POS() {
     () => waiterTables.find((table) => table.id === selectedTableId) || null,
     [selectedTableId, waiterTables]
   );
+  const openBillByTableId = useMemo(() => {
+    const nextMap = new Map();
+
+    (Array.isArray(openBillsData) ? openBillsData : []).forEach((order) => {
+      if (!order?.tableId || nextMap.has(order.tableId)) {
+        return;
+      }
+
+      nextMap.set(order.tableId, order);
+    });
+
+    return nextMap;
+  }, [openBillsData]);
 
   useEffect(() => {
     if (pendingBillingTarget) {
       clearPendingBillingTarget();
     }
   }, [clearPendingBillingTarget, pendingBillingTarget]);
+
+  useEffect(() => {
+    if (!incomingBillingMessage) {
+      return;
+    }
+
+    setSubmitSuccess(incomingBillingMessage);
+  }, [incomingBillingMessage]);
 
   useEffect(() => {
     preloadCoreData().catch(() => {
@@ -380,13 +370,17 @@ export default function POS() {
     }
 
     const refreshAssignedQueue = () => {
-      refreshTableOverview({ force: true }).catch(() => {
+      refreshTableOverview({
+        force: true,
+        silent: true,
+        includeTables: false,
+        includeOpenBills: true,
+      }).catch(() => {
         // Shared store error state handles the UI.
       });
     };
 
-    refreshAssignedQueue();
-    const intervalId = window.setInterval(refreshAssignedQueue, 6000);
+    const intervalId = window.setInterval(refreshAssignedQueue, 8000);
 
     return () => window.clearInterval(intervalId);
   }, [isWaiterAccount, refreshTableOverview]);
@@ -407,7 +401,7 @@ export default function POS() {
     qrAlertedOrderIdsRef.current = nextIds;
 
     if (isWaiterAccount && hasNewQrAlert) {
-      playWaiterQrAlertBuzzer();
+      playLoudBuzzer('waiter');
       const affectedTables = Array.from(
         new Set(newQrOrders.map((order) => order.tableNumber || 'Walk-in').filter(Boolean))
       );
@@ -519,7 +513,8 @@ export default function POS() {
         const response = targetOrderId
           ? await orderAPI.getOrder(targetOrderId)
           : await orderAPI.getActiveOrderForTable(selectedTableId);
-        const currentOrder = response.data?.data || null;
+        const fetchedOrder = response.data?.data || null;
+        const currentOrder = isOrderClosedForBilling(fetchedOrder) ? null : fetchedOrder;
 
         if (!isCurrent) {
           return;
@@ -540,6 +535,9 @@ export default function POS() {
           setCartItems([]);
           setDiscountType('flat');
           setDiscountValue('');
+          setActiveOrder(null);
+          setOrderType('dine-in');
+          setSelectedTableId(selectedTableId);
           setPaymentMethod('cash');
           setCashReceived('');
           setPaymentNote('');
@@ -547,6 +545,7 @@ export default function POS() {
           resetOnlineDraft();
           cacheTableOrder(selectedTableId, null);
           clearWorkspaceDraft(getPosWorkspaceDraftKey('dine-in', selectedTableId));
+          syncBillingSearchParams({ tableId: selectedTableId, orderId: '' });
         }
       } catch (error) {
         if (!isCurrent) {
@@ -647,6 +646,14 @@ export default function POS() {
     () => Math.max(0, Number((subtotal - discountAmount).toFixed(2))),
     [discountAmount, subtotal]
   );
+  const defaultServiceCharge = useMemo(
+    () => Math.max(0, Number(restaurantProfile?.defaultServiceCharge || 0)),
+    [restaurantProfile?.defaultServiceCharge]
+  );
+  const restaurantBillingSettings = useMemo(
+    () => getRestaurantBillingSettings(restaurantProfile),
+    [restaurantProfile]
+  );
   const loyaltyDiscountPreview = useMemo(() => {
     const requestedPoints = Math.max(0, Math.floor(Number(redeemPoints || 0)));
     const availablePoints = Math.max(0, Number(loyaltyProfile?.pointsBalance || 0));
@@ -659,11 +666,12 @@ export default function POS() {
         orderDiscountAmount: discountAmount,
         loyaltyRedeemedAmount: loyaltyDiscountPreview,
         packingCharge,
-        serviceCharge,
+        serviceCharge: defaultServiceCharge,
         deliveryCharge,
-        gstPercent: getRestaurantBillingSettings(restaurantProfile).gstPercent,
+        cgstRate: restaurantBillingSettings.cgstRate,
+        sgstRate: restaurantBillingSettings.sgstRate,
       }).grandTotal,
-    [deliveryCharge, discountAmount, loyaltyDiscountPreview, packingCharge, restaurantProfile, serviceCharge, subtotal]
+    [defaultServiceCharge, deliveryCharge, discountAmount, loyaltyDiscountPreview, packingCharge, restaurantBillingSettings, subtotal]
   );
   const invoicePreview = useMemo(
     () =>
@@ -672,11 +680,12 @@ export default function POS() {
         orderDiscountAmount: discountAmount,
         loyaltyRedeemedAmount: loyaltyDiscountPreview,
         packingCharge,
-        serviceCharge,
+        serviceCharge: defaultServiceCharge,
         deliveryCharge,
-        gstPercent: getRestaurantBillingSettings(restaurantProfile).gstPercent,
+        cgstRate: restaurantBillingSettings.cgstRate,
+        sgstRate: restaurantBillingSettings.sgstRate,
       }),
-    [deliveryCharge, discountAmount, loyaltyDiscountPreview, packingCharge, restaurantProfile, serviceCharge, subtotal]
+    [defaultServiceCharge, deliveryCharge, discountAmount, loyaltyDiscountPreview, packingCharge, restaurantBillingSettings, subtotal]
   );
 
   const isEditingActiveBill = Boolean(activeOrder?.id);
@@ -810,7 +819,6 @@ export default function POS() {
     setCashReceived(workspace.cashReceived || '');
     setPaymentNote(workspace.paymentNote || '');
     setPackingCharge(workspace.packingCharge || '');
-    setServiceCharge(workspace.serviceCharge || '');
     setDeliveryCharge(workspace.deliveryCharge || '');
     setOnlineSource(workspace.onlineSource || 'direct');
     setPromisedAt(workspace.promisedAt || '');
@@ -843,7 +851,6 @@ export default function POS() {
     setCashReceived('');
     setPaymentNote('');
     setPackingCharge(order?.billing?.packingCharge ? String(order.billing.packingCharge) : '');
-    setServiceCharge(order?.billing?.serviceCharge ? String(order.billing.serviceCharge) : '');
     setDeliveryCharge(order?.billing?.deliveryCharge ? String(order.billing.deliveryCharge) : '');
     setOnlineSource(restoredOnlineDraft.source);
     setPromisedAt(restoredOnlineDraft.promisedAt);
@@ -901,7 +908,6 @@ export default function POS() {
     setCashReceived('');
     setPaymentNote('');
     setPackingCharge('');
-    setServiceCharge('');
     setDeliveryCharge('');
     setEditingItemId('');
     setShowItemDetailsModal(false);
@@ -951,7 +957,6 @@ export default function POS() {
       cashReceived,
       paymentNote,
       packingCharge,
-      serviceCharge,
       deliveryCharge,
       onlineSource,
       promisedAt,
@@ -984,7 +989,6 @@ export default function POS() {
     paymentNote,
     packingCharge,
     promisedAt,
-    serviceCharge,
     pinnedOrderId,
     deliveryCharge,
     saveWorkspaceDraft,
@@ -1024,11 +1028,13 @@ export default function POS() {
   };
 
   const handleSelectTable = (tableId) => {
-    setPinnedOrderId('');
+    const existingOrder = openBillByTableId.get(tableId);
+
+    setPinnedOrderId(existingOrder?.id || '');
     setSelectedTableId(tableId);
-    syncBillingSearchParams({ tableId });
+    syncBillingSearchParams({ tableId, orderId: existingOrder?.id || '' });
     setSubmitError(null);
-    setSubmitSuccess(null);
+    setSubmitSuccess(existingOrder ? 'Table is currently in use. Opened the existing bill.' : null);
     setIsSwitchingTable(true);
     if (user?.id) {
       logWaiterActivity({ waiterId: user.id, action: 'selected_table', tableId });
@@ -1148,6 +1154,10 @@ export default function POS() {
     }
 
     if (paymentMethod === 'cash') {
+      if (payableTotal <= 0) {
+        return true;
+      }
+
       if (!Number.isFinite(cashReceivedAmount)) {
         setSubmitError('Enter the cash received amount before settling the bill.');
         return false;
@@ -1201,6 +1211,7 @@ export default function POS() {
         : await orderAPI.createOrder(payload);
 
       const savedOrder = response.data?.data;
+      const responseMessage = response.data?.message || '';
       applyOrderToWorkspace(savedOrder);
       if (savedOrder?.tableId) {
         cacheTableOrder(savedOrder.tableId, savedOrder);
@@ -1219,7 +1230,11 @@ export default function POS() {
       refreshOnlineInbox();
 
       setSubmitSuccess(
-        `${formatDisplayOrderNumber(savedOrder)} saved successfully. Continue editing or settle when the guest is ready.`
+        responseMessage.includes('existing bill')
+          ? responseMessage
+          : canManageBilling
+            ? `${formatDisplayOrderNumber(savedOrder)} saved successfully. Continue editing or settle when the guest is ready.`
+            : `${formatDisplayOrderNumber(savedOrder)} saved successfully. Continue editing or send it to kitchen when ready.`
       );
     } catch (error) {
       setSubmitError(
@@ -1246,6 +1261,14 @@ export default function POS() {
       if (!isEditingActiveBill) {
         const createResponse = await orderAPI.createOrder(buildOrderPayload());
         orderForKitchen = createResponse.data?.data;
+        if (createResponse.data?.message?.includes('existing bill')) {
+          setSubmitSuccess(createResponse.data.message);
+          applyOrderToWorkspace(orderForKitchen);
+          if (orderForKitchen?.tableId) {
+            cacheTableOrder(orderForKitchen.tableId, orderForKitchen);
+          }
+          return;
+        }
       } else if (hasUnsavedChanges) {
         const updateResponse = await orderAPI.updateOrder(activeOrder.id, buildOrderPayload());
         orderForKitchen = updateResponse.data?.data;
@@ -1273,12 +1296,26 @@ export default function POS() {
       refreshOnlineInbox();
 
       setSubmitSuccess(`${formatDisplayOrderNumber(updatedOrder)} sent to kitchen successfully.`);
+      let autoPrintError = '';
+      try {
+        const printResult = await autoPrintKot({
+          ticket: kitchenTicket,
+          order: updatedOrder,
+          restaurant: restaurantProfile,
+        });
+        if (printResult?.fallback && printResult?.error) {
+          autoPrintError = 'Kitchen printer was unavailable, so browser print opened instead.';
+        }
+      } catch (printError) {
+        autoPrintError = printError.message || 'Auto-print failed. Use Print KOT manually.';
+      }
       navigate(`/pos/kot/${updatedOrder.id}`, {
         state: {
           order: updatedOrder,
           ticket: kitchenTicket,
           restaurant: restaurantProfile,
           returnTo: '/pos',
+          autoPrintError,
         },
       });
     } catch (error) {
@@ -1292,6 +1329,11 @@ export default function POS() {
     setSubmitError(null);
     setSubmitSuccess(null);
 
+    if (!canManageBilling) {
+      setSubmitError('Billing will be handled by manager.');
+      return;
+    }
+
     if (!validateSettlement()) {
       return;
     }
@@ -1304,6 +1346,14 @@ export default function POS() {
       if (!isEditingActiveBill) {
         const createResponse = await orderAPI.createOrder(buildOrderPayload());
         orderToSettle = createResponse.data?.data;
+        if (createResponse.data?.message?.includes('existing bill')) {
+          setSubmitSuccess(createResponse.data.message);
+          applyOrderToWorkspace(orderToSettle);
+          if (orderToSettle?.tableId) {
+            cacheTableOrder(orderToSettle.tableId, orderToSettle);
+          }
+          return;
+        }
       } else if (hasUnsavedChanges) {
         const updateResponse = await orderAPI.updateOrder(activeOrder.id, buildOrderPayload());
         orderToSettle = updateResponse.data?.data;
@@ -1316,7 +1366,7 @@ export default function POS() {
         loyaltyPhone: loyaltyPhone.trim(),
         redeemPoints: loyaltyDiscountPreview,
         packingCharge: Number(packingCharge || 0),
-        serviceCharge: Number(serviceCharge || 0),
+        serviceCharge: defaultServiceCharge,
         deliveryCharge: Number(deliveryCharge || 0),
       });
       const settledOrder = settleResponse.data?.data;
@@ -1328,6 +1378,21 @@ export default function POS() {
         restaurant: restaurantProfile,
         cashierName: user?.name || user?.email || 'Cashier',
       });
+      let autoPrintError = '';
+
+      try {
+        const printResult = await autoPrintBill({
+          order: settledOrder,
+          restaurant: restaurantProfile,
+          invoice: invoiceData,
+          cashierName: user?.name || user?.email || 'Cashier',
+        });
+        if (printResult?.fallback && printResult?.error) {
+          autoPrintError = 'Billing printer was unavailable, so browser print opened instead.';
+        }
+      } catch (printError) {
+        autoPrintError = printError.message || 'Auto-print failed. Use Print Bill manually.';
+      }
 
       clearBillDraft();
       setPinnedOrderId('');
@@ -1362,6 +1427,7 @@ export default function POS() {
           invoice: invoiceData,
           returnTo: '/pos',
           cashierName: user?.name || user?.email || 'Cashier',
+          autoPrintError,
         },
       });
     } catch (error) {
@@ -1448,6 +1514,18 @@ export default function POS() {
 
   return (
     <div className="compact-page space-y-4">
+      <Toast
+        type="error"
+        message={submitError}
+        onClose={() => setSubmitError(null)}
+        autoDismissMs={5200}
+      />
+      <Toast
+        type="success"
+        message={submitSuccess}
+        onClose={() => setSubmitSuccess(null)}
+        autoDismissMs={3600}
+      />
       <Toast
         type="info"
         message={waiterAlertMessage}
@@ -1667,7 +1745,9 @@ export default function POS() {
                       ? `${activeOrder.items?.length || 0} customer-selected lines are waiting for waiter approval. Review them, make any changes you need, then approve and send the kitchen ticket.`
                       : isEditingActiveBill
                         ? `${activeOrder.items?.length || 0} saved lines loaded. Keep updating this same bill, and send only the real kitchen delta when new items are added.`
-                        : 'No active order yet for this table. Start a fresh running bill, send it to kitchen when ready, and settle it when the guest is ready to pay.'}
+                        : canManageBilling
+                          ? 'No active order yet for this table. Start a fresh running bill, send it to kitchen when ready, and settle it when the guest is ready to pay.'
+                          : 'No active order yet for this table. Start a fresh running bill, keep it updated, and send it to kitchen when ready. Billing will be handled by manager.'}
                   </p>
                   {isEditingActiveBill ? (
                     <div className="flex flex-wrap items-center gap-3 text-sm font-semibold text-[var(--text-secondary)]">
@@ -1774,6 +1854,7 @@ export default function POS() {
               onDiscountTypeChange={setDiscountType}
               discountValue={discountValue}
               onDiscountValueChange={setDiscountValue}
+              canManageBilling={canManageBilling}
             />
 
             <OnlineOrderDetailsPanel
@@ -1795,34 +1876,34 @@ export default function POS() {
               disabled={isLoadingTableOrder || isSubmitting || isSettling || isSendingToKitchen}
             />
 
-            <PaymentPanel
-              paymentMethod={paymentMethod}
-              onPaymentMethodChange={setPaymentMethod}
-              totalAmount={payableTotal}
-              orderType={orderType}
-              cashReceived={cashReceived}
-              onCashReceivedChange={setCashReceived}
-              changeDue={changeDue}
-              shortfallAmount={shortfallAmount}
-              paymentNote={paymentNote}
-              onPaymentNoteChange={setPaymentNote}
-              packingCharge={packingCharge}
-              onPackingChargeChange={setPackingCharge}
-              serviceCharge={serviceCharge}
-              onServiceChargeChange={setServiceCharge}
-              deliveryCharge={deliveryCharge}
-              onDeliveryChargeChange={setDeliveryCharge}
-              invoicePreview={invoicePreview}
-              activeOrder={activeOrder}
-              loyaltyPhone={loyaltyPhone}
-              onLoyaltyPhoneChange={setLoyaltyPhone}
-              loyaltyProfile={loyaltyProfile}
-              redeemPoints={redeemPoints}
-              onRedeemPointsChange={setRedeemPoints}
-              onCheckLoyalty={handleCheckLoyalty}
-              checkingLoyalty={isCheckingLoyalty}
-              disabled={isLoadingTableOrder || isSubmitting || isSettling}
-            />
+            {canManageBilling ? (
+              <PaymentPanel
+                paymentMethod={paymentMethod}
+                onPaymentMethodChange={setPaymentMethod}
+                totalAmount={payableTotal}
+                orderType={orderType}
+                cashReceived={cashReceived}
+                onCashReceivedChange={setCashReceived}
+                changeDue={changeDue}
+                shortfallAmount={shortfallAmount}
+                paymentNote={paymentNote}
+                onPaymentNoteChange={setPaymentNote}
+                packingCharge={packingCharge}
+                onPackingChargeChange={setPackingCharge}
+                deliveryCharge={deliveryCharge}
+                onDeliveryChargeChange={setDeliveryCharge}
+                invoicePreview={invoicePreview}
+                activeOrder={activeOrder}
+                loyaltyPhone={loyaltyPhone}
+                onLoyaltyPhoneChange={setLoyaltyPhone}
+                loyaltyProfile={loyaltyProfile}
+                redeemPoints={redeemPoints}
+                onRedeemPointsChange={setRedeemPoints}
+                onCheckLoyalty={handleCheckLoyalty}
+                checkingLoyalty={isCheckingLoyalty}
+                disabled={isLoadingTableOrder || isSubmitting || isSettling}
+              />
+            ) : null}
 
             <div className="min-h-0 flex-1">
               <CartPanel
@@ -1837,7 +1918,7 @@ export default function POS() {
                 onEditDetails={handleOpenItemDetails}
                 onSubmit={handleSubmit}
                 onSendToKitchen={handleSendToKitchen}
-                onSettle={handleSettle}
+                onSettle={canManageBilling ? handleSettle : null}
                 isSubmitting={isSubmitting}
                 isSendingToKitchen={isSendingToKitchen}
                 isSettling={isSettling}
@@ -1862,6 +1943,7 @@ export default function POS() {
                       : 'SETTLE BILL'
                     : 'CREATE & SETTLE BILL'
                 }
+                billingMessage={!canManageBilling ? 'Billing will be handled by manager.' : ''}
                 isSubmitDisabled={isLoadingTableOrder}
                 isSendToKitchenDisabled={isLoadingTableOrder}
                 isSettleDisabled={isLoadingTableOrder || (paymentMethod === 'cash' && shortfallAmount > 0)}

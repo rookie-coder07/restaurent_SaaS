@@ -69,6 +69,10 @@ const PAGE_META = {
     section: 'Bills',
     title: 'Billing Control',
   },
+  '/manager/settings': {
+    section: 'Settings',
+    title: 'Workspace Settings',
+  },
 };
 
 export default function AdminLayout({ children }) {

@@ -74,6 +74,41 @@ describe('OrderService stability', () => {
     expect(TableService.getEffectiveStatus({ status: 'closed' }, true)).toBe('occupied');
   });
 
+  test('waiter roles cannot apply billing discounts through create or update totals', () => {
+    expect(() => OrderService.assertBillingChangesAllowed('staff', 80, 100)).toThrow(
+      'Unauthorized: Only manager can perform billing actions'
+    );
+    expect(() => OrderService.assertBillingChangesAllowed('manager', 80, 100)).not.toThrow();
+    expect(() => OrderService.assertBillingChangesAllowed('staff', 100, 100)).not.toThrow();
+  });
+
+  test('createOrder reuses the existing dine-in bill for the same table instead of creating a duplicate', async () => {
+    const existingOrder = {
+      id: 'order-1',
+      tableId: 'table-1',
+      status: 'pending',
+      paymentStatus: 'unpaid',
+    };
+
+    const activeOrderSpy = jest.spyOn(OrderService, 'getActiveOrderByTable').mockResolvedValue(existingOrder);
+
+    const result = await OrderService.createOrder(
+      'rest-1',
+      {
+        tableId: 'table-1',
+        orderType: 'dine-in',
+        items: [{ menuItemId: 'item-1', quantity: 1, unitPrice: 100 }],
+      },
+      {}
+    );
+
+    expect(activeOrderSpy).toHaveBeenCalledWith('rest-1', 'table-1');
+    expect(result).toMatchObject({
+      id: 'order-1',
+      reusedExistingBill: true,
+    });
+  });
+
   test('getLoyaltyProfile only reads settled orders for the current restaurant', async () => {
     const orderRows = [
       {
@@ -123,5 +158,92 @@ describe('OrderService stability', () => {
     expect(profile.visitCount).toBe(1);
     expect(profile.recentOrders).toHaveLength(1);
     expect(profile.recentOrders[0].id).toBe('order-1');
+  });
+
+  test('settleOrder allows cash settlement when loyalty rounds the payable amount down to zero', async () => {
+    const existingOrder = {
+      id: 'order-1',
+      restaurant_id: 'rest-1',
+      table_id: 'table-14',
+      status: 'pending',
+      payment_status: 'unpaid',
+      total_amount: 1,
+      payment_method: 'cash',
+      notes: '',
+      created_at: '2026-04-05T08:00:00.000Z',
+      updated_at: '2026-04-05T08:00:00.000Z',
+      order_items: [
+        {
+          id: 'line-1',
+          menu_item_id: 'item-1',
+          quantity: 1,
+          unit_price: 1,
+          menu_items: {
+            name: 'Mint',
+            preparation_time: 5,
+          },
+        },
+      ],
+    };
+    const updatedOrderRow = {
+      ...existingOrder,
+      status: 'completed',
+      payment_status: 'paid',
+      total_amount: 0,
+      updated_at: '2026-04-05T08:05:00.000Z',
+    };
+
+    jest.spyOn(OrderService, 'fetchOrderRecord').mockResolvedValue(existingOrder);
+    jest.spyOn(OrderService, 'getLoyaltyProfile').mockResolvedValue({
+      customerPhone: '9876543210',
+      pointsBalance: 2,
+      totalEarnedPoints: 2,
+      totalRedeemedPoints: 0,
+      totalRedeemedAmount: 0,
+      totalSpend: 200,
+      visitCount: 1,
+      lastVisitAt: '2026-04-04T08:00:00.000Z',
+      recentOrders: [],
+    });
+    jest.spyOn(OrderService, 'getOrderById').mockResolvedValue(OrderService.transformOrder(updatedOrderRow));
+    jest.spyOn(TableService, 'syncTableLifecycle').mockResolvedValue();
+
+    const updateEqRestaurant = jest.fn().mockResolvedValue({ error: null });
+    const updateEqId = jest.fn(() => ({ eq: updateEqRestaurant }));
+    const update = jest.fn(() => ({ eq: updateEqId }));
+    const single = jest.fn().mockResolvedValue({
+      data: {
+        id: 'rest-1',
+        enable_gst: true,
+        default_gst_percent: 5,
+      },
+      error: null,
+    });
+    const selectRestaurants = jest.fn(() => ({ eq: jest.fn(() => ({ single })) }));
+
+    jest.spyOn(supabase, 'from').mockImplementation((table) => {
+      if (table === 'restaurants') {
+        return { select: selectRestaurants };
+      }
+
+      if (table === 'orders') {
+        return { update };
+      }
+
+      throw new Error(`Unexpected table ${table}`);
+    });
+
+    const result = await OrderService.settleOrder('rest-1', 'order-1', {
+      method: 'cash',
+      loyaltyPhone: '9876543210',
+      redeemPoints: 1,
+    });
+
+    expect(update).toHaveBeenCalled();
+    expect(updateEqId).toHaveBeenCalledWith('id', 'order-1');
+    expect(updateEqRestaurant).toHaveBeenCalledWith('restaurant_id', 'rest-1');
+    expect(result.settlement.finalTotal).toBe(0);
+    expect(result.settlement.amountReceived).toBe(0);
+    expect(result.settlement.loyalty.redeemedPoints).toBe(1);
   });
 });

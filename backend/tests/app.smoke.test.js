@@ -208,4 +208,27 @@ describe('Backend deployment smoke', () => {
     expect(response.body.success).toBe(false);
     expect(response.body.message).toBe('Validation error');
   });
+
+  test('POST /api/v1/orders/:orderId/settle blocks waiter billing access', async () => {
+    const token = jwt.sign(
+      {
+        userId: 'waiter-1',
+        restaurantId: 'rest-1',
+        email: 'waiter@example.com',
+        role: 'staff',
+      },
+      process.env.JWT_SECRET
+    );
+
+    const response = await request(app)
+      .post('/api/v1/orders/order-1/settle')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        paymentMethod: 'cash',
+      });
+
+    expect(response.status).toBe(403);
+    expect(response.body.success).toBe(false);
+    expect(response.body.message).toBe('Unauthorized: Only manager can perform billing actions');
+  });
 });

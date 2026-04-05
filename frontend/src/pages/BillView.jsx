@@ -7,6 +7,7 @@ import Toast from '../components/common/Toast';
 import { orderAPI, restaurantAPI } from '../services/apiEndpoints';
 import { buildInvoiceData } from '../utils/invoice';
 import { formatCurrency, formatDisplayOrderNumber } from '../utils/formatters';
+import { printBillReceipt } from '../utils/printerService';
 import '../styles/thermal-print.css';
 
 function resolveReturnPath(pathname = '', fallback = '') {
@@ -52,7 +53,7 @@ export default function BillView() {
   const location = useLocation();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(!location.state?.invoice);
-  const [error, setError] = useState('');
+  const [error, setError] = useState(location.state?.autoPrintError || '');
   const [order, setOrder] = useState(location.state?.order || null);
   const [restaurant, setRestaurant] = useState(location.state?.restaurant || null);
   const [invoiceOverride, setInvoiceOverride] = useState(location.state?.invoice || null);
@@ -131,14 +132,25 @@ export default function BillView() {
     [location, restaurant]
   );
 
-  const handlePrint = () => {
+  const handlePrint = async () => {
     if (!invoice) {
       return;
     }
 
     try {
       setPrinting(true);
-      window.print();
+      const result = await printBillReceipt({
+        order,
+        restaurant,
+        invoice,
+        cashierName: location.state?.cashierName || order?.billing?.cashierName || '',
+        fallbackToBrowser: true,
+      });
+      if (result?.fallback && result?.error) {
+        setError('Billing printer was unavailable, so browser print opened instead.');
+      }
+    } catch (printError) {
+      setError(printError.message || 'Failed to print the bill.');
     } finally {
       setPrinting(false);
     }
@@ -189,7 +201,7 @@ export default function BillView() {
               {formatDisplayOrderNumber(order)}
             </h1>
             <p className="mt-2 text-sm text-[var(--color-text-muted)]">
-              Review items, GST, total, and payment details before printing the final bill.
+              Review items, CGST, SGST, total, and payment details before printing the final bill.
             </p>
           </div>
           <div className="flex flex-wrap gap-3">
@@ -233,14 +245,6 @@ export default function BillView() {
               <span className="thermal-align-right">{String(invoice.orderType || '').replace('-', ' ')}</span>
               <span>Table</span>
               <span className="thermal-align-right">{invoice.tableNumber || 'Walk-in'}</span>
-              <span>Cashier</span>
-              <span className="thermal-align-right">{invoice.cashierName || 'Cashier'}</span>
-              {invoice.kotReference ? (
-                <>
-                  <span>KOT Ref</span>
-                  <span className="thermal-align-right">{invoice.kotReference}</span>
-                </>
-              ) : null}
             </div>
 
             <div className="thermal-separator">--------------------------------</div>

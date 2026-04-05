@@ -90,6 +90,11 @@ export const settleOrderSchema = Joi.object({
   'redeem_points'
 );
 
+export const approveDiscountSchema = Joi.object({
+  percent: Joi.number().greater(0).max(100).precision(2).required(),
+  note: Joi.string().trim().max(200).optional().allow(''),
+});
+
 export const updateOnlineOrderSchema = Joi.object({
   workflowStatus: Joi.string().trim().lowercase().valid(...ONLINE_WORKFLOW_VALUES).optional(),
   workflow_status: Joi.string().trim().lowercase().valid(...ONLINE_WORKFLOW_VALUES).optional(),

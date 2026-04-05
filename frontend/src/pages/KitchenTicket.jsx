@@ -5,6 +5,7 @@ import Card from '../components/common/Card';
 import Button from '../components/common/Button';
 import Toast from '../components/common/Toast';
 import { orderAPI, restaurantAPI } from '../services/apiEndpoints';
+import { printKotReceipt } from '../utils/printerService';
 import '../styles/thermal-print.css';
 
 function resolveReturnPath(pathname = '', fallback = '') {
@@ -64,7 +65,7 @@ export default function KitchenTicket() {
   const navigate = useNavigate();
   const initialTicketId = location.state?.ticket?.id || '';
   const [loading, setLoading] = useState(!location.state?.order);
-  const [error, setError] = useState('');
+  const [error, setError] = useState(location.state?.autoPrintError || '');
   const [order, setOrder] = useState(location.state?.order || null);
   const [restaurant, setRestaurant] = useState(location.state?.restaurant || null);
   const [printing, setPrinting] = useState(false);
@@ -127,14 +128,24 @@ export default function KitchenTicket() {
     [location, restaurant]
   );
 
-  const handlePrint = () => {
+  const handlePrint = async () => {
     if (!ticket) {
       return;
     }
 
     try {
       setPrinting(true);
-      window.print();
+      const result = await printKotReceipt({
+        ticket,
+        order,
+        restaurant,
+        fallbackToBrowser: true,
+      });
+      if (result?.fallback && result?.error) {
+        setError('Kitchen printer was unavailable, so browser print opened instead.');
+      }
+    } catch (printError) {
+      setError(printError.message || 'Failed to print the KOT.');
     } finally {
       setPrinting(false);
     }

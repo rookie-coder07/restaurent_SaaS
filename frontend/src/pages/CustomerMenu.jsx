@@ -17,6 +17,7 @@ import {
 import { useApi } from '../hooks/useApi';
 import { customerAPI } from '../services/apiEndpoints';
 import { formatCurrency } from '../utils/formatters';
+import { playLoudBuzzer } from '../utils/alerts';
 import { getMenuItemImageUrl } from '../utils/menuItemImage';
 import CartDrawer from '../components/customer/CartDrawer';
 import FloatingCartButton from '../components/customer/FloatingCartButton';
@@ -228,44 +229,7 @@ export default function CustomerMenu() {
   };
 
   const playOrderConfirmationBuzzer = () => {
-    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-    if (!AudioContextClass) {
-      return;
-    }
-
-    try {
-      const audioContext = new AudioContextClass();
-      const now = audioContext.currentTime;
-      const pattern = [
-        { frequency: 880, start: 0, duration: 0.1 },
-        { frequency: 660, start: 0.14, duration: 0.1 },
-        { frequency: 990, start: 0.28, duration: 0.16 },
-      ];
-
-      pattern.forEach((tone) => {
-        const oscillator = audioContext.createOscillator();
-        const gainNode = audioContext.createGain();
-
-        oscillator.type = 'square';
-        oscillator.frequency.setValueAtTime(tone.frequency, now + tone.start);
-
-        gainNode.gain.setValueAtTime(0.0001, now + tone.start);
-        gainNode.gain.exponentialRampToValueAtTime(0.12, now + tone.start + 0.02);
-        gainNode.gain.exponentialRampToValueAtTime(0.0001, now + tone.start + tone.duration);
-
-        oscillator.connect(gainNode);
-        gainNode.connect(audioContext.destination);
-
-        oscillator.start(now + tone.start);
-        oscillator.stop(now + tone.start + tone.duration + 0.02);
-      });
-
-      window.setTimeout(() => {
-        audioContext.close().catch(() => {});
-      }, 900);
-    } catch (error) {
-      console.warn('Order confirmation buzzer could not play.', error);
-    }
+    playLoudBuzzer('success');
   };
 
   const handlePlaceOrder = async () => {
