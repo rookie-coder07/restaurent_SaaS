@@ -1,6 +1,16 @@
 import OrderService from '../src/services/orderService.js';
 
 describe('OrderService stability', () => {
+  test('resolveOrderItemUnitPrice falls back to the menu price when the request sends zero', () => {
+    expect(OrderService.resolveOrderItemUnitPrice(0, 67)).toBe(67);
+    expect(OrderService.resolveOrderItemUnitPrice(undefined, 67)).toBe(67);
+  });
+
+  test('resolvePersistedOrderTotal falls back to the computed order total when the request total is zero', () => {
+    expect(OrderService.resolvePersistedOrderTotal(0, 67)).toBe(67);
+    expect(OrderService.resolvePersistedOrderTotal(undefined, 67)).toBe(67);
+  });
+
   test('transformOrder synthesizes billing details for settled orders when metadata is missing', () => {
     const transformed = OrderService.transformOrder({
       id: '030a2702-a51e-4a65-9fe7-af9484da7fe9',

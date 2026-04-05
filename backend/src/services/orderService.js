@@ -536,9 +536,7 @@ export class OrderService {
       return {
         menuItemId: item.menuItemId,
         quantity: Number(item.quantity || 0),
-        unitPrice: options.enforceMenuPrice
-          ? Number(menuItem?.price ?? 0)
-          : Number(item.unitPrice ?? menuItem?.price ?? 0),
+        unitPrice: this.resolveOrderItemUnitPrice(item.unitPrice, menuItem?.price, options),
         name: item.name || menuItem?.name || '',
         itemNote: this.sanitizeLineNote(item.itemNote),
         modifiers: this.parseModifierList(item.modifiers),
@@ -551,6 +549,34 @@ export class OrderService {
 
   static computeOrderTotal(items = []) {
     return items.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
+  }
+
+  static resolveOrderItemUnitPrice(requestedUnitPrice, menuItemPrice, options = {}) {
+    const catalogPrice = Number(menuItemPrice ?? 0);
+    const normalizedCatalogPrice = Number.isFinite(catalogPrice) && catalogPrice > 0 ? catalogPrice : 0;
+
+    if (options.enforceMenuPrice) {
+      return normalizedCatalogPrice;
+    }
+
+    const requestedPrice = Number(requestedUnitPrice);
+    if (Number.isFinite(requestedPrice) && requestedPrice > 0) {
+      return requestedPrice;
+    }
+
+    return normalizedCatalogPrice;
+  }
+
+  static resolvePersistedOrderTotal(requestedTotalAmount, computedTotalAmount) {
+    const computedTotal = Number(computedTotalAmount ?? 0);
+    const normalizedComputedTotal = Number.isFinite(computedTotal) && computedTotal > 0 ? computedTotal : 0;
+
+    const requestedTotal = Number(requestedTotalAmount);
+    if (Number.isFinite(requestedTotal) && requestedTotal > 0) {
+      return requestedTotal;
+    }
+
+    return normalizedComputedTotal;
   }
 
   static normalizePaymentMethod(method) {
@@ -961,7 +987,7 @@ export class OrderService {
           restaurant_id: finalRestaurantId,
           table_id: orderData.tableId,
           status: initialStatus,
-          total_amount: Number(orderData.totalAmount ?? computedTotalAmount ?? 0),
+          total_amount: this.resolvePersistedOrderTotal(orderData.totalAmount, computedTotalAmount),
           payment_method: this.normalizePaymentMethod(orderData.paymentMethod) || 'cash',
           payment_status: 'unpaid',
           notes: composeNotesWithKotMeta(orderData.notes || '', initialKotMeta),
@@ -1854,7 +1880,7 @@ export class OrderService {
         .from('orders')
         .update({
           table_id: resolvedTableId,
-          total_amount: Number(orderData.totalAmount ?? computedTotalAmount ?? 0),
+          total_amount: this.resolvePersistedOrderTotal(orderData.totalAmount, computedTotalAmount),
           payment_method: orderData.paymentMethod !== undefined
             ? this.normalizePaymentMethod(orderData.paymentMethod) || existingOrder.payment_method
             : existingOrder.payment_method,
