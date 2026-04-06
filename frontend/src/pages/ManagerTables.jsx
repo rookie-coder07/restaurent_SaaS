@@ -2,7 +2,9 @@ import { GitMerge, LockKeyhole, Loader, SplitSquareVertical, UserPlus2 } from 'l
 import { useEffect, useMemo, useState } from 'react';
 import { useApi } from '../hooks/useApi';
 import useAutoRefresh from '../hooks/useAutoRefresh';
+import { useOrderSubscription } from '../hooks/useOrderSubscription';
 import { orderAPI, restaurantAPI, tableAPI } from '../services/apiEndpoints';
+import { useAuthStore } from '../context/authStore';
 import { useManagerStore } from '../context/managerStore';
 import { getTableActivity } from '../utils/managerPortal';
 import { subscribeToOrderEvents } from '../utils/liveOrderEvents';
@@ -12,6 +14,7 @@ import Modal from '../components/common/Modal';
 import Toast from '../components/common/Toast';
 
 export default function ManagerTables() {
+  const restaurantId = useAuthStore((state) => state.restaurantId);
   const { data: tablesData = {}, loading, refetch: refetchTables } = useApi(() => tableAPI.getTables({ limit: 200 }));
   const { data: ordersData = {}, refetch: refetchOrders } = useApi(orderAPI.getOpenBills);
   const { data: staffData = {}, refetch: refetchStaff } = useApi(() => restaurantAPI.getStaff({ limit: 100, skip: 0, isActive: true }));
@@ -102,6 +105,10 @@ export default function ManagerTables() {
 
     return cleanup;
   }, [refetchOrders, refetchTables]);
+
+  useOrderSubscription(restaurantId, () => {
+    Promise.allSettled([refetchTables(), refetchOrders()]);
+  });
 
   const closeMergePicker = () => {
     setShowMergePicker(false);
@@ -284,7 +291,9 @@ export default function ManagerTables() {
             type="button"
             onClick={() => setSelectedTableId(table.id)}
             className={`rounded-[1.75rem] border p-4 text-left ${
-              table.effectiveStatus === 'busy'
+              table.effectiveStatus === 'qr_locked'
+                ? 'border-fuchsia-500/20 bg-fuchsia-500/10'
+                : table.effectiveStatus === 'busy' || table.effectiveStatus === 'manual'
                 ? 'border-amber-500/20 bg-amber-500/10'
                 : table.effectiveStatus === 'closed'
                   ? 'border-slate-500/20 bg-slate-500/10'
@@ -298,7 +307,18 @@ export default function ManagerTables() {
                 {table.mergedDisplayName}
               </p>
             ) : null}
-            <p className="mt-2 text-sm capitalize text-[var(--color-text-muted)]">{table.effectiveStatus}</p>
+            <p className="mt-2 text-sm text-[var(--color-text-muted)]">
+              {table.effectiveStatus === 'qr_locked'
+                ? 'QR Locked'
+                : table.effectiveStatus === 'manual'
+                  ? 'Manual'
+                  : table.effectiveStatus}
+            </p>
+            {table.assignedWaiterName ? (
+              <p className="mt-1 text-sm text-[var(--color-text-muted)]">
+                {table.lockedByQr ? `QR locked to ${table.assignedWaiterName}` : `Assigned to ${table.assignedWaiterName}`}
+              </p>
+            ) : null}
             <p className="mt-1 text-sm text-[var(--color-text-muted)]">{table.activeOrders.length} active orders</p>
           </button>
         ))}
@@ -326,7 +346,9 @@ export default function ManagerTables() {
                   <p className="mt-1 text-sm text-[var(--text-secondary)]">
                     {assignedWaiter
                       ? `${assignedWaiter.name} is assigned to this table.`
-                      : 'No waiter assigned to this table.'}
+                      : selectedTable.assignedWaiterName
+                        ? `${selectedTable.assignedWaiterName} is currently occupying this table.`
+                        : 'No waiter assigned to this table.'}
                   </p>
                 </div>
                 {assignedWaiter ? (

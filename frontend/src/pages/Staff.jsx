@@ -67,6 +67,26 @@ export default function StaffManagement() {
       new Map(availableTables.map((table) => [table.id, table.mergedDisplayName || `Table ${table.tableNumber}`])),
     [availableTables]
   );
+  const assignedTableOwners = useMemo(() => {
+    const owners = new Map();
+
+    (staff || [])
+      .filter((member) => member.role === 'staff')
+      .forEach((member) => {
+        (member.assignedTables || []).forEach((tableId) => {
+          if (!tableId) {
+            return;
+          }
+
+          owners.set(tableId, {
+            staffId: member.id,
+            name: member.name || member.email || 'Assigned waiter',
+          });
+        });
+      });
+
+    return owners;
+  }, [staff]);
   const managerCount = staff.filter((member) => member.role === 'manager').length;
   const staffCount = staff.filter((member) => member.role === 'staff').length;
   const filteredStaff = useMemo(
@@ -446,19 +466,32 @@ export default function StaffManagement() {
                 ) : (
                   availableTables.map((table) => {
                     const isChecked = (formData.assignedTables || []).includes(table.id);
+                    const assignedOwner = assignedTableOwners.get(table.id);
+                    const isTakenByAnotherWaiter =
+                      Boolean(assignedOwner) && assignedOwner.staffId !== editingStaff?.id;
 
                     return (
                       <label
                         key={table.id}
-                        className="flex items-center gap-3 rounded-xl bg-[var(--color-panel)] px-3 py-2 text-sm text-[var(--color-text)]"
+                        className={`flex items-center gap-3 rounded-xl px-3 py-2 text-sm ${
+                          isTakenByAnotherWaiter
+                            ? 'bg-[var(--color-surface)] text-[var(--color-text-muted)] opacity-70'
+                            : 'bg-[var(--color-panel)] text-[var(--color-text)]'
+                        }`}
                       >
                         <input
                           type="checkbox"
                           checked={isChecked}
                           onChange={() => toggleAssignedTable(table.id)}
+                          disabled={isTakenByAnotherWaiter}
                           className="h-4 w-4 accent-[var(--color-primary)]"
                         />
-                        <span>{table.mergedDisplayName || `Table ${table.tableNumber}`}</span>
+                        <div className="flex min-w-0 flex-col">
+                          <span>{table.mergedDisplayName || `Table ${table.tableNumber}`}</span>
+                          {isTakenByAnotherWaiter ? (
+                            <span className="text-xs text-amber-400">Remove from {assignedOwner.name} first</span>
+                          ) : null}
+                        </div>
                       </label>
                     );
                   })

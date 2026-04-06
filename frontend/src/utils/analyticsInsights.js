@@ -167,7 +167,7 @@ export function buildAnalyticsSnapshot(orders = [], dateRange = {}, filters = {}
     }
     orderHourMap.set(orderHour, hourEntry);
 
-    const paymentLabel = String(order?.paymentMethod || order?.payment_mode || order?.billing?.paymentMode || (isSettledAnalyticsOrder(order) ? 'unknown' : 'unpaid'))
+    const paymentLabel = String(order?.paymentMethod || order?.payment_mode || order?.billing?.paymentMode || (isSettledAnalyticsOrder(order) ? 'unknown' : 'pending'))
       .replace(/_/g, ' ')
       .trim()
       .toUpperCase();

@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, BellRing, RefreshCw, ShieldAlert } from 'lucide-react';
 import { kitchenAPI, restaurantAPI } from '../services/apiEndpoints';
 import { formatDate, formatDisplayOrderNumber, formatShortDisplayOrderNumber, parseServerDate } from '../utils/formatters';
 import { printKotReceipt } from '../utils/printerService';
 import { useManagerStore } from '../context/managerStore';
+import { useAuthStore } from '../context/authStore';
+import { useOrderSubscription } from '../hooks/useOrderSubscription';
 import { playLoudBuzzer } from '../utils/alerts';
 import { useApi } from '../hooks/useApi';
 import Card from '../components/common/Card';
@@ -22,7 +24,7 @@ const STATUS_LANES = [
 const NEXT_STATUS = {
   pending: 'preparing',
   preparing: 'ready',
-  ready: 'served',
+  ready: 'completed',
 };
 
 function formatElapsed(createdAt) {
@@ -93,6 +95,7 @@ function normalizeTicket(ticket) {
 }
 
 export default function ManagerKitchen() {
+  const restaurantId = useAuthStore((state) => state.restaurantId);
   const { data: restaurantProfile = {} } = useApi(restaurantAPI.getProfile);
   const [tickets, setTickets] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -111,12 +114,18 @@ export default function ManagerKitchen() {
   const [detailLoading, setDetailLoading] = useState(false);
   const knownTicketIdsRef = useRef(new Set());
   const fetchInFlightRef = useRef(false);
+  const realtimeRefreshTimeoutRef = useRef(null);
+  const ticketsRef = useRef([]);
   const prioritizedOrders = useManagerStore((state) => state.prioritizedOrders);
   const setOrderPriority = useManagerStore((state) => state.setOrderPriority);
 
-  const fetchOrders = async (showLoader = false, { force = false } = {}) => {
+  useEffect(() => {
+    ticketsRef.current = tickets;
+  }, [tickets]);
+
+  const fetchOrders = useCallback(async (showLoader = false, { force = false } = {}) => {
     if (fetchInFlightRef.current && !force) {
-      return tickets;
+      return ticketsRef.current;
     }
 
     fetchInFlightRef.current = true;
@@ -161,13 +170,28 @@ export default function ManagerKitchen() {
       setLoading(false);
       setRefreshing(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     fetchOrders(true).catch(() => {
       // handled in state
     });
-  }, []);
+    return () => {
+      if (realtimeRefreshTimeoutRef.current) {
+        window.clearTimeout(realtimeRefreshTimeoutRef.current);
+      }
+    };
+  }, [fetchOrders]);
+
+  useOrderSubscription(restaurantId, () => {
+    if (realtimeRefreshTimeoutRef.current) {
+      window.clearTimeout(realtimeRefreshTimeoutRef.current);
+    }
+
+    realtimeRefreshTimeoutRef.current = window.setTimeout(() => {
+      fetchOrders(false, { force: true }).catch(() => {});
+    }, 200);
+  });
 
   const groups = useMemo(
     () => ({
@@ -240,7 +264,7 @@ export default function ManagerKitchen() {
           .map((currentTicket) =>
             currentTicket.id === ticket.id ? { ...currentTicket, status: nextStatus } : currentTicket
           )
-          .filter((currentTicket) => currentTicket.status !== 'served')
+          .filter((currentTicket) => currentTicket.status !== 'completed')
       );
       setNewTicketIds((current) => current.filter((id) => id !== ticket.id));
 

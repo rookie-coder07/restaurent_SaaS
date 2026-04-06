@@ -13,9 +13,9 @@ import {
 import { broadcastRestaurantEvent } from '../utils/realtimeEvents.js';
 
 export class OrderService {
-  static ACTIVE_ORDER_STATUSES = ['awaiting_waiter_approval', 'pending', 'preparing', 'ready', 'in_progress'];
+  static ACTIVE_ORDER_STATUSES = ['awaiting_waiter_approval', 'pending', 'preparing', 'ready'];
 
-  static OPEN_BILL_STATUSES = ['awaiting_waiter_approval', 'pending', 'preparing', 'ready', 'served', 'in_progress'];
+  static OPEN_BILL_STATUSES = ['awaiting_waiter_approval', 'pending', 'preparing', 'ready'];
 
   static CLOSED_ORDER_STATUSES = ['completed'];
   static LOYALTY_EARN_RATE_RUPEES = 100;
@@ -76,6 +76,10 @@ export class OrderService {
       return 'preparing';
     }
 
+    if (status === 'served') {
+      return 'completed';
+    }
+
     return status;
   }
 
@@ -84,12 +88,13 @@ export class OrderService {
     return normalizedOrderType === 'takeaway' ? 'takeaway' : 'dine-in';
   }
 
+  static normalizeRequestId(value) {
+    const normalizedValue = String(value || '').trim().toLowerCase();
+    return normalizedValue || '';
+  }
+
   static getStatusFilterValues(status) {
     const normalizedStatus = this.normalizeOrderStatus(status);
-
-    if (normalizedStatus === 'preparing') {
-      return ['preparing', 'in_progress'];
-    }
 
     return normalizedStatus ? [normalizedStatus] : [];
   }
@@ -335,6 +340,7 @@ export class OrderService {
     const normalizedStatus = this.normalizeOrderStatus(order.status);
     const { publicNotes, kotMeta } = splitNotesAndKotMeta(order.notes);
     const lineDetails = kotMeta.lineDetails || {};
+    const aggregatedOrderItems = this.aggregateOrderItems(order.order_items, lineDetails);
     const kitchenTickets = (kotMeta.kitchen?.tickets || []).map((ticket) => this.normalizeKitchenTicket(ticket));
     const online = this.normalizeOnlineMeta(kotMeta.online, {
       orderType: order.order_type,
@@ -363,7 +369,7 @@ export class OrderService {
       ? billing
       : this.normalizeBillingMeta(
           {
-            invoiceNumber: this.generateInvoiceNumber(order),
+            invoiceNumber: '',
             invoiceDate: this.normalizeTimestamp(order.updated_at || order.created_at || new Date().toISOString()),
             subtotal: subtotalFromItems,
             grandTotal: Number(order.total_amount || 0),
@@ -379,49 +385,31 @@ export class OrderService {
       id: order.id,
       restaurantId: order.restaurant_id,
       tableId: order.table_id,
+      orderSource: String(order.order_source || '').trim().toLowerCase() === 'qr' ? 'qr' : (
+        kotMeta.system?.orderOrigin === 'qr' ? 'qr' : 'manual'
+      ),
       origin: kotMeta.system?.orderOrigin || (normalizedStatus === 'awaiting_waiter_approval' ? 'qr' : 'pos'),
+      requestId: order.request_id || '',
       status: normalizedStatus,
       orderType: online.fulfillmentType || order.order_type || (order.table_id ? 'dine-in' : 'takeaway'),
       totalAmount: order.total_amount,
       total: Number(order.total_amount || 0),
+      finalAmount: Number(order.final_amount || effectiveBilling.grandTotal || order.total_amount || 0),
       paymentMethod: order.payment_method,
-      paymentStatus: order.payment_status || 'unpaid',
+        paymentStatus: order.payment_status || 'pending',
       billing: effectiveBilling,
       notes: publicNotes,
       createdAt: this.normalizeTimestamp(order.created_at),
       updatedAt: this.normalizeTimestamp(order.updated_at),
       displayOrderNumber: order.display_order_number || null,
-      orderItems: order.order_items?.map(item => ({
-        id: item.id,
-        menuItemId: item.menu_item_id,
-        quantity: item.quantity,
-        unitPrice: Number(item.unit_price ?? item.price ?? 0),
-        price: Number(item.unit_price ?? item.price ?? 0),
-        name: item.menu_items?.name || item.name || `Item ${item.menu_item_id?.slice(0, 6) || ''}`,
-        preparationTime: item.menu_items?.preparation_time || 15,
-        itemNote: lineDetails[item.menu_item_id]?.note || '',
-        modifiers: lineDetails[item.menu_item_id]?.modifiers || [],
-        station: lineDetails[item.menu_item_id]?.station || 'Main Kitchen',
-        categoryId: lineDetails[item.menu_item_id]?.categoryId || null,
-        categoryName: lineDetails[item.menu_item_id]?.categoryName || '',
-      })) || [],
-      items: order.order_items?.map(item => ({
-        id: item.id,
-        menuItemId: item.menu_item_id,
-        quantity: item.quantity,
-        price: Number(item.unit_price ?? item.price ?? 0),
-        unitPrice: Number(item.unit_price ?? item.price ?? 0),
-        name: item.menu_items?.name || item.name || `Item ${item.menu_item_id?.slice(0, 6) || ''}`,
-        preparationTime: item.menu_items?.preparation_time || 15,
-        itemNote: lineDetails[item.menu_item_id]?.note || '',
-        modifiers: lineDetails[item.menu_item_id]?.modifiers || [],
-        station: lineDetails[item.menu_item_id]?.station || 'Main Kitchen',
-        categoryId: lineDetails[item.menu_item_id]?.categoryId || null,
-        categoryName: lineDetails[item.menu_item_id]?.categoryName || '',
-      })) || [],
+      orderItems: aggregatedOrderItems,
+      items: aggregatedOrderItems,
       kitchenTickets,
       activeKitchenTickets: kitchenTickets.filter((ticket) => ['pending', 'preparing', 'ready'].includes(ticket.status)),
       kitchenLastSentAt: kitchenTickets.length > 0 ? kitchenTickets[kitchenTickets.length - 1].createdAt : null,
+      hasPendingKitchenItems: aggregatedOrderItems.some(
+        (item) => !item.sentToKitchen && Number(item.quantity || 0) > 0
+      ),
       online,
       loyalty,
       approvedDiscount:
@@ -441,6 +429,38 @@ export class OrderService {
     return orders.map(order => this.transformOrder(order));
   }
 
+  static aggregateOrderItems(orderItems = [], lineDetails = {}) {
+    const itemsByMenuItemId = new Map();
+
+    (orderItems || []).forEach((item) => {
+      const menuItemId = item.menu_item_id;
+      const lineMeta = lineDetails[menuItemId] || {};
+      const existing = itemsByMenuItemId.get(menuItemId) || {
+        id: menuItemId || item.id,
+        menuItemId,
+        quantity: 0,
+        unitPrice: Number(item.unit_price ?? item.price ?? 0),
+        price: Number(item.unit_price ?? item.price ?? 0),
+        name: item.menu_items?.name || item.name || `Item ${String(menuItemId || '').slice(0, 6)}`,
+        preparationTime: item.menu_items?.preparation_time || 15,
+        itemNote: lineMeta.note || '',
+        modifiers: lineMeta.modifiers || [],
+        station: lineMeta.station || 'Main Kitchen',
+        categoryId: lineMeta.categoryId || null,
+        categoryName: lineMeta.categoryName || '',
+        sentToKitchen: true,
+        kotId: item.kot_id || null,
+      };
+
+      existing.quantity += Number(item.quantity || 0);
+      existing.sentToKitchen = existing.sentToKitchen && Boolean(item.sent_to_kitchen);
+      existing.kotId = item.kot_id || existing.kotId || null;
+      itemsByMenuItemId.set(menuItemId, existing);
+    });
+
+    return Array.from(itemsByMenuItemId.values());
+  }
+
   static normalizeOrderItems(items = []) {
     return items.map((item) => ({
       menuItemId: item.menuItemId || item.itemId || item.id,
@@ -450,6 +470,11 @@ export class OrderService {
       itemNote: String(item.itemNote ?? item.note ?? item.specialInstructions ?? '').trim(),
       modifiers: this.parseModifierList(item.modifiers ?? item.modifierList ?? item.modifierText),
     }));
+  }
+
+  static normalizeOrderSource(value, fallback = 'manual') {
+    const normalizedValue = String(value || fallback).trim().toLowerCase();
+    return normalizedValue === 'qr' ? 'qr' : 'manual';
   }
 
   static parseModifierList(value) {
@@ -645,23 +670,55 @@ export class OrderService {
       .map((ticket) => this.normalizeKitchenTicket(ticket))
       .filter((ticket) => !['cancelled'].includes(ticket.status));
 
-    if (activeTickets.some((ticket) => ticket.status === 'pending')) {
-      return 'pending';
+    if (activeTickets.some((ticket) => ticket.status === 'ready')) {
+      return 'ready';
     }
 
     if (activeTickets.some((ticket) => ticket.status === 'preparing')) {
       return 'preparing';
     }
 
-    if (activeTickets.some((ticket) => ticket.status === 'ready')) {
-      return 'ready';
+    if (activeTickets.some((ticket) => ticket.status === 'pending')) {
+      return 'pending';
     }
 
-    if (activeTickets.length > 0 && activeTickets.every((ticket) => ticket.status === 'served')) {
-      return 'served';
+    if (activeTickets.length > 0 && activeTickets.every((ticket) => ticket.status === 'completed')) {
+      return 'completed';
     }
 
     return this.normalizeOrderStatus(fallbackStatus);
+  }
+
+  static syncKitchenTicketsWithOrderStatus(existingTickets = [], nextStatus, now = new Date().toISOString()) {
+    const normalizedStatus = this.normalizeOrderStatus(nextStatus);
+    const normalizedTickets = (existingTickets || []).map((ticket) => this.normalizeKitchenTicket(ticket));
+
+    if (!['pending', 'preparing', 'ready', 'completed'].includes(normalizedStatus) || normalizedTickets.length === 0) {
+      return normalizedTickets;
+    }
+
+    const targetIndex = [...normalizedTickets]
+      .reverse()
+      .findIndex((ticket) => ['pending', 'preparing', 'ready'].includes(ticket.status));
+    const resolvedIndex =
+      targetIndex === -1 ? normalizedTickets.length - 1 : normalizedTickets.length - 1 - targetIndex;
+
+    return normalizedTickets.map((ticket, index) =>
+      index !== resolvedIndex
+        ? ticket
+        : {
+            ...ticket,
+            status: normalizedStatus,
+            updatedAt: now,
+            startedAt:
+              normalizedStatus === 'preparing'
+                ? ticket.startedAt || now
+                : ticket.startedAt,
+            readyAt: normalizedStatus === 'ready' ? now : ticket.readyAt,
+            completedAt: normalizedStatus === 'completed' ? now : ticket.completedAt,
+            servedAt: normalizedStatus === 'completed' ? now : ticket.servedAt,
+          }
+    );
   }
 
   static async validateOrderItems(restaurantId, items = [], options = {}) {
@@ -880,7 +937,7 @@ export class OrderService {
       case 'ready':
         return 'ready';
       case 'dispatched':
-        return 'served';
+        return 'completed';
       case 'rejected':
         return 'cancelled';
       default:
@@ -1165,7 +1222,7 @@ export class OrderService {
     redeemedAmount = 0,
     earnedPoints = 0,
   }) {
-    const noteParts = [`[Settlement ${new Date().toISOString()}] ${String(method || '').toUpperCase()} marked paid`];
+    const noteParts = [`[Settlement ${new Date().toISOString()}] ${String(method || '').toUpperCase()} bill created with payment pending`];
 
     if (discountPercent > 0) {
       noteParts.push(`discount ${Number(discountPercent).toFixed(2)}%`);
@@ -1239,6 +1296,25 @@ export class OrderService {
 
       const normalizedOrderType = this.normalizeOrderType(orderData.orderType, orderData.tableId ? 'dine-in' : 'takeaway');
       const resolvedTableId = normalizedOrderType === 'dine-in' ? orderData.tableId : null;
+      const normalizedOrderSource = this.normalizeOrderSource(orderData.orderSource || orderData.origin, orderData.origin === 'qr' ? 'qr' : 'manual');
+      const normalizedRequestId = this.normalizeRequestId(orderData.requestId || orderData.request_id);
+
+      if (normalizedRequestId) {
+        const { data: existingRequestedOrder, error: existingRequestedOrderError } = await supabase
+          .from('orders')
+          .select('id')
+          .eq('restaurant_id', finalRestaurantId)
+          .eq('request_id', normalizedRequestId)
+          .maybeSingle();
+
+        if (existingRequestedOrderError) {
+          throw existingRequestedOrderError;
+        }
+
+        if (existingRequestedOrder?.id) {
+          return await this.getOrderById(finalRestaurantId, existingRequestedOrder.id);
+        }
+      }
 
       if (normalizedOrderType === 'dine-in' && resolvedTableId) {
         const existingOpenBill = await this.getActiveOrderByTable(finalRestaurantId, resolvedTableId);
@@ -1258,7 +1334,7 @@ export class OrderService {
       const initialStatus = orderData.requiresWaiterApproval ? 'awaiting_waiter_approval' : 'pending';
       const initialOnlineMeta = this.normalizeOnlineMeta(orderData.online, {
         orderType: normalizedOrderType,
-        paymentStatus: 'unpaid',
+        paymentStatus: 'pending',
       });
       const initialKotMeta = {
         lineDetails: this.buildLineDetailsMap(normalizedItems),
@@ -1290,9 +1366,12 @@ export class OrderService {
             order_type: normalizedOrderType,
             status: initialStatus,
             total_amount: this.resolvePersistedOrderTotal(orderData.totalAmount, computedTotalAmount),
+            final_amount: this.resolvePersistedOrderTotal(orderData.totalAmount, computedTotalAmount),
             display_order_number: reservedDisplayOrderNumber,
+            request_id: normalizedRequestId || null,
             payment_method: this.normalizePaymentMethod(orderData.paymentMethod) || 'cash',
-            payment_status: 'unpaid',
+            payment_status: 'pending',
+            order_source: normalizedOrderSource,
             notes: composeNotesWithKotMeta(orderData.notes || '', initialKotMeta),
             created_at: createdAt,
             updated_at: createdAt,
@@ -1309,6 +1388,23 @@ export class OrderService {
 
         if (!this.isUniqueConstraintError(error)) {
           throw error;
+        }
+
+        if (normalizedRequestId) {
+          const { data: duplicateRequestedOrder, error: duplicateRequestedOrderError } = await supabase
+            .from('orders')
+            .select('id')
+            .eq('restaurant_id', finalRestaurantId)
+            .eq('request_id', normalizedRequestId)
+            .maybeSingle();
+
+          if (duplicateRequestedOrderError) {
+            throw duplicateRequestedOrderError;
+          }
+
+          if (duplicateRequestedOrder?.id) {
+            return await this.getOrderById(finalRestaurantId, duplicateRequestedOrder.id);
+          }
         }
       }
 
@@ -1356,6 +1452,8 @@ export class OrderService {
         menu_item_id: item.menuItemId || item.itemId,
         quantity: item.quantity,
         unit_price: item.unitPrice ?? item.price ?? 0,
+        sent_to_kitchen: Boolean(item.sentToKitchen),
+        kot_id: item.kotId || null,
       }));
 
       const { data: orderItems, error } = await supabase
@@ -1383,6 +1481,8 @@ export class OrderService {
           menu_item_id,
           quantity,
           unit_price,
+          sent_to_kitchen,
+          kot_id,
           menu_items (
             name,
             preparation_time
@@ -1425,14 +1525,16 @@ export class OrderService {
         .from('orders')
         .select(`
           *,
-          order_items (
-            id,
-            menu_item_id,
-            quantity,
-            unit_price,
-            menu_items (
-              name,
-              preparation_time
+        order_items (
+          id,
+          menu_item_id,
+          quantity,
+          unit_price,
+          sent_to_kitchen,
+          kot_id,
+          menu_items (
+            name,
+            preparation_time
             )
           ),
           tables!table_id (
@@ -1482,7 +1584,7 @@ export class OrderService {
       const normalizedStatus = this.normalizeOrderStatus(newStatus);
       const { data: existingOrder, error: existingOrderError } = await supabase
         .from('orders')
-        .select('id, table_id, order_type, status, notes, payment_status')
+        .select('id, table_id, order_type, order_source, status, notes, payment_status')
         .eq('id', orderId)
         .eq('restaurant_id', restaurantId)
         .single();
@@ -1496,7 +1598,7 @@ export class OrderService {
 
       const { publicNotes, kotMeta } = splitNotesAndKotMeta(existingOrder.notes);
       const kitchenTickets = (kotMeta.kitchen?.tickets || []).map((ticket) => this.normalizeKitchenTicket(ticket));
-      const existingOrigin = kotMeta.system?.orderOrigin || (existingOrder.table_id ? 'pos' : 'pos');
+      const existingOrigin = this.normalizeOrderSource(existingOrder.order_source, kotMeta.system?.orderOrigin === 'qr' ? 'qr' : 'manual') === 'qr' ? 'qr' : 'pos';
       const isQrAwaitingWaiterApproval =
         existingOrigin === 'qr' &&
         existingOrderType === 'dine-in' &&
@@ -1510,17 +1612,31 @@ export class OrderService {
         throw new Error('Waiter must approve the QR order and generate the first KOT before manager can change progress');
       }
 
+      const now = new Date().toISOString();
+      const nextTickets = this.syncKitchenTicketsWithOrderStatus(kitchenTickets, normalizedStatus, now);
       const nextNotes =
         normalizedStatus === 'cancelled'
-          ? this.appendOrderNote(composeNotesWithKotMeta(publicNotes, kotMeta), this.formatCancellationNote(cancelReason, 'status-update'))
-          : composeNotesWithKotMeta(publicNotes, kotMeta);
+          ? this.appendOrderNote(composeNotesWithKotMeta(publicNotes, {
+              ...kotMeta,
+              kitchen: {
+                ...kotMeta.kitchen,
+                tickets: nextTickets,
+              },
+            }), this.formatCancellationNote(cancelReason, 'status-update'))
+          : composeNotesWithKotMeta(publicNotes, {
+              ...kotMeta,
+              kitchen: {
+                ...kotMeta.kitchen,
+                tickets: nextTickets,
+              },
+            });
 
       const { data: order, error } = await supabase
         .from('orders')
         .update({
           status: normalizedStatus,
           notes: nextNotes,
-          updated_at: new Date(),
+          updated_at: now,
         })
         .eq('id', orderId)
         .eq('restaurant_id', restaurantId)
@@ -1581,8 +1697,8 @@ export class OrderService {
         throw new Error('Cancelled orders cannot be settled');
       }
 
-      if (existingOrder.status === 'completed' || existingOrder.payment_status === 'paid') {
-        throw new Error('Order is already settled');
+      if (existingOrder.payment_status === 'paid') {
+        throw new Error('Order is already paid');
       }
 
       const storedTotalAmount = Number(existingOrder.total_amount || 0);
@@ -1607,6 +1723,9 @@ export class OrderService {
         paymentMethod: existingOrder.payment_method,
         paymentStatus: existingOrder.payment_status,
       });
+      if (existingBilling.invoiceNumber) {
+        throw new Error('Bill is already created for this order');
+      }
       const hasPersistedBilling = this.hasMeaningfulBillingMeta(existingBilling);
       const subtotal = this.roundCurrency(
         (existingOrder.order_items || []).reduce(
@@ -1711,17 +1830,7 @@ export class OrderService {
         ? Number((effectiveAmountReceived - finalTotal).toFixed(2))
         : 0;
 
-      let invoiceNumber = kotMeta.billing?.invoiceNumber || '';
-      if (!invoiceNumber) {
-        try {
-          invoiceNumber = await this.getNextInvoiceNumber(restaurantId);
-        } catch (invoiceError) {
-          logger.warn(
-            `Invoice counter unavailable for restaurant ${restaurantId}; using fallback invoice number. Details: ${invoiceError?.message || invoiceError}`
-          );
-          invoiceNumber = this.generateInvoiceNumber(existingOrder);
-        }
-      }
+      const invoiceNumber = kotMeta.billing?.invoiceNumber || await this.getNextInvoiceNumber(restaurantId);
 
       const nextKotMeta = {
         ...kotMeta,
@@ -1748,12 +1857,12 @@ export class OrderService {
             roundOff,
             grandTotal: finalTotal,
             paymentMode: method,
-            paidAmount: Number.isFinite(effectiveAmountReceived) ? effectiveAmountReceived : finalTotal,
+            paidAmount: 0,
             cashierName: paymentData.actorName || '',
           },
           {
             paymentMethod: method,
-            paymentStatus: 'paid',
+            paymentStatus: 'pending',
           }
         ),
         loyalty: this.normalizeLoyaltyMeta(
@@ -1775,9 +1884,9 @@ export class OrderService {
       const nextNotes = this.appendOrderNote(
         composeNotesWithKotMeta(publicNotes, {
           ...nextKotMeta,
-          online: this.mergeOnlineMeta(kotMeta.online, { paymentState: 'paid', customerPhone: normalizedLoyaltyPhone || kotMeta.online?.customerPhone || '' }, {
+          online: this.mergeOnlineMeta(kotMeta.online, { paymentState: 'pending', customerPhone: normalizedLoyaltyPhone || kotMeta.online?.customerPhone || '' }, {
             orderType: kotMeta.online?.fulfillmentType || (existingOrder.table_id ? 'dine-in' : 'takeaway'),
-            paymentStatus: 'paid',
+            paymentStatus: 'pending',
           }),
         }),
         this.formatSettlementNote({
@@ -1800,10 +1909,11 @@ export class OrderService {
       const { error: settleError } = await supabase
         .from('orders')
         .update({
-          status: 'completed',
+          status: existingOrder.status,
           total_amount: finalTotal,
+          final_amount: finalTotal,
           payment_method: method,
-          payment_status: 'paid',
+          payment_status: 'pending',
           notes: nextNotes,
           updated_at: new Date().toISOString(),
         })
@@ -1819,7 +1929,7 @@ export class OrderService {
       }
 
       const settledOrder = await this.getOrderById(restaurantId, orderId);
-      this.logAuditEvent('order.settled', {
+      this.logAuditEvent('order.bill_created', {
         restaurantId,
         orderId,
         orderNumber: settledOrder?.displayOrderNumber || settledOrder?.id || orderId,
@@ -1829,7 +1939,7 @@ export class OrderService {
         amounts: {
           originalTotal: storedTotalAmount,
           finalTotal,
-          amountReceived: Number.isFinite(effectiveAmountReceived) ? effectiveAmountReceived : finalTotal,
+          amountReceived: Number.isFinite(effectiveAmountReceived) ? effectiveAmountReceived : 0,
           changeDue,
           discountPercent,
           discountAmount: managerDiscountAmount,
@@ -1850,7 +1960,7 @@ export class OrderService {
           discountAmount: managerDiscountAmount,
           billing: this.normalizeBillingMeta(nextKotMeta.billing, {
             paymentMethod: method,
-            paymentStatus: 'paid',
+            paymentStatus: 'pending',
           }),
           loyalty: {
             customerPhone: normalizedLoyaltyPhone,
@@ -1860,12 +1970,205 @@ export class OrderService {
             availablePointsBefore,
             availablePointsAfter,
           },
+          paymentStatus: 'pending',
         },
       };
     } catch (error) {
       logger.error('Settle order error:', error);
       throw error;
     }
+  }
+
+  static async markOrderPaid(restaurantId, orderId, paymentData = {}) {
+    try {
+      const existingOrder = await this.fetchOrderRecord(restaurantId, orderId);
+      const auditActor = this.buildAuditActor(paymentData);
+
+      if (!existingOrder) {
+        throw new Error('Order not found');
+      }
+
+      if (existingOrder.status === 'cancelled') {
+        throw new Error('Cancelled orders cannot be marked paid');
+      }
+
+      if (existingOrder.payment_status === 'paid') {
+        throw new Error('Bill is already paid');
+      }
+
+      const { publicNotes, kotMeta } = splitNotesAndKotMeta(existingOrder.notes);
+      const existingBilling = this.normalizeBillingMeta(kotMeta.billing, {
+        paymentMethod: existingOrder.payment_method,
+        paymentStatus: existingOrder.payment_status,
+      });
+
+      if (!existingBilling.invoiceNumber) {
+        throw new Error('Bill number is missing. Settle the order before marking it paid');
+      }
+
+      const method = this.normalizePaymentMethod(paymentData.method || existingBilling.paymentMode || existingOrder.payment_method || 'cash');
+      if (!method) {
+        throw new Error('Unsupported payment method');
+      }
+
+      const expectedTotal = this.roundCurrency(existingBilling.grandTotal || existingOrder.final_amount || existingOrder.total_amount || 0);
+      const explicitAmountReceived = paymentData.amountReceived;
+      const amountReceived =
+        explicitAmountReceived === undefined || explicitAmountReceived === null || explicitAmountReceived === ''
+          ? null
+          : this.roundCurrency(Number(explicitAmountReceived));
+
+      if (!Number.isFinite(amountReceived)) {
+        throw new Error('Received amount is required before confirming payment');
+      }
+
+      const shortfall = this.roundCurrency(expectedTotal - amountReceived);
+      if (shortfall > 0.01) {
+        throw new Error(`Received amount must be at least ${expectedTotal.toFixed(2)}`);
+      }
+
+      const changeDue = method === 'cash' && Number.isFinite(amountReceived)
+        ? this.roundCurrency(amountReceived - expectedTotal)
+        : 0;
+
+      const nextKotMeta = {
+        ...kotMeta,
+        billing: this.normalizeBillingMeta(
+          {
+            ...existingBilling,
+            paymentMode: method,
+            paidAmount: amountReceived,
+            paymentNote: paymentData.paymentNote || existingBilling.paymentNote || '',
+          },
+          {
+            paymentMethod: method,
+            paymentStatus: 'paid',
+          }
+        ),
+      };
+
+      const confirmationNote = this.appendOrderNote(
+        composeNotesWithKotMeta(publicNotes, {
+          ...nextKotMeta,
+          online: this.mergeOnlineMeta(kotMeta.online, { paymentState: 'paid' }, {
+            orderType: kotMeta.online?.fulfillmentType || (existingOrder.table_id ? 'dine-in' : 'takeaway'),
+            paymentStatus: 'paid',
+          }),
+        }),
+        `[Payment ${new Date().toISOString()}] ${String(method).toUpperCase()} confirmed paid${paymentData.actorName ? ` by ${paymentData.actorName}` : ''}`
+      );
+
+      const { error: updateError } = await supabase
+        .from('orders')
+        .update({
+          status: 'completed',
+          payment_method: method,
+          payment_status: 'paid',
+          final_amount: expectedTotal,
+          notes: confirmationNote,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', orderId)
+        .eq('restaurant_id', restaurantId)
+        .neq('payment_status', 'paid');
+
+      if (updateError) {
+        throw updateError;
+      }
+
+      if (existingOrder.table_id) {
+        await TableService.syncTableLifecycle(restaurantId, existingOrder.table_id);
+      }
+
+      const paidOrder = await this.getOrderById(restaurantId, orderId);
+      this.logAuditEvent('order.payment_confirmed', {
+        restaurantId,
+        orderId,
+        orderNumber: paidOrder?.displayOrderNumber || paidOrder?.id || orderId,
+        actor: auditActor,
+        paymentMethod: method,
+        amounts: {
+          finalTotal: expectedTotal,
+          amountReceived,
+          changeDue,
+        },
+      });
+
+      return {
+        ...paidOrder,
+        settlement: {
+          ...(paidOrder?.settlement || {}),
+          method,
+          amountReceived,
+          changeDue,
+          paymentStatus: 'paid',
+        },
+      };
+    } catch (error) {
+      logger.error('Mark order paid error:', error);
+      throw error;
+    }
+  }
+
+  static rebuildOrderItemsForUpdate(existingItems = [], normalizedItems = []) {
+    const availableExistingByMenuItem = new Map();
+
+    (existingItems || []).forEach((item) => {
+      const key = String(item.menu_item_id || '');
+      const bucket = availableExistingByMenuItem.get(key) || [];
+      bucket.push({
+        quantity: Number(item.quantity || 0),
+        unitPrice: Number(item.unit_price ?? 0),
+        sentToKitchen: Boolean(item.sent_to_kitchen),
+        kotId: item.kot_id || null,
+      });
+      availableExistingByMenuItem.set(key, bucket);
+    });
+
+    return (normalizedItems || []).flatMap((item) => {
+      const key = String(item.menuItemId || '');
+      const bucket = [...(availableExistingByMenuItem.get(key) || [])].sort((left, right) => {
+        if (left.sentToKitchen !== right.sentToKitchen) {
+          return left.sentToKitchen ? -1 : 1;
+        }
+
+        return Number(left.quantity || 0) - Number(right.quantity || 0);
+      });
+      let remainingQuantity = Number(item.quantity || 0);
+      const rebuiltItems = [];
+
+      bucket.forEach((existingItem) => {
+        if (remainingQuantity <= 0) {
+          return;
+        }
+
+        const carryQuantity = Math.min(remainingQuantity, Number(existingItem.quantity || 0));
+        if (carryQuantity <= 0) {
+          return;
+        }
+
+        rebuiltItems.push({
+          ...item,
+          quantity: carryQuantity,
+          unitPrice: Number(item.unitPrice ?? item.price ?? existingItem.unitPrice ?? 0),
+          sentToKitchen: Boolean(existingItem.sentToKitchen),
+          kotId: existingItem.kotId || null,
+        });
+        remainingQuantity -= carryQuantity;
+      });
+
+      if (remainingQuantity > 0) {
+        rebuiltItems.push({
+          ...item,
+          quantity: remainingQuantity,
+          unitPrice: Number(item.unitPrice ?? item.price ?? 0),
+          sentToKitchen: false,
+          kotId: null,
+        });
+      }
+
+      return rebuiltItems;
+    });
   }
 
   static async updateOrderItem(restaurantId, orderItemId, quantity) {
@@ -1908,7 +2211,7 @@ export class OrderService {
       const { data: order, error } = await supabase
         .from('orders')
         .update({
-          status: 'served',
+          status: 'completed',
           updated_at: new Date(),
         })
         .eq('id', orderId)
@@ -2088,14 +2391,16 @@ export class OrderService {
         .from('orders')
         .select(`
           *,
-          order_items (
-            id,
-            menu_item_id,
-            quantity,
-            unit_price,
-            menu_items (
-              name,
-              preparation_time
+        order_items (
+          id,
+          menu_item_id,
+          quantity,
+          unit_price,
+          sent_to_kitchen,
+          kot_id,
+          menu_items (
+            name,
+            preparation_time
             )
           ),
           tables!table_id (
@@ -2160,14 +2465,16 @@ export class OrderService {
         .from('orders')
         .select(`
           *,
-          order_items (
-            id,
-            menu_item_id,
-            quantity,
-            unit_price,
-            menu_items (
-              name,
-              preparation_time
+        order_items (
+          id,
+          menu_item_id,
+          quantity,
+          unit_price,
+          sent_to_kitchen,
+          kot_id,
+          menu_items (
+            name,
+            preparation_time
             )
           ),
           tables!table_id (
@@ -2201,14 +2508,16 @@ export class OrderService {
         .from('orders')
         .select(`
           *,
-          order_items (
-            id,
-            menu_item_id,
-            quantity,
-            unit_price,
-            menu_items (
-              name,
-              preparation_time
+        order_items (
+          id,
+          menu_item_id,
+          quantity,
+          unit_price,
+          sent_to_kitchen,
+          kot_id,
+          menu_items (
+            name,
+            preparation_time
             )
           ),
           tables!table_id (
@@ -2293,7 +2602,7 @@ export class OrderService {
 
       const { data: existingOrderItems, error: existingItemsError } = await supabase
         .from('order_items')
-        .select('menu_item_id, quantity, unit_price')
+        .select('menu_item_id, quantity, unit_price, sent_to_kitchen, kot_id')
         .eq('order_id', orderId);
 
       if (existingItemsError) {
@@ -2339,7 +2648,8 @@ export class OrderService {
       }
 
       try {
-        await this.addOrderItems(orderId, normalizedItems);
+        const rebuiltOrderItems = this.rebuildOrderItemsForUpdate(existingOrderItems || [], normalizedItems);
+        await this.addOrderItems(orderId, rebuiltOrderItems);
       } catch (addOrderItemsError) {
         if (existingOrderItems?.length) {
           try {
@@ -2349,6 +2659,8 @@ export class OrderService {
                 menuItemId: item.menu_item_id,
                 quantity: item.quantity,
                 unitPrice: Number(item.unit_price ?? 0),
+                sentToKitchen: Boolean(item.sent_to_kitchen),
+                kotId: item.kot_id || null,
               }))
             );
           } catch (restoreError) {
@@ -2448,14 +2760,16 @@ export class OrderService {
         .from('orders')
         .select(`
           *,
-          order_items (
-            id,
-            menu_item_id,
-            quantity,
-            unit_price,
-            menu_items (
-              name,
-              preparation_time
+        order_items (
+          id,
+          menu_item_id,
+          quantity,
+          unit_price,
+          sent_to_kitchen,
+          kot_id,
+          menu_items (
+            name,
+            preparation_time
             )
           ),
           tables!table_id (
@@ -2870,21 +3184,54 @@ export class OrderService {
         throw new Error('Add at least one item before sending to kitchen');
       }
 
-      const currentSnapshot = this.buildKitchenSnapshot(transformedOrder.items);
+      const pendingKitchenRows = (rawOrder.order_items || []).filter((item) => !item.sent_to_kitchen);
       const existingTickets = (kotMeta.kitchen?.tickets || []).map((ticket) => this.normalizeKitchenTicket(ticket));
-      const lastSentSnapshot = Array.isArray(kotMeta.kitchen?.lastSentSnapshot) ? kotMeta.kitchen.lastSentSnapshot : [];
-      const ticketItems =
-        lastSentSnapshot.length === 0
-          ? currentSnapshot.map((item) => ({ ...item, action: 'add' }))
-          : this.diffKitchenSnapshot(lastSentSnapshot, currentSnapshot);
+      const ticketItems = pendingKitchenRows.map((item) => ({
+        lineKey: `${item.id}`,
+        orderItemId: item.id,
+        menuItemId: item.menu_item_id,
+        name: item.menu_items?.name || '',
+        quantity: Number(item.quantity || 0),
+        note: this.sanitizeLineNote(kotMeta.lineDetails?.[item.menu_item_id]?.note || ''),
+        modifiers: this.parseModifierList(kotMeta.lineDetails?.[item.menu_item_id]?.modifiers || []),
+        station: kotMeta.lineDetails?.[item.menu_item_id]?.station || 'Main Kitchen',
+        categoryId: kotMeta.lineDetails?.[item.menu_item_id]?.categoryId || null,
+        categoryName: kotMeta.lineDetails?.[item.menu_item_id]?.categoryName || '',
+        unitPrice: Number(item.unit_price ?? 0),
+        detailsSignature: this.buildItemDetailsSignature({
+          itemNote: kotMeta.lineDetails?.[item.menu_item_id]?.note || '',
+          modifiers: kotMeta.lineDetails?.[item.menu_item_id]?.modifiers || [],
+          station: kotMeta.lineDetails?.[item.menu_item_id]?.station || 'Main Kitchen',
+          categoryName: kotMeta.lineDetails?.[item.menu_item_id]?.categoryName || '',
+        }),
+        action: 'add',
+      }));
 
       if (ticketItems.length === 0) {
         throw new Error('No new kitchen changes to send for this bill');
       }
 
       const now = new Date().toISOString();
+      const kitchenTicketId = randomUUID();
+      const { error: kitchenTicketInsertError } = await supabase
+        .from('kitchen_tickets')
+        .insert([{
+          id: kitchenTicketId,
+          restaurant_id: restaurantId,
+          order_id: orderId,
+          status: 'pending',
+          ticket_type: existingTickets.length === 0 ? 'send' : 'delta',
+          summary: this.summarizeKitchenActions(ticketItems),
+          created_at: now,
+          updated_at: now,
+        }]);
+
+      if (kitchenTicketInsertError) {
+        throw kitchenTicketInsertError;
+      }
+
       const nextTicket = this.normalizeKitchenTicket({
-        id: randomUUID(),
+        id: kitchenTicketId,
         sequence: existingTickets.length + 1,
         type: existingTickets.length === 0 ? 'send' : 'delta',
         status: 'pending',
@@ -2910,6 +3257,23 @@ export class OrderService {
           referenceId: `${orderId}:${nextTicket.id}`,
           reason: 'Recipe-based auto deduction on kitchen send',
         });
+      }
+
+      const pendingOrderItemIds = pendingKitchenRows.map((item) => item.id).filter(Boolean);
+      if (pendingOrderItemIds.length > 0) {
+        const { error: markItemsSentError } = await supabase
+          .from('order_items')
+          .update({
+            sent_to_kitchen: true,
+            kot_id: kitchenTicketId,
+            updated_at: now,
+          })
+          .in('id', pendingOrderItemIds)
+          .eq('order_id', orderId);
+
+        if (markItemsSentError) {
+          throw markItemsSentError;
+        }
       }
 
       const existingOnline = this.normalizeOnlineMeta(kotMeta.online, {
@@ -2944,7 +3308,14 @@ export class OrderService {
         online: nextOnline,
         kitchen: {
           ...kotMeta.kitchen,
-          lastSentSnapshot: currentSnapshot,
+          lastSentSnapshot: this.buildKitchenSnapshot(this.aggregateOrderItems(
+            (rawOrder.order_items || []).map((item) => ({
+              ...item,
+              sent_to_kitchen: pendingOrderItemIds.includes(item.id) ? true : item.sent_to_kitchen,
+              kot_id: pendingOrderItemIds.includes(item.id) ? kitchenTicketId : item.kot_id,
+            })),
+            kotMeta.lineDetails || {}
+          )),
           tickets: [...existingTickets, nextTicket],
         },
       };
@@ -2993,7 +3364,7 @@ export class OrderService {
   static async updateKitchenTicketStatus(restaurantId, orderId, ticketId, nextStatus) {
     try {
       const normalizedStatus = this.normalizeOrderStatus(nextStatus);
-      if (!['pending', 'preparing', 'ready', 'served'].includes(normalizedStatus)) {
+      if (!['pending', 'preparing', 'ready', 'completed'].includes(normalizedStatus)) {
         throw new Error('Unsupported kitchen ticket status');
       }
 
@@ -3016,7 +3387,8 @@ export class OrderService {
             ? existingTickets[ticketIndex].startedAt || now
             : existingTickets[ticketIndex].startedAt,
         readyAt: normalizedStatus === 'ready' ? now : existingTickets[ticketIndex].readyAt,
-        servedAt: normalizedStatus === 'served' ? now : existingTickets[ticketIndex].servedAt,
+        completedAt: normalizedStatus === 'completed' ? now : existingTickets[ticketIndex].completedAt,
+        servedAt: normalizedStatus === 'completed' ? now : existingTickets[ticketIndex].servedAt,
       };
       const nextTickets = existingTickets.map((ticket, index) => (index === ticketIndex ? targetTicket : ticket));
       const derivedOrderStatus = this.deriveOrderStatusFromTickets(nextTickets, rawOrder.status);
@@ -3025,7 +3397,7 @@ export class OrderService {
         paymentStatus: rawOrder.payment_status,
       });
       const nextOnlineWorkflowStatus = existingOnline.source
-        ? normalizedStatus === 'served'
+        ? normalizedStatus === 'completed'
           ? 'dispatched'
           : normalizedStatus
         : existingOnline.workflowStatus;
@@ -3039,6 +3411,19 @@ export class OrderService {
             paymentStatus: rawOrder.payment_status,
           })
         : existingOnline;
+
+      const { error: kitchenTicketUpdateError } = await supabase
+        .from('kitchen_tickets')
+        .update({
+          status: normalizedStatus,
+          updated_at: now,
+        })
+        .eq('id', ticketId)
+        .eq('order_id', orderId);
+
+      if (kitchenTicketUpdateError) {
+        throw kitchenTicketUpdateError;
+      }
 
       const { error: updateError } = await supabase
         .from('orders')

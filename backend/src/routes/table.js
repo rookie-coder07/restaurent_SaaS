@@ -26,6 +26,7 @@ router.put('/:tableId', checkPermission(['manage_tables', 'manage_menu']), table
 router.delete('/:tableId', checkPermission(['manage_menu']), tableController.deleteTable);
 router.post('/:tableId/reserve', checkPermission(['manage_tables', 'manage_menu', 'manage_orders']), validateRequest(reserveTableSchema), tableController.reserveTable);
 router.post('/:tableId/release', checkPermission(['manage_tables', 'manage_menu', 'manage_orders']), tableController.releaseTable);
+router.post('/:tableId/claim', checkPermission(['manage_orders']), tableController.claimTable);
 
 // Generate QR URLs
 router.post('/qr/generate', checkPermission(['manage_menu']), tableController.generateQRUrls);

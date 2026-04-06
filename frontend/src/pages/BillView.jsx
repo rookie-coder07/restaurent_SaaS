@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Loader, Printer } from 'lucide-react';
 import Card from '../components/common/Card';
 import Button from '../components/common/Button';
+import Input from '../components/common/Input';
 import Toast from '../components/common/Toast';
 import { orderAPI, restaurantAPI } from '../services/apiEndpoints';
 import { buildInvoiceData } from '../utils/invoice';
@@ -58,6 +59,9 @@ export default function BillView() {
   const [restaurant, setRestaurant] = useState(location.state?.restaurant || null);
   const [invoiceOverride, setInvoiceOverride] = useState(location.state?.invoice || null);
   const [printing, setPrinting] = useState(false);
+  const [markingPaid, setMarkingPaid] = useState(false);
+  const [confirmMethod, setConfirmMethod] = useState(String(location.state?.order?.paymentMethod || location.state?.invoice?.paymentMode || 'upi').toLowerCase());
+  const [receivedAmount, setReceivedAmount] = useState('');
 
   const returnTo = useMemo(
     () => resolveReturnPath(location.pathname, location.state?.returnTo || ''),
@@ -135,6 +139,9 @@ export default function BillView() {
     () => Number((invoice?.summary?.orderDiscountAmount || 0) + (invoice?.summary?.managerDiscountAmount || 0)),
     [invoice]
   );
+  const isPaid = String(order?.paymentStatus || invoice?.paymentStatus || '').toLowerCase() === 'paid';
+  const finalAmount = Number(invoice?.summary?.grandTotal || order?.finalAmount || order?.totalAmount || 0);
+  const numericReceivedAmount = receivedAmount === '' ? NaN : Number(receivedAmount);
 
   const handlePrint = async () => {
     if (!invoice) {
@@ -157,6 +164,35 @@ export default function BillView() {
       setError(printError.message || 'Failed to print the bill.');
     } finally {
       setPrinting(false);
+    }
+  };
+
+  const handleMarkPaid = async () => {
+    if (!order?.id || isPaid) {
+      return;
+    }
+
+    try {
+      setMarkingPaid(true);
+      setError('');
+      const response = await orderAPI.markOrderPaid(order.id, {
+        paymentMethod: confirmMethod,
+        amountReceived: numericReceivedAmount,
+      });
+      const paidOrder = response.data?.data || null;
+      setOrder(paidOrder);
+      setInvoiceOverride(
+        buildInvoiceData({
+          order: paidOrder,
+          restaurant: restaurant || {},
+          cashierName: paidOrder?.billing?.cashierName || location.state?.cashierName || '',
+        })
+      );
+      setReceivedAmount('');
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || 'Failed to mark the bill paid.');
+    } finally {
+      setMarkingPaid(false);
     }
   };
 
@@ -197,6 +233,49 @@ export default function BillView() {
       <style>{`@page { size: ${paperWidthMm}mm auto; margin: 0; }`}</style>
       {error ? <Toast type="error" message={error} /> : null}
 
+      {!isPaid ? (
+        <Card>
+          <div className="grid gap-4 lg:grid-cols-[1.15fr,0.85fr]">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--color-text-subtle)]">Payment Confirmation</p>
+              <h2 className="mt-2 text-xl font-bold text-[var(--color-text)]">Confirm exact amount</h2>
+              <p className="mt-2 text-sm text-[var(--color-text-muted)]">
+                Final amount to collect: {formatCurrency(finalAmount)}
+              </p>
+              {qrCodeImage ? (
+                <div className="mt-4 inline-flex rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card-muted)] p-3">
+                  <div className="text-center">
+                    <img src={qrCodeImage} alt="Payment QR" className="h-28 w-28 object-contain" />
+                    <p className="mt-2 text-sm font-semibold text-[var(--text-primary)]">
+                      Scan QR for {formatCurrency(finalAmount)}
+                    </p>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+            <div className="space-y-3">
+              <label className="block space-y-2">
+                <span className="text-sm font-medium text-[var(--text-primary)]">Payment method</span>
+                <select value={confirmMethod} onChange={(event) => setConfirmMethod(event.target.value)} className="input">
+                  <option value="upi">UPI</option>
+                  <option value="cash">Cash</option>
+                </select>
+              </label>
+              <Input
+                label="Received amount"
+                type="number"
+                value={receivedAmount}
+                onChange={(event) => setReceivedAmount(event.target.value)}
+                placeholder={finalAmount ? String(finalAmount) : '0'}
+              />
+              <p className="text-xs text-[var(--color-text-muted)]">
+                Confirmation is blocked if received amount is less than {formatCurrency(finalAmount)}.
+              </p>
+            </div>
+          </div>
+        </Card>
+      ) : null}
+
       <Card className="bill-print-toolbar">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
@@ -215,6 +294,13 @@ export default function BillView() {
                 Back
               </Button>
             </Link>
+            <Button
+              variant="secondary"
+              onClick={handleMarkPaid}
+              disabled={markingPaid || isPaid || !Number.isFinite(numericReceivedAmount) || numericReceivedAmount + 0.001 < finalAmount}
+            >
+              {markingPaid ? 'Updating...' : isPaid ? 'Paid' : 'Confirm Payment'}
+            </Button>
             <Button onClick={handlePrint} disabled={printing}>
               <Printer className="h-4 w-4" />
               {printing ? 'Printing...' : 'Print Bill'}

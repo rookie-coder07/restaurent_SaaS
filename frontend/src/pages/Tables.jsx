@@ -16,6 +16,7 @@ import { orderAPI, tableAPI } from '../services/apiEndpoints';
 import { useAuthStore } from '../context/authStore';
 import { useManagerStore } from '../context/managerStore';
 import { usePosStore } from '../context/posStore';
+import { useOrderSubscription } from '../hooks/useOrderSubscription';
 import { getTableActivity } from '../utils/managerPortal';
 import QRCodeModal from '../components/QRCodeModal';
 import { generateBulkQRCodes } from '../utils/qrCodeGenerator';
@@ -44,6 +45,18 @@ const TABLE_STATUS_META = {
     badge: 'border-rose-500/25 bg-rose-500/10 text-rose-700 dark:text-rose-300',
     dot: 'bg-rose-500',
   },
+  manual: {
+    label: 'Manual',
+    card: 'border-sky-500/20 bg-sky-500/8',
+    badge: 'border-sky-500/25 bg-sky-500/10 text-sky-700 dark:text-sky-300',
+    dot: 'bg-sky-500',
+  },
+  qr_locked: {
+    label: 'QR Locked',
+    card: 'border-fuchsia-500/20 bg-fuchsia-500/8',
+    badge: 'border-fuchsia-500/25 bg-fuchsia-500/10 text-fuchsia-700 dark:text-fuchsia-300',
+    dot: 'bg-fuchsia-500',
+  },
   reserved: {
     label: 'Reserved',
     card: 'border-amber-500/20 bg-amber-500/8',
@@ -62,6 +75,7 @@ export default function Tables() {
   const location = useLocation();
   const navigate = useNavigate();
   const currentUser = useAuthStore((state) => state.user);
+  const restaurantId = useAuthStore((state) => state.restaurantId);
   const userRole = useAuthStore((state) => state.user?.role);
   const currentPortal = location.pathname.startsWith('/admin') ? 'admin' : 'pos';
   const canManageTableConfig = userRole === 'owner';
@@ -151,7 +165,7 @@ export default function Tables() {
   );
 
   const availableCount = visibleTables.filter((table) => table.effectiveStatus === 'open').length;
-  const occupiedCount = visibleTables.filter((table) => table.effectiveStatus === 'busy').length;
+  const occupiedCount = visibleTables.filter((table) => ['busy', 'manual', 'qr_locked'].includes(table.effectiveStatus)).length;
   const reservedCount = visibleTables.filter((table) => table.effectiveStatus === 'reserved').length;
   const loadError = tablesError || openBillsError || null;
   const {
@@ -212,6 +226,12 @@ export default function Tables() {
       // Shared store errors are already exposed in UI state.
     });
   }, [preloadCoreData, refreshTableOverview]);
+
+  useOrderSubscription(restaurantId, () => {
+    refreshTableOverview({ force: true, silent: true }).catch(() => {
+      // Shared store errors are already surfaced in the page state.
+    });
+  });
 
   const openBilling = (table, order = null) => {
     if (!canOpenBilling) {
@@ -490,6 +510,12 @@ export default function Tables() {
                       <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--text-secondary)]">Seats</p>
                       <p className="mt-2 text-lg font-bold text-[var(--text-primary)]">{table.seatCapacity || '-'}</p>
                     </div>
+                    {table.assignedWaiterName ? (
+                      <div className="rounded-2xl bg-[var(--color-panel)]/70 px-3 py-3">
+                        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--text-secondary)]">Assigned Waiter</p>
+                        <p className="mt-2 text-sm font-bold text-[var(--text-primary)]">{table.assignedWaiterName}</p>
+                      </div>
+                    ) : null}
                     {duplicateBillCount > 0 ? (
                       <p className="text-xs font-medium text-amber-600 dark:text-amber-300">
                         {duplicateBillCount} more open bill{duplicateBillCount > 1 ? 's' : ''} need review
@@ -710,8 +736,10 @@ function TableDetails({
 
       {table.assignedWaiterId ? (
         <div className="rounded-[1.6rem] border border-[var(--border-color)] bg-[var(--color-panel)] p-4">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--text-secondary)]">Assigned Waiter</p>
-          <p className="mt-3 text-base font-bold text-[var(--text-primary)]">Assigned from manager portal</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--text-secondary)]">
+            {table.lockedByQr ? 'QR Waiter Lock' : 'Assigned Waiter'}
+          </p>
+          <p className="mt-3 text-base font-bold text-[var(--text-primary)]">{table.assignedWaiterName || 'Assigned from manager portal'}</p>
         </div>
       ) : null}
 
@@ -790,7 +818,7 @@ function TableDetails({
                           {formatDisplayOrderNumber(order)}
                         </p>
                         <p className="mt-1 text-xs text-[var(--text-secondary)]">
-                          {formatDate(order.updatedAt || order.createdAt)} • {order.status} • {order.paymentStatus || 'unpaid'}
+                          {formatDate(order.updatedAt || order.createdAt)} • {order.status} • {order.paymentStatus || 'pending'}
                         </p>
                       </div>
                       <div className="flex items-center gap-3">

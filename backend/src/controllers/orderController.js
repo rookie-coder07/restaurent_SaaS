@@ -24,6 +24,18 @@ function getOptionalNotes(body = {}) {
   return Object.prototype.hasOwnProperty.call(body, 'notes') ? body.notes : undefined;
 }
 
+function getOptionalRequestId(body = {}) {
+  if (Object.prototype.hasOwnProperty.call(body, 'requestId')) {
+    return body.requestId;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'request_id')) {
+    return body.request_id;
+  }
+
+  return undefined;
+}
+
 function getOptionalTotalAmount(body = {}) {
   if (Object.prototype.hasOwnProperty.call(body, 'totalAmount')) {
     return Number(body.totalAmount);
@@ -215,6 +227,7 @@ function extractOnlineOrderFields(body = {}) {
 export const createOrder = asyncHandler(async (req, res) => {
   const orderOrigin = req.orderOrigin || (req.user ? 'pos' : 'qr');
   const normalizedOrder = {
+    requestId: getOptionalRequestId(req.body),
     tableId: getTableIdFromBody(req.body) ?? null,
     items: (req.body.items || []).map((item) => ({
       menuItemId: item.menuItemId || item.itemId || item.id,
@@ -231,6 +244,7 @@ export const createOrder = asyncHandler(async (req, res) => {
     notes: getOptionalNotes(req.body) ?? '',
     requiresWaiterApproval: !req.user,
     origin: orderOrigin,
+    orderSource: orderOrigin === 'qr' ? 'qr' : 'manual',
     online: extractOnlineOrderFields(req.body),
   };
 
@@ -435,7 +449,22 @@ export const settleOrder = asyncHandler(async (req, res) => {
     actorName: req.user?.name || req.user?.email || 'Unknown user',
   });
 
-  return sendSuccess(res, 200, settlement, 'Order settled successfully');
+  return sendSuccess(res, 200, settlement, 'Bill created successfully');
+});
+
+export const markOrderPaid = asyncHandler(async (req, res) => {
+  const { orderId } = req.params;
+
+  const payment = await OrderService.markOrderPaid(req.restaurantId, orderId, {
+    method: getOptionalPaymentMethod(req.body),
+    amountReceived: getOptionalAmountReceived(req.body),
+    paymentNote: getOptionalPaymentNote(req.body) ?? '',
+    actorRole: req.user?.role,
+    actorUserId: req.user?.userId,
+    actorName: req.user?.name || req.user?.email || 'Unknown user',
+  });
+
+  return sendSuccess(res, 200, payment, 'Bill marked paid successfully');
 });
 
 export const getLoyaltyProfile = asyncHandler(async (req, res) => {

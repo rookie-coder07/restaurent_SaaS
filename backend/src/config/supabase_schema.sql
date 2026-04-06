@@ -87,10 +87,13 @@ CREATE TABLE IF NOT EXISTS orders (
   customer_name VARCHAR(255),
   status VARCHAR(50) DEFAULT 'pending',
   total_amount DECIMAL(10, 2),
+  final_amount DECIMAL(10, 2),
   display_order_number VARCHAR(50),
-  payment_method VARCHAR(50) DEFAULT 'cash',
-  payment_status VARCHAR(50) DEFAULT 'unpaid',
+  request_id UUID,
+  payment_method VARCHAR(50) DEFAULT 'cash' CHECK (payment_method IN ('cash', 'upi')),
+  payment_status VARCHAR(50) DEFAULT 'pending' CHECK (payment_status IN ('pending', 'paid', 'failed')),
   order_type VARCHAR(50) DEFAULT 'dine-in',
+  order_source VARCHAR(20) DEFAULT 'manual',
   notes TEXT,
   created_at TIMESTAMP DEFAULT now(),
   updated_at TIMESTAMP DEFAULT now()
@@ -103,8 +106,21 @@ CREATE TABLE IF NOT EXISTS order_items (
   menu_item_id UUID NOT NULL REFERENCES menu_items(id) ON DELETE CASCADE,
   quantity INT NOT NULL,
   unit_price DECIMAL(10, 2) NOT NULL,
+  sent_to_kitchen BOOLEAN NOT NULL DEFAULT false,
+  kot_id UUID,
   special_instructions TEXT,
   item_status VARCHAR(50) DEFAULT 'pending',
+  created_at TIMESTAMP DEFAULT now(),
+  updated_at TIMESTAMP DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS kitchen_tickets (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  restaurant_id UUID NOT NULL REFERENCES restaurants(id) ON DELETE CASCADE,
+  order_id UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+  status VARCHAR(50) NOT NULL DEFAULT 'pending',
+  ticket_type VARCHAR(20) NOT NULL DEFAULT 'send',
+  summary TEXT,
   created_at TIMESTAMP DEFAULT now(),
   updated_at TIMESTAMP DEFAULT now()
 );
@@ -117,6 +133,8 @@ CREATE TABLE IF NOT EXISTS tables (
   capacity INT NOT NULL,
   location VARCHAR(100) DEFAULT 'main',
   status VARCHAR(50) DEFAULT 'available',
+  assigned_to UUID REFERENCES users(id) ON DELETE SET NULL,
+  locked_by_qr BOOLEAN DEFAULT false,
   reserved_by VARCHAR(120),
   reservation_time TIMESTAMP,
   qr_code VARCHAR(255),
@@ -218,9 +236,12 @@ CREATE INDEX idx_menu_items_category_id ON menu_items(category_id);
 CREATE INDEX idx_orders_restaurant_id ON orders(restaurant_id);
 CREATE INDEX idx_orders_status ON orders(status);
 CREATE INDEX idx_orders_display_order_number ON orders(display_order_number);
+CREATE UNIQUE INDEX idx_orders_request_id_unique ON orders(request_id) WHERE request_id IS NOT NULL;
 CREATE INDEX idx_password_reset_requests_restaurant_status ON password_reset_requests(restaurant_id, status, requested_at DESC);
 CREATE UNIQUE INDEX idx_password_reset_requests_pending_user ON password_reset_requests(user_id) WHERE status = 'pending';
 CREATE INDEX idx_order_items_order_id ON order_items(order_id);
+CREATE INDEX idx_order_items_sent_to_kitchen ON order_items(order_id, sent_to_kitchen);
+CREATE INDEX idx_kitchen_tickets_order_id ON kitchen_tickets(order_id);
 CREATE INDEX idx_tables_restaurant_id ON tables(restaurant_id);
 CREATE INDEX idx_daily_analytics_restaurant_id ON daily_analytics(restaurant_id);
 CREATE INDEX idx_daily_analytics_date ON daily_analytics(date);

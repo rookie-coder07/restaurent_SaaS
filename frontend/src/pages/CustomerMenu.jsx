@@ -25,6 +25,15 @@ import { useCustomerCartStore } from '../context/customerCartStore';
 
 const PRODUCTION_API_BASE_URL = 'https://restaurent-backend-448t.onrender.com/api';
 const DEVELOPMENT_API_BASE_URL = 'http://localhost:3000/api';
+
+function buildStableRequestId() {
+  if (typeof globalThis !== 'undefined' && globalThis.crypto?.randomUUID) {
+    return globalThis.crypto.randomUUID();
+  }
+
+  return `req-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
 export default function CustomerMenu() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -37,6 +46,7 @@ export default function CustomerMenu() {
   const isValidTableNumber = !tableNumber || /^[A-Za-z0-9][A-Za-z0-9\s-]*$/.test(tableNumber);
   const hasValidQrParams = Boolean(tableNumber || tableId) && isValidUuid && isValidTableNumber;
   const cartKey = tableId || `table-${tableNumber}`;
+  const placeOrderRequestRef = useRef({ id: '', signature: '' });
 
   const [showCart, setShowCart] = useState(false);
   const [isPlacingOrder, setIsPlacingOrder] = useState(false);
@@ -253,8 +263,29 @@ export default function CustomerMenu() {
         paymentMethod: 'cash',
       };
 
-      const response = await customerAPI.placeOrder(orderData);
+      const requestSignature = JSON.stringify({
+        tableId: orderData.tableId || '',
+        tableNumber: orderData.tableNumber || '',
+        totalAmount: Number(orderData.totalAmount || 0),
+        items: cart
+          .map((item) => `${item.id}:${Number(item.quantity || 0)}:${Number(item.price || 0).toFixed(2)}`)
+          .sort()
+          .join('|'),
+      });
+
+      if (placeOrderRequestRef.current.signature !== requestSignature || !placeOrderRequestRef.current.id) {
+        placeOrderRequestRef.current = {
+          id: buildStableRequestId(),
+          signature: requestSignature,
+        };
+      }
+
+      const response = await customerAPI.placeOrder({
+        ...orderData,
+        requestId: placeOrderRequestRef.current.id,
+      });
       const createdOrder = response.data?.data;
+      placeOrderRequestRef.current = { id: '', signature: '' };
 
       setOrderStatus('success');
       setOrderMessage('Order placed successfully! A waiter will review it shortly before it is sent to the kitchen.');

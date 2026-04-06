@@ -103,6 +103,7 @@ function buildPrintShell({ title, paperWidthMm, bodyMarkup }) {
 
 export function buildBillPrintHtml({ order, restaurant, invoice, cashierName }) {
   const resolvedInvoice = invoice || buildInvoiceData({ order, restaurant, cashierName });
+  const isPaid = String(resolvedInvoice?.paymentStatus || order?.paymentStatus || '').toLowerCase() === 'paid';
   const { receiptWidthMm } = getRestaurantPrinterSettings(restaurant);
 
   const itemsMarkup = (resolvedInvoice.items || [])
@@ -129,7 +130,7 @@ export function buildBillPrintHtml({ order, restaurant, invoice, cashierName }) 
     : '';
 
   const qrMarkup = resolvedInvoice.paymentQrCodeUrl
-    ? `<div class="center" style="margin-top:8px;"><img src="${escapeHtml(resolvedInvoice.paymentQrCodeUrl)}" alt="Payment QR" style="max-width:100%;height:auto;max-height:110px;" /></div>`
+    ? `<div class="center" style="margin-top:8px;"><img src="${escapeHtml(resolvedInvoice.paymentQrCodeUrl)}" alt="Payment QR" style="max-width:100%;height:auto;max-height:110px;" /><div style="margin-top:6px;font-weight:700;">Scan QR for ${escapeHtml(formatCurrency(resolvedInvoice.summary.grandTotal))}</div></div>`
     : '';
 
   const bodyMarkup = `
@@ -168,7 +169,7 @@ export function buildBillPrintHtml({ order, restaurant, invoice, cashierName }) 
     <div class="separator">--------------------------------</div>
     <div class="summary strong">
       <span>Final Amount</span><span>${escapeHtml(formatCurrency(resolvedInvoice.summary.grandTotal))}</span>
-      <span>Paid Amount</span><span>${escapeHtml(formatCurrency(resolvedInvoice.paidAmount || resolvedInvoice.summary.grandTotal))}</span>
+      <span>Paid Amount</span><span>${escapeHtml(formatCurrency(isPaid ? (resolvedInvoice.paidAmount || resolvedInvoice.summary.grandTotal) : 0))}</span>
       <span>Payment</span><span>${escapeHtml(String(resolvedInvoice.paymentMethod || 'cash').toUpperCase())}</span>
     </div>
     ${qrMarkup}

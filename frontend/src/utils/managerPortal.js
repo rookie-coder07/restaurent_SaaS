@@ -160,21 +160,27 @@ export function getTableActivity(
       ACTIVE_ORDER_STATUSES.has(order.status)
   );
   const closure = tableClosures[table.id];
-  const assignedWaiterId = tableAssignments[table.id] || '';
+  const assignedWaiterId = table.assignedTo || tableAssignments[table.id] || '';
   const isClosed = table.status === 'closed' || Boolean(closure?.closed);
+  const isQrLocked = Boolean(table.lockedByQr);
+  const hasActiveOrders = activeOrders.length > 0;
   const mergedMeta = buildMergedTableMeta(table, allTables, tableMerges);
 
   return {
     ...table,
     activeOrders,
     assignedWaiterId,
+    assignedWaiterName: table.assignedWaiterName || '',
+    lockedByQr: isQrLocked,
     isClosed,
     closureNote: closure?.note || '',
     ...mergedMeta,
     effectiveStatus: closure?.closed
       ? 'closed'
-      : activeOrders.length > 0
-        ? 'busy'
+      : isQrLocked
+        ? 'qr_locked'
+        : hasActiveOrders
+          ? 'manual'
         : table.status === 'closed'
           ? 'closed'
           : table.status === 'reserved' || table.reservedBy

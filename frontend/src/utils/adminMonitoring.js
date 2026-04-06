@@ -150,7 +150,7 @@ export function buildSmartNotifications({
       notifications.push({
         id: `bill-${order.id}`,
         title: `Bill generated for ${formatDisplayOrderNumber(order)}`,
-        detail: `${formatCurrency(order.totalAmount || order.total || 0)} is still unpaid.`,
+        detail: `${formatCurrency(order.totalAmount || order.total || 0)} is still pending payment.`,
         priority: Number(order.totalAmount || order.total || 0) >= 3000 ? 'critical' : 'warning',
         timestamp: order.updatedAt || order.createdAt,
         category: 'billing',

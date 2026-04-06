@@ -94,13 +94,43 @@ export class RestaurantService {
     };
   }
 
-  static async validateAssignedTables(restaurantId, assignedTables = []) {
+  static sanitizeStaffAssignmentRows(staffUsers = []) {
+    const orderedUsers = [...(staffUsers || [])].sort((left, right) => {
+      const leftTime = new Date(left.updated_at || left.created_at || 0).getTime();
+      const rightTime = new Date(right.updated_at || right.created_at || 0).getTime();
+      return rightTime - leftTime;
+    });
+
+    const claimedTables = new Set();
+
+    return orderedUsers.map((user) => {
+      const currentAssignedTables = Array.isArray(user.assigned_tables) ? user.assigned_tables.filter(Boolean) : [];
+      const nextAssignedTables = currentAssignedTables.filter((tableId) => {
+        if (claimedTables.has(tableId)) {
+          return false;
+        }
+
+        claimedTables.add(tableId);
+        return true;
+      });
+
+      return {
+        ...user,
+        assigned_tables: nextAssignedTables,
+      };
+    });
+  }
+
+  static async validateAssignedTables(restaurantId, assignedTables = [], options = {}) {
     const normalizedTableIds = Array.from(
       new Set((assignedTables || []).map((tableId) => String(tableId || '').trim()).filter(Boolean))
     );
 
     if (normalizedTableIds.length === 0) {
-      return [];
+      return {
+        assignedTables: [],
+        conflictingAssignments: [],
+      };
     }
 
     const { data: tables, error } = await supabase
@@ -118,7 +148,44 @@ export class RestaurantService {
       throw new Error('One or more selected tables do not belong to this restaurant');
     }
 
-    return normalizedTableIds;
+    const { data: staffUsers, error: staffError } = await supabase
+      .from('users')
+      .select('id, name, email, assigned_tables')
+      .eq('restaurant_id', restaurantId)
+      .eq('role', 'staff');
+
+    if (staffError) {
+      throw staffError;
+    }
+
+    const excludedStaffId = String(options.excludeStaffId || '').trim();
+    const conflictingAssignments = [];
+
+    this.sanitizeStaffAssignmentRows(staffUsers || []).forEach((user) => {
+      if (!user?.id || (excludedStaffId && user.id === excludedStaffId)) {
+        return;
+      }
+
+      const currentAssignedTables = Array.isArray(user.assigned_tables) ? user.assigned_tables.filter(Boolean) : [];
+      currentAssignedTables.forEach((tableId) => {
+        if (normalizedTableIds.includes(tableId)) {
+          conflictingAssignments.push({
+            tableId,
+            ownerName: user.name || user.email || 'another waiter',
+          });
+        }
+      });
+    });
+
+    if (conflictingAssignments.length > 0 && !options.allowTableReassign) {
+      const firstConflict = conflictingAssignments[0];
+      throw new Error(`Table is already assigned to ${firstConflict.ownerName}`);
+    }
+
+    return {
+      assignedTables: normalizedTableIds,
+      conflictingAssignments,
+    };
   }
 
   // ============ RESTAURANT MANAGEMENT ============
@@ -474,9 +541,12 @@ export class RestaurantService {
       }
 
       const passwordHash = await AuthService.hashPassword(staffData.password);
-      const assignedTables = staffData.role === 'staff'
-        ? await this.validateAssignedTables(restaurantId, staffData.assignedTables)
-        : [];
+      const assignedTableValidation = staffData.role === 'staff'
+        ? await this.validateAssignedTables(restaurantId, staffData.assignedTables, {
+            allowTableReassign: Boolean(staffData.allowTableReassign),
+          })
+        : { assignedTables: [], conflictingAssignments: [] };
+      const assignedTables = assignedTableValidation.assignedTables;
       const staffPayload = {
         restaurant_id: restaurantId,
         name: staffData.name,
@@ -510,6 +580,18 @@ export class RestaurantService {
         throw error;
       }
 
+      if (staffData.role === 'staff' && assignedTableValidation.conflictingAssignments.length > 0) {
+        await this.releaseAssignedTablesFromOtherWaiters(
+          restaurantId,
+          user.id,
+          assignedTableValidation.conflictingAssignments.map((entry) => entry.tableId)
+        );
+      }
+
+      if (staffData.role === 'staff') {
+        await this.reconcileAssignedTables(restaurantId);
+      }
+
       return this.transformStaffUser(user);
     } catch (error) {
       logger.error('❌ Create staff user error:', error);
@@ -517,8 +599,97 @@ export class RestaurantService {
     }
   }
 
+  static async releaseAssignedTablesFromOtherWaiters(restaurantId, targetStaffId, tableIds = []) {
+    const normalizedTableIds = Array.from(new Set((tableIds || []).filter(Boolean)));
+
+    if (normalizedTableIds.length === 0) {
+      return;
+    }
+
+    const { data: staffUsers, error } = await supabase
+      .from('users')
+      .select('id, assigned_tables')
+      .eq('restaurant_id', restaurantId)
+      .eq('role', 'staff');
+
+    if (error) {
+      throw error;
+    }
+
+    const updates = (staffUsers || [])
+      .filter((user) => user.id && user.id !== targetStaffId)
+      .map(async (user) => {
+        const currentAssignedTables = Array.isArray(user.assigned_tables) ? user.assigned_tables.filter(Boolean) : [];
+        const nextAssignedTables = currentAssignedTables.filter((tableId) => !normalizedTableIds.includes(tableId));
+
+        if (nextAssignedTables.length === currentAssignedTables.length) {
+          return;
+        }
+
+        const { error: updateError } = await supabase
+          .from('users')
+          .update({
+            assigned_tables: nextAssignedTables,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('restaurant_id', restaurantId)
+          .eq('id', user.id);
+
+        if (updateError) {
+          throw updateError;
+        }
+      });
+
+    await Promise.all(updates);
+  }
+
+  static async reconcileAssignedTables(restaurantId) {
+    const { data: staffUsers, error } = await supabase
+      .from('users')
+      .select('id, assigned_tables, updated_at, created_at')
+      .eq('restaurant_id', restaurantId)
+      .eq('role', 'staff');
+
+    if (error) {
+      throw error;
+    }
+
+    const sanitizedUsers = this.sanitizeStaffAssignmentRows(staffUsers || []);
+    const updates = [];
+
+    sanitizedUsers.forEach((user) => {
+      const currentAssignedTables = Array.isArray(user.assigned_tables) ? user.assigned_tables.filter(Boolean) : [];
+      const originalUser = (staffUsers || []).find((entry) => entry.id === user.id);
+      const originalAssignedTables = Array.isArray(originalUser?.assigned_tables) ? originalUser.assigned_tables.filter(Boolean) : [];
+      const nextAssignedTables = currentAssignedTables;
+
+      if (nextAssignedTables.length !== originalAssignedTables.length) {
+        updates.push(
+          supabase
+            .from('users')
+            .update({
+              assigned_tables: nextAssignedTables,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('restaurant_id', restaurantId)
+            .eq('id', user.id)
+        );
+      }
+    });
+
+    if (updates.length > 0) {
+      const results = await Promise.all(updates);
+      const failedResult = results.find((result) => result.error);
+      if (failedResult?.error) {
+        throw failedResult.error;
+      }
+    }
+  }
+
   static async getStaffUsers(restaurantId, filters = {}) {
     try {
+      await this.reconcileAssignedTables(restaurantId);
+
       let query = supabase
         .from('users')
         .select('*')
@@ -537,7 +708,9 @@ export class RestaurantService {
 
       if (error) throw error;
 
-      const allStaff = (users || []).map((user) => this.transformStaffUser(user));
+      const allStaff = this
+        .sanitizeStaffAssignmentRows(users || [])
+        .map((user) => this.transformStaffUser(user));
       const skip = filters.skip || 0;
       const limit = filters.limit || 50;
 
@@ -587,6 +760,7 @@ export class RestaurantService {
       }
 
       const nextRole = updateData.role || existingUser.role;
+      let conflictingAssignments = [];
       const payload = {
         updated_at: new Date().toISOString(),
       };
@@ -622,9 +796,18 @@ export class RestaurantService {
       }
 
       if (updateData.assignedTables !== undefined || nextRole !== 'staff') {
-        payload.assigned_tables = nextRole === 'staff'
-          ? await this.validateAssignedTables(restaurantId, updateData.assignedTables ?? existingUser.assigned_tables)
-          : [];
+        const assignedTableValidation = nextRole === 'staff'
+          ? await this.validateAssignedTables(
+              restaurantId,
+              updateData.assignedTables ?? existingUser.assigned_tables,
+              {
+                excludeStaffId: staffId,
+                allowTableReassign: Boolean(updateData.allowTableReassign),
+              }
+            )
+          : { assignedTables: [], conflictingAssignments: [] };
+        payload.assigned_tables = assignedTableValidation.assignedTables;
+        conflictingAssignments = assignedTableValidation.conflictingAssignments;
       }
 
       const { data: user, error } = await supabase
@@ -643,6 +826,18 @@ export class RestaurantService {
         }
 
         throw error || new Error('Failed to update staff user');
+      }
+
+      if (Array.isArray(conflictingAssignments) && conflictingAssignments.length > 0) {
+        await this.releaseAssignedTablesFromOtherWaiters(
+          restaurantId,
+          staffId,
+          conflictingAssignments.map((entry) => entry.tableId)
+        );
+      }
+
+      if (nextRole === 'staff' || existingUser.role === 'staff') {
+        await this.reconcileAssignedTables(restaurantId);
       }
 
       return this.transformStaffUser(user);

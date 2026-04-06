@@ -92,17 +92,13 @@ export default function ManagerWaiters() {
       new Set([...(targetWaiter.assignedTables || []).filter(Boolean), tableId])
     );
 
-    const updateRequests = [restaurantAPI.updateStaff(waiterId, { assignedTables: nextTargetAssignments })];
-
     if (currentlyAssignedWaiter && currentlyAssignedWaiter.id !== waiterId) {
-      updateRequests.push(
-        restaurantAPI.updateStaff(currentlyAssignedWaiter.id, {
-          assignedTables: (currentlyAssignedWaiter.assignedTables || []).filter((assignedTableId) => assignedTableId !== tableId),
-        })
-      );
+      throw new Error(`Remove Table ${tables.find((table) => table.id === tableId)?.tableNumber || ''} from ${currentlyAssignedWaiter.name} first.`);
     }
 
-    await Promise.all(updateRequests);
+    await restaurantAPI.updateStaff(waiterId, {
+      assignedTables: nextTargetAssignments,
+    });
     assignTable(tableId, waiterId);
     logWaiterActivity({ waiterId, action: 'assigned_table', tableId });
     await Promise.allSettled([refetchStaff(), refetchTables(), refetchOrders()]);
@@ -161,21 +157,7 @@ export default function ManagerWaiters() {
       return;
     }
 
-    setError('');
-
-    try {
-      await persistTableAssignment(editingAllocation.tableId, nextWaiterId);
-      logWaiterActivity({
-        waiterId: nextWaiterId,
-        action: 'reassigned_table',
-        tableId: editingAllocation.tableId,
-      });
-      setSuccess(`Table ${editingAllocation.tableNumber} reassigned.`);
-      setEditingAllocation(null);
-      setNextWaiterId('');
-    } catch (requestError) {
-      setError(requestError.response?.data?.message || requestError.message || 'Failed to reassign the table.');
-    }
+    setError('Remove this table from the current waiter first, then assign it to another waiter.');
   };
 
   const removeAllocation = async (tableId, waiterId, tableNumber) => {
@@ -203,7 +185,7 @@ export default function ManagerWaiters() {
             (table) =>
               table.effectiveStatus !== 'closed' &&
               !table.isMergedPrimary &&
-              (!persistedTableAssignments[table.id] || persistedTableAssignments[table.id] === waiter.id)
+              !persistedTableAssignments[table.id]
           );
 
           return (

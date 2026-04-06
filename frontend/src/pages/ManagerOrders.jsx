@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Card from '../components/common/Card';
 import Button from '../components/common/Button';
@@ -10,7 +10,7 @@ import { useApi } from '../hooks/useApi';
 import { useAuthStore } from '../context/authStore';
 import { orderAPI, menuAPI, restaurantAPI } from '../services/apiEndpoints';
 import { formatCurrency, formatDisplayOrderNumber } from '../utils/formatters';
-import { autoPrintBill, printKotReceipt } from '../utils/printerService';
+import { printKotReceipt } from '../utils/printerService';
 import { buildInvoiceData, calculateInvoiceSummary, getRestaurantBillingSettings } from '../utils/invoice';
 
 function normalizeId(value) {
@@ -35,6 +35,26 @@ function normalizeMenuItem(item) {
   };
 }
 
+function buildStableRequestId() {
+  if (typeof globalThis !== 'undefined' && globalThis.crypto?.randomUUID) {
+    return globalThis.crypto.randomUUID();
+  }
+
+  return `req-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function createDraftRequestSignature({ items = [], notes = '', customerName = '', customerPhone = '' } = {}) {
+  return JSON.stringify({
+    items: items
+      .map((item) => `${item.menuItemId}:${Number(item.quantity || 0)}:${Number(item.unitPrice || 0).toFixed(2)}`)
+      .sort()
+      .join('|'),
+    notes: String(notes || '').trim(),
+    customerName: String(customerName || '').trim(),
+    customerPhone: String(customerPhone || '').trim(),
+  });
+}
+
 export default function ManagerOrders() {
   const navigate = useNavigate();
   const user = useAuthStore((state) => state.user);
@@ -56,6 +76,8 @@ export default function ManagerOrders() {
   const [success, setSuccess] = useState('');
   const [showCustomer, setShowCustomer] = useState(false);
   const [showSettleModal, setShowSettleModal] = useState(false);
+  const createRequestRef = useRef({ id: '', signature: '' });
+  const [hasPendingKitchenItems, setHasPendingKitchenItems] = useState(false);
 
   const menuItems = useMemo(
     () => (menuData?.items || []).map(normalizeMenuItem).filter((item) => item.isAvailable),
@@ -153,6 +175,7 @@ export default function ManagerOrders() {
         },
       ];
     });
+    setHasPendingKitchenItems(true);
   };
 
   const changeDraftQuantity = (menuItemId, delta) => {
@@ -165,6 +188,7 @@ export default function ManagerOrders() {
         )
         .filter((item) => Number(item.quantity || 0) > 0)
     );
+    setHasPendingKitchenItems(true);
   };
 
   const resetComposer = () => {
@@ -179,6 +203,8 @@ export default function ManagerOrders() {
     setShowSettleModal(false);
     setError('');
     setSuccess('');
+    createRequestRef.current = { id: '', signature: '' };
+    setHasPendingKitchenItems(false);
   };
 
   const persistDraftOrder = async ({ sendKitchen = false } = {}) => {
@@ -202,12 +228,35 @@ export default function ManagerOrders() {
       customerPhone: customerPhone.trim(),
     };
 
-    const response = draftOrderId ? await orderAPI.updateOrder(draftOrderId, payload) : await orderAPI.createOrder(payload);
+    const requestSignature = createDraftRequestSignature({
+      items: payload.items,
+      notes: payload.notes,
+      customerName: payload.customerName,
+      customerPhone: payload.customerPhone,
+    });
+
+    if (!draftOrderId && (createRequestRef.current.signature !== requestSignature || !createRequestRef.current.id)) {
+      createRequestRef.current = {
+        id: buildStableRequestId(),
+        signature: requestSignature,
+      };
+    }
+
+    const response = draftOrderId
+      ? await orderAPI.updateOrder(draftOrderId, payload)
+      : await orderAPI.createOrder({
+          ...payload,
+          requestId: createRequestRef.current.id,
+        });
     let savedOrder = response.data?.data;
+    if (savedOrder?.id) {
+      createRequestRef.current = { id: '', signature: '' };
+    }
 
     if (sendKitchen) {
       const sendResponse = await orderAPI.sendToKitchen(savedOrder.id);
       savedOrder = sendResponse.data?.data?.order || savedOrder;
+      setHasPendingKitchenItems(false);
     }
 
     setDraftOrderId(savedOrder?.id || '');
@@ -279,23 +328,9 @@ export default function ManagerOrders() {
         restaurant: restaurantProfile,
         cashierName: user?.name || user?.email || 'Manager',
       });
-      let autoPrintError = '';
+      const autoPrintError = '';
 
-      try {
-        const printResult = await autoPrintBill({
-          order: settledOrder,
-          restaurant: restaurantProfile,
-          invoice: invoiceData,
-          cashierName: user?.name || user?.email || 'Manager',
-        });
-        if (printResult?.fallback && printResult?.error) {
-          autoPrintError = 'Billing printer was unavailable, so browser print opened instead.';
-        }
-      } catch (printError) {
-        autoPrintError = printError.message || 'Auto-print failed. Use Print Bill manually.';
-      }
-
-      setSuccess(`${formatDisplayOrderNumber(settledOrder)} settled.`);
+      setSuccess(`${formatDisplayOrderNumber(settledOrder)} bill created and waiting for payment confirmation.`);
       resetComposer();
       await Promise.allSettled([refetchMenu(), refetchCategories(), refetchProfile()]);
       navigate(`/manager/bills/${settledOrder?.id || orderId}`, {
@@ -424,13 +459,16 @@ export default function ManagerOrders() {
           ) : null}
 
           <div className="grid gap-3 sm:grid-cols-2">
-            <Button onClick={handleSendToKitchen} disabled={loadingAction || draftItems.length === 0}>
+            <Button onClick={handleSendToKitchen} disabled={loadingAction || draftItems.length === 0 || !hasPendingKitchenItems}>
               {loadingAction ? 'Working...' : 'Send to Kitchen'}
             </Button>
             <Button variant="secondary" onClick={openSettleModal} disabled={loadingAction || draftItems.length === 0}>
-              {loadingAction ? 'Working...' : 'Settle Bill'}
+              {loadingAction ? 'Working...' : 'Create Bill'}
             </Button>
           </div>
+          {!hasPendingKitchenItems && draftItems.length > 0 ? (
+            <p className="text-sm font-medium text-amber-300">No new items to send.</p>
+          ) : null}
         </Card>
       </div>
 

@@ -50,7 +50,7 @@ function PaymentPanel({
       {activeOrder ? (
         <div className="mt-4 rounded-[1.4rem] border border-[var(--border-color)] bg-[var(--bg-card-muted)] px-4 py-3 text-sm text-[var(--text-secondary)]">
           <p className="font-semibold text-[var(--text-primary)]">Open bill status: {activeOrder.status}</p>
-          <p className="mt-1">Payment status: {activeOrder.paymentStatus || 'unpaid'}</p>
+          <p className="mt-1">Payment status: {activeOrder.paymentStatus || 'pending'}</p>
         </div>
       ) : null}
 

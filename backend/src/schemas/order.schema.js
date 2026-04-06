@@ -24,6 +24,8 @@ const paymentMethodSchema = Joi.string().trim().lowercase().valid(...PAYMENT_MET
 const tableLabelSchema = Joi.string().trim().max(30).pattern(/^[A-Za-z0-9][A-Za-z0-9\s-]*$/);
 
 export const createOrderSchema = Joi.object({
+  requestId: Joi.string().uuid().optional(),
+  request_id: Joi.string().uuid().optional(),
   tableId: Joi.string().uuid().optional().allow(null),
   table_id: Joi.string().uuid().optional().allow(null),
   qrCodeData: Joi.string().trim().optional(),
@@ -90,6 +92,15 @@ export const settleOrderSchema = Joi.object({
   'redeem_points'
 );
 
+export const markOrderPaidSchema = Joi.object({
+  paymentMethod: paymentMethodSchema.optional(),
+  payment_method: paymentMethodSchema.optional(),
+  amountReceived: Joi.number().min(0).precision(2).optional(),
+  amount_received: Joi.number().min(0).precision(2).optional(),
+  paymentNote: Joi.string().trim().max(200).optional().allow(''),
+  payment_note: Joi.string().trim().max(200).optional().allow(''),
+}).or('amountReceived', 'amount_received');
+
 export const approveDiscountSchema = Joi.object({
   percent: Joi.number().greater(0).max(100).precision(2).required(),
   note: Joi.string().trim().max(200).optional().allow(''),
@@ -131,7 +142,7 @@ export const updateOnlineOrderSchema = Joi.object({
 
 export const updateKitchenTicketStatusSchema = Joi.object({
   status: Joi.string()
-    .valid('pending', 'preparing', 'ready', 'served')
+    .valid('pending', 'preparing', 'ready', 'completed', 'served')
     .required(),
 });
 

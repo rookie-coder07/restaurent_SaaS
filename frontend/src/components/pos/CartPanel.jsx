@@ -31,6 +31,7 @@ function CartPanel({
   isSettleDisabled = false,
   isCancelDisabled = false,
   billingMessage = '',
+  kitchenMessage = '',
 }) {
   return (
     <section className="flex h-full flex-col rounded-[2rem] border border-[var(--border-color)] bg-[var(--bg-card)] p-4 shadow-[var(--shadow-card)] sm:p-5">
@@ -178,6 +179,11 @@ function CartPanel({
           {billingMessage ? (
             <div className="rounded-[1.3rem] border border-[var(--border-color)] bg-[var(--bg-card-muted)] px-4 py-3 text-sm font-medium text-[var(--text-secondary)]">
               {billingMessage}
+            </div>
+          ) : null}
+          {kitchenMessage ? (
+            <div className="rounded-[1.3rem] border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm font-medium text-amber-200">
+              {kitchenMessage}
             </div>
           ) : null}
           <div className={`grid gap-3 ${onSettle ? 'lg:grid-cols-3' : 'lg:grid-cols-2'}`}>

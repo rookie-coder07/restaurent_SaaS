@@ -65,6 +65,13 @@ export const releaseTable = asyncHandler(async (req, res) => {
   return sendSuccess(res, 200, table, 'Table released successfully');
 });
 
+export const claimTable = asyncHandler(async (req, res) => {
+  const { tableId } = req.params;
+  const table = await TableService.claimTable(req.user.restaurantId, tableId, req.user.userId);
+
+  return sendSuccess(res, 200, table, 'Table claimed successfully');
+});
+
 export const deleteTable = asyncHandler(async (req, res) => {
   const { tableId } = req.params;
   logger.info(`📨 DELETE /tables/${tableId} - Deleting table`);

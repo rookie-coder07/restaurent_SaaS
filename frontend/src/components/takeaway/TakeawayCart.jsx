@@ -134,7 +134,7 @@ export default function TakeawayCart({ recentBills = [], onRefresh = () => {} })
           disabled={!cart.length || loading}
           className="h-12 rounded-xl bg-emerald-600 text-white font-semibold"
         >
-          {loading ? '...' : 'Settle Bill'}
+          {loading ? '...' : 'Create Bill'}
         </button>
       </div>
 

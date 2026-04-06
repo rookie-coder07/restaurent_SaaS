@@ -72,6 +72,28 @@ export const errorHandler = (err, req, res, next) => {
   }
 
   if (
+    String(err?.message || '').includes('tables.locked_by_qr') ||
+    String(err?.message || '').includes('orders.order_source')
+  ) {
+    return sendError(
+      res,
+      500,
+      'Your database is missing the QR/manual table lock migration. Apply backend/src/config/migrations/2026-04-06-add-order-source-and-qr-lock.sql and restart the backend.'
+    );
+  }
+
+  if (
+    String(err?.message || '').includes('tables.assigned_to') ||
+    String(err?.message || '').includes("Could not find the 'assigned_to' column of 'tables' in the schema cache")
+  ) {
+    return sendError(
+      res,
+      500,
+      'Your database is missing tables.assigned_to. Apply the table assignment lock migration and restart the backend.'
+    );
+  }
+
+  if (
     String(err?.message || '').includes("Could not find the 'menu_item_recipes'") ||
     String(err?.message || '').includes('menu_item_recipes') ||
     String(err?.message || '').includes('inventory_items!inventory_item_id')
@@ -91,6 +113,30 @@ export const errorHandler = (err, req, res, next) => {
       res,
       500,
       'Your database is missing password_reset_requests. Apply the password reset request migration and restart the backend.'
+    );
+  }
+
+  if (
+    String(err?.message || '').includes('orders.request_id') ||
+    String(err?.message || '').includes("Could not find the 'request_id' column of 'orders' in the schema cache")
+  ) {
+    return sendError(
+      res,
+      500,
+      'Your database is missing orders.request_id. Apply backend/src/config/migrations/2026-04-06-add-order-request-id.sql and restart the backend.'
+    );
+  }
+
+  if (
+    String(err?.message || '').includes('order_items.sent_to_kitchen') ||
+    String(err?.message || '').includes('order_items.kot_id') ||
+    String(err?.message || '').includes('kitchen_tickets') ||
+    String(err?.message || '').includes("Could not find the 'sent_to_kitchen' column of 'order_items' in the schema cache")
+  ) {
+    return sendError(
+      res,
+      500,
+      'Your database is missing the incremental KOT migration. Apply backend/src/config/migrations/2026-04-06-add-incremental-kot-columns.sql and restart the backend.'
     );
   }
 
@@ -116,6 +162,8 @@ export const errorHandler = (err, req, res, next) => {
     businessMessage.includes('Reset request role does not match the target account') ||
     businessMessage.includes('You cannot reset your own password through reset requests') ||
     businessMessage.includes('Password reset requests are available only for manager and POS accounts') ||
+    businessMessage.includes('This table is already occupied by another waiter') ||
+    businessMessage.includes('This QR table is locked to another waiter') ||
     businessMessage.includes('Only ') && businessMessage.includes('loyalty points are available');
 
   if (isBusinessRuleError) {

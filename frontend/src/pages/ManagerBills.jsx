@@ -10,7 +10,6 @@ import { formatCurrency, formatDate, formatDisplayOrderNumber } from '../utils/f
 import { buildInvoiceData, calculateInvoiceSummary, getRestaurantBillingSettings } from '../utils/invoice';
 import { isUnpaid } from '../utils/managerPortal';
 import { playLoudBuzzer } from '../utils/alerts';
-import { autoPrintBill } from '../utils/printerService';
 import Card from '../components/common/Card';
 import Button from '../components/common/Button';
 import Input from '../components/common/Input';
@@ -105,7 +104,7 @@ function getBillSummary(
     paidAmount,
     dueAmount: Math.max(0, Number((grandTotal - Math.min(grandTotal, paidAmount)).toFixed(2))),
     paymentMethod: String(billing.paymentMode || order?.paymentMethod || 'cash').toLowerCase(),
-    paymentStatus: String(order?.paymentStatus || 'unpaid').toLowerCase(),
+    paymentStatus: String(order?.paymentStatus || 'pending').toLowerCase(),
   };
 }
 
@@ -441,7 +440,7 @@ export default function ManagerBills() {
       });
   };
 
-  const markBillPaid = async () => {
+  const createBill = async () => {
     if (!payingBill?.id) {
       return;
     }
@@ -471,26 +470,11 @@ export default function ManagerBills() {
         restaurant: restaurantProfile,
         cashierName: user?.name || user?.email || 'Manager',
       });
-      let autoPrintError = '';
-
-      try {
-        const printResult = await autoPrintBill({
-          order: settledBill,
-          restaurant: restaurantProfile,
-          invoice: invoiceData,
-          cashierName: user?.name || user?.email || 'Manager',
-        });
-        if (printResult?.fallback && printResult?.error) {
-          autoPrintError = 'Billing printer was unavailable, so browser print opened instead.';
-        }
-      } catch (printError) {
-        autoPrintError = printError.message || 'Auto-print failed. Use Print Bill manually.';
-      }
 
       setSuccess(
         approval?.percent
-          ? `${formatDisplayOrderNumber(payingBill)} settled with ${approval.percent}% discount.`
-          : `${formatDisplayOrderNumber(payingBill)} settled successfully.`
+          ? `${formatDisplayOrderNumber(payingBill)} bill created with ${approval.percent}% discount.`
+          : `${formatDisplayOrderNumber(payingBill)} bill created and waiting for payment confirmation.`
       );
       setPayingBill(null);
       setAmountReceived('');
@@ -506,11 +490,31 @@ export default function ManagerBills() {
           invoice: invoiceData,
           returnTo: '/manager/bills',
           cashierName: user?.name || user?.email || 'Manager',
-          autoPrintError,
         },
       });
     } catch (requestError) {
-      setError(requestError.response?.data?.message || 'Failed to settle the bill.');
+      setError(requestError.response?.data?.message || 'Failed to create the bill.');
+    } finally {
+      setActioningBillId('');
+    }
+  };
+
+  const confirmBillPaid = async (bill) => {
+    if (!bill?.id) {
+      return;
+    }
+
+    setActioningBillId(bill.id);
+    setError('');
+
+    try {
+      await orderAPI.markOrderPaid(bill.id, {
+        paymentMethod: String(bill?.paymentMethod || bill?.billing?.paymentMode || 'cash').toLowerCase(),
+      });
+      await reloadOrders();
+      setSuccess(`${formatDisplayOrderNumber(bill)} marked paid.`);
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || 'Failed to mark the bill paid.');
     } finally {
       setActioningBillId('');
     }
@@ -756,7 +760,7 @@ export default function ManagerBills() {
                             : 'border-emerald-400/45 bg-emerald-500 text-white shadow-[0_10px_30px_rgba(16,185,129,0.28)]'
                         }`}
                       >
-                        {unpaid ? 'Unpaid' : 'Paid'}
+                        {unpaid ? 'Pending Payment' : 'Paid'}
                       </span>
                     </div>
                     <p className="mt-1 text-sm font-semibold text-[var(--text-primary)]">Table {bill.tableNumber || 'Walk-in'}</p>
@@ -770,7 +774,7 @@ export default function ManagerBills() {
                     </div>
                     <div className="rounded-xl bg-[var(--bg-card)] px-3 py-2.5">
                       <p className="text-[10px] uppercase tracking-[0.16em] text-[var(--text-secondary)]">
-                        {unpaid ? 'Payable' : 'Paid Amount'}
+                        {unpaid ? 'Final Amount' : 'Paid Amount'}
                       </p>
                       <p className={`mt-0.5 text-base font-bold ${unpaid ? 'text-amber-300' : 'text-emerald-400'}`}>
                         {formatCurrency(unpaid ? summary.grandTotal : summary.paidAmount)}
@@ -799,7 +803,7 @@ export default function ManagerBills() {
                     <div className="rounded-xl border border-[var(--border-color)] bg-[var(--bg-card)] px-3 py-2.5">
                       <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-secondary)]">Status</p>
                       <p className={`mt-0.5 break-words text-xs font-semibold ${unpaid ? 'text-[var(--text-primary)]' : 'text-emerald-400'}`}>
-                        {unpaid ? 'Awaiting manager payment' : 'Paid and ready to print'}
+                        {unpaid ? 'Awaiting payment confirmation' : 'Paid and ready to print'}
                       </p>
                     </div>
                   </div>
@@ -814,9 +818,13 @@ export default function ManagerBills() {
                         <Button variant="secondary" className="w-full px-3 py-2 text-xs" onClick={() => openEditBill(bill)} disabled={actioningBillId === bill.id}>
                           {actioningBillId === bill.id ? 'Loading...' : 'Edit'}
                         </Button>
-                        <Button className="w-full px-3 py-2 text-xs" onClick={() => openPayBill(bill)} disabled={actioningBillId === bill.id}>
+                        <Button
+                          className="w-full px-3 py-2 text-xs"
+                          onClick={() => (bill?.billing?.invoiceNumber ? openPrintedBill(bill) : openPayBill(bill))}
+                          disabled={actioningBillId === bill.id}
+                        >
                           <Wallet className="h-4 w-4" />
-                          {actioningBillId === bill.id ? 'Loading...' : 'Settle'}
+                          {actioningBillId === bill.id ? 'Loading...' : bill?.billing?.invoiceNumber ? 'Open Bill' : 'Settle'}
                         </Button>
                       </div>
                     ) : (
@@ -1008,11 +1016,11 @@ export default function ManagerBills() {
             </Button>
             <Button
               className="w-full sm:flex-1"
-              onClick={markBillPaid}
+              onClick={createBill}
               disabled={actioningBillId === payingBill?.id || (paymentMethod === 'cash' && paymentGap > 0)}
             >
               <Wallet className="h-4 w-4" />
-              {actioningBillId === payingBill?.id ? 'Settling...' : 'Settle Bill'}
+              {actioningBillId === payingBill?.id ? 'Creating...' : 'Create Bill'}
             </Button>
           </div>
         </div>

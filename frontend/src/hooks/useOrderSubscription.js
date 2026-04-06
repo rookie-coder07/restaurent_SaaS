@@ -1,99 +1,150 @@
-import { useEffect, useCallback } from 'react';
+import { useEffect, useRef } from 'react';
 import supabase from '../config/supabase';
 
-/**
- * Hook for real-time order updates using Supabase subscriptions
- * @param {string} restaurantId - Restaurant ID to subscribe to
- * @param {Function} onOrderUpdate - Callback when orders change
- * @param {string} status - Optional status filter (e.g., 'pending', 'preparing')
- */
+function buildRestaurantFilter(restaurantId) {
+  return restaurantId ? `restaurant_id=eq.${restaurantId}` : undefined;
+}
+
+function getPayloadStatus(payload) {
+  return String(payload?.new?.status || payload?.old?.status || '').trim().toLowerCase();
+}
+
 export const useOrderSubscription = (restaurantId, onOrderUpdate, status = null) => {
+  const onOrderUpdateRef = useRef(onOrderUpdate);
+
   useEffect(() => {
-    if (!restaurantId) return;
+    onOrderUpdateRef.current = onOrderUpdate;
+  }, [onOrderUpdate]);
 
-    // Subscribe to order changes
-    const subscription = supabase
-      .from('orders')
-      .on('*', (payload) => {
-        console.log('🔔 Real-time order update:', payload);
+  useEffect(() => {
+    if (!restaurantId || typeof onOrderUpdateRef.current !== 'function') {
+      return undefined;
+    }
 
-        // Filter by restaurant if needed
-        if (payload.new?.restaurant_id === restaurantId) {
-          onOrderUpdate(payload);
+    const normalizedStatus = String(status || '').trim().toLowerCase();
+    const channel = supabase.channel(`orders:${restaurantId}:${normalizedStatus || 'all'}`);
+    const handleEvent = (payload) => {
+      if (normalizedStatus) {
+        const payloadStatus = getPayloadStatus(payload);
+        if (payloadStatus !== normalizedStatus) {
+          return;
         }
-      })
+      }
+
+      onOrderUpdateRef.current?.(payload);
+    };
+
+    channel
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'orders',
+          filter: buildRestaurantFilter(restaurantId),
+        },
+        handleEvent
+      )
       .subscribe();
 
     return () => {
-      subscription.unsubscribe();
+      supabase.removeChannel(channel);
     };
-  }, [restaurantId, onOrderUpdate]);
+  }, [restaurantId, status]);
 };
 
-/**
- * Hook for real-time order items updates
- * @param {string} orderId - Order ID to subscribe to
- * @param {Function} onItemsUpdate - Callback when items change
- */
 export const useOrderItemsSubscription = (orderId, onItemsUpdate) => {
+  const onItemsUpdateRef = useRef(onItemsUpdate);
+
   useEffect(() => {
-    if (!orderId) return;
+    onItemsUpdateRef.current = onItemsUpdate;
+  }, [onItemsUpdate]);
 
-    const subscription = supabase
-      .from('order_items')
-      .on('*', (payload) => {
-        console.log('🔔 Real-time order items update:', payload);
+  useEffect(() => {
+    if (!orderId || typeof onItemsUpdateRef.current !== 'function') {
+      return undefined;
+    }
 
-        if (payload.new?.order_id === orderId || payload.old?.order_id === orderId) {
-          onItemsUpdate(payload);
-        }
-      })
+    const channel = supabase.channel(`order-items:${orderId}`);
+    const handleEvent = (payload) => {
+      const payloadOrderId = payload?.new?.order_id || payload?.old?.order_id;
+      if (payloadOrderId !== orderId) {
+        return;
+      }
+
+      onItemsUpdateRef.current?.(payload);
+    };
+
+    channel
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'order_items',
+        },
+        handleEvent
+      )
       .subscribe();
 
     return () => {
-      subscription.unsubscribe();
+      supabase.removeChannel(channel);
     };
-  }, [orderId, onItemsUpdate]);
+  }, [orderId]);
 };
 
-/**
- * Hook to get real-time order count by status
- * @param {string} restaurantId - Restaurant ID
- * @param {Function} onCountUpdate - Callback with counts
- */
 export const useOrderCountSubscription = (restaurantId, onCountUpdate) => {
+  const onCountUpdateRef = useRef(onCountUpdate);
+
   useEffect(() => {
-    if (!restaurantId) return;
+    onCountUpdateRef.current = onCountUpdate;
+  }, [onCountUpdate]);
 
-    const subscription = supabase
-      .from('orders')
-      .on('*', async (payload) => {
-        // Refetch counts when any order changes
-        if (payload.new?.restaurant_id === restaurantId) {
-          try {
-            const { data: orders, error } = await supabase
-              .from('orders')
-              .select('status')
-              .eq('restaurant_id', restaurantId);
+  useEffect(() => {
+    if (!restaurantId || typeof onCountUpdateRef.current !== 'function') {
+      return undefined;
+    }
 
-            if (!error && orders) {
-              const counts = {
-                pending: orders.filter(o => o.status === 'pending').length,
-                preparing: orders.filter(o => o.status === 'preparing').length,
-                ready: orders.filter(o => o.status === 'ready').length,
-                completed: orders.filter(o => o.status === 'completed').length,
-              };
-              onCountUpdate(counts);
-            }
-          } catch (err) {
-            console.error('Error fetching order counts:', err);
-          }
+    const channel = supabase.channel(`order-counts:${restaurantId}`);
+    const refetchCounts = async () => {
+      try {
+        const { data: orders, error } = await supabase
+          .from('orders')
+          .select('status')
+          .eq('restaurant_id', restaurantId);
+
+        if (error) {
+          return;
         }
-      })
+
+        const counts = {
+          pending: (orders || []).filter((order) => order.status === 'pending').length,
+          preparing: (orders || []).filter((order) => order.status === 'preparing').length,
+          ready: (orders || []).filter((order) => order.status === 'ready').length,
+          completed: (orders || []).filter((order) => order.status === 'completed').length,
+        };
+
+        onCountUpdateRef.current?.(counts);
+      } catch {
+        // Realtime count refresh should never break the UI.
+      }
+    };
+
+    channel
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'orders',
+          filter: buildRestaurantFilter(restaurantId),
+        },
+        refetchCounts
+      )
       .subscribe();
 
     return () => {
-      subscription.unsubscribe();
+      supabase.removeChannel(channel);
     };
-  }, [restaurantId, onCountUpdate]);
+  }, [restaurantId]);
 };

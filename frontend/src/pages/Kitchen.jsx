@@ -9,6 +9,8 @@ import {
   X,
 } from 'lucide-react';
 import { usePolling } from '../hooks/usePolling';
+import { useOrderSubscription } from '../hooks/useOrderSubscription';
+import { useAuthStore } from '../context/authStore';
 import { kitchenAPI, orderAPI } from '../services/apiEndpoints';
 import { formatCompactTableLabel, formatCurrency, formatDate } from '../utils/formatters';
 
@@ -41,7 +43,7 @@ const STATUS_META = {
 const STATUS_FLOW = {
   pending: 'preparing',
   preparing: 'ready',
-  ready: 'served',
+  ready: 'completed',
 };
 
 function getElapsedMinutes(createdAt) {
@@ -63,7 +65,8 @@ function getStatusIcon(status) {
 }
 
 export default function Kitchen() {
-  const { data: pollingData, loading, error } = usePolling(
+  const restaurantId = useAuthStore((state) => state.restaurantId);
+  const { data: pollingData, loading, error, refresh } = usePolling(
     orderAPI.getActiveOrders,
     POLLING_INTERVAL_MS
   );
@@ -73,6 +76,10 @@ export default function Kitchen() {
   const [updating, setUpdating] = useState(null);
   const [actionError, setActionError] = useState(null);
   const [success, setSuccess] = useState(null);
+
+  useOrderSubscription(restaurantId, () => {
+    refresh();
+  });
 
   const orders = Array.isArray(pollingData) ? pollingData : [];
 
@@ -164,7 +171,7 @@ export default function Kitchen() {
               Real-time kitchen dashboard
             </h1>
             <p className="mt-2 max-w-2xl text-sm leading-6 text-[var(--text-secondary)]">
-              Track active orders, update status from pending to served, and keep the line moving with safe 5-second
+              Track active orders, update status from pending to completed, and keep the line moving with safe 5-second
               polling.
             </p>
           </div>
@@ -279,8 +286,8 @@ function OrderCard({ order, onOpen, onStatusUpdate, updating }) {
       ? 'Start Preparing'
       : nextStatus === 'ready'
         ? 'Mark Ready'
-        : nextStatus === 'served'
-          ? 'Mark Served'
+        : nextStatus === 'completed'
+          ? 'Mark Completed'
           : `Move to ${STATUS_META[nextStatus]?.label || nextStatus}`;
 
   return (
@@ -362,8 +369,8 @@ function OrderDetailModal({ order, orderDetails, loadingDetails, updating, onClo
       ? 'Start Preparing'
       : nextStatus === 'ready'
         ? 'Mark Ready'
-        : nextStatus === 'served'
-          ? 'Mark Served'
+        : nextStatus === 'completed'
+          ? 'Mark Completed'
           : `Move to ${STATUS_META[nextStatus]?.label || nextStatus}`;
 
   return (

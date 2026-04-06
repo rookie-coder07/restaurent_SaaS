@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowRight, Loader, RefreshCw, Store, ShoppingBag } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../context/authStore';
@@ -6,6 +6,7 @@ import { authAPI, orderAPI } from '../services/apiEndpoints';
 import { formatCurrency, formatDisplayOrderNumber } from '../utils/formatters';
 import { playLoudBuzzer } from '../utils/alerts';
 import { subscribeToOrderEvents } from '../utils/liveOrderEvents';
+import { useOrderSubscription } from '../hooks/useOrderSubscription';
 import { syncPortalSessionUser } from '../utils/sessionUserSync';
 import Toast from '../components/common/Toast';
 
@@ -35,8 +36,6 @@ const STATUS_META = {
   accepted: 'border-indigo-300 bg-indigo-50 text-indigo-900',
   preparing: 'border-violet-300 bg-violet-50 text-violet-900',
   ready: 'border-emerald-300 bg-emerald-50 text-emerald-900',
-  served: 'border-cyan-300 bg-cyan-50 text-cyan-900',
-  dispatched: 'border-fuchsia-300 bg-fuchsia-50 text-fuchsia-900',
   completed: 'border-emerald-300 bg-emerald-50 text-emerald-900',
   rejected: 'border-rose-300 bg-rose-50 text-rose-900',
   unpaid: 'border-rose-300 bg-rose-50 text-rose-900',
@@ -46,11 +45,18 @@ const STATUS_META = {
 };
 
 function getOrderWorkflow(order) {
-  return String(order?.status || order?.online?.workflowStatus || 'new');
+  const status = String(order?.status || order?.online?.workflowStatus || 'pending');
+  if (status === 'awaiting_waiter_approval') {
+    return 'pending';
+  }
+  if (status === 'served') {
+    return 'completed';
+  }
+  return status;
 }
 
 function isLiveWorkflow(status) {
-  return ['new', 'accepted', 'preparing', 'pending', 'awaiting_waiter_approval', 'served', 'dispatched'].includes(status);
+  return ['preparing', 'pending', 'ready'].includes(status);
 }
 
 function isWaiterApprovalOrder(order) {
@@ -68,6 +74,7 @@ function getStatusChipClass(value, fallback = 'border-slate-300 bg-slate-50 text
 export default function POSOrders() {
   const navigate = useNavigate();
   const user = useAuthStore((state) => state.user);
+  const restaurantId = useAuthStore((state) => state.restaurantId);
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -78,11 +85,12 @@ export default function POSOrders() {
   const isWaiterAccount = user?.role === 'staff';
   const qrAlertedOrderIdsRef = useRef(new Set());
   const hasPrimedQrAlertsRef = useRef(false);
+  const reloadTimeoutRef = useRef(null);
   const assignedTableIds = useMemo(
     () => (Array.isArray(user?.assignedTables) ? user.assignedTables.filter(Boolean) : []),
     [user?.assignedTables]
   );
-  const loadOrders = async () => {
+  const loadOrders = useCallback(async () => {
     setLoading(true);
     setError('');
 
@@ -96,19 +104,38 @@ export default function POSOrders() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  const queueOrderReload = useCallback(() => {
+    if (reloadTimeoutRef.current) {
+      window.clearTimeout(reloadTimeoutRef.current);
+    }
+
+    reloadTimeoutRef.current = window.setTimeout(() => {
+      loadOrders();
+    }, 200);
+  }, [loadOrders]);
 
   useEffect(() => {
     loadOrders();
-  }, []);
+    return () => {
+      if (reloadTimeoutRef.current) {
+        window.clearTimeout(reloadTimeoutRef.current);
+      }
+    };
+  }, [loadOrders]);
 
   useEffect(() => {
     const cleanup = subscribeToOrderEvents(() => {
-      loadOrders();
+      queueOrderReload();
     });
 
     return cleanup;
-  }, []);
+  }, [queueOrderReload]);
+
+  useOrderSubscription(restaurantId, () => {
+    queueOrderReload();
+  });
 
   useEffect(() => {
     const syncCurrentWaiter = async () => {
@@ -131,11 +158,11 @@ export default function POSOrders() {
     syncCurrentWaiter();
     const intervalId = window.setInterval(() => {
       syncCurrentWaiter();
-      loadOrders();
+      queueOrderReload();
     }, 12000);
 
     return () => window.clearInterval(intervalId);
-  }, [isWaiterAccount, user?.id]);
+  }, [isWaiterAccount, queueOrderReload, user?.id]);
 
   const pendingAssignedQrOrders = useMemo(
     () =>

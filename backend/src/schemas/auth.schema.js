@@ -44,6 +44,7 @@ export const createStaffSchema = Joi.object({
   password: Joi.string().required(),
   role: Joi.string().valid('manager', 'kitchen_staff', 'staff').required(),
   assignedTables: Joi.array().items(Joi.string().uuid()).default([]),
+  allowTableReassign: Joi.boolean().optional(),
 });
 
 export const updateStaffSchema = Joi.object({
@@ -53,4 +54,5 @@ export const updateStaffSchema = Joi.object({
   password: Joi.string().optional(),
   role: Joi.string().valid('manager', 'kitchen_staff', 'staff').optional(),
   assignedTables: Joi.array().items(Joi.string().uuid()).optional(),
+  allowTableReassign: Joi.boolean().optional(),
 });

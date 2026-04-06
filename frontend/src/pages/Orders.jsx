@@ -832,7 +832,7 @@ export default function Orders() {
                 {formatPaymentMethodLabel((selectedOrderDetails || selectedOrder).paymentMethod)}
               </span>
               <span className="rounded-full bg-[var(--color-surface-muted)] px-3 py-1 text-xs font-semibold text-[var(--color-text)]">
-                {(selectedOrderDetails || selectedOrder).paymentStatus || 'unpaid'}
+                {(selectedOrderDetails || selectedOrder).paymentStatus || 'pending'}
               </span>
               <span className="text-sm text-[var(--color-text-muted)]">{formatDate((selectedOrderDetails || selectedOrder).createdAt)}</span>
             </div>

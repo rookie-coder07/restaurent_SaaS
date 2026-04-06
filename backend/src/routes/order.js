@@ -9,6 +9,7 @@ import {
   createOrderSchema,
   softDeleteOrderSchema,
   settleOrderSchema,
+  markOrderPaidSchema,
   updateOnlineOrderSchema,
   updateOrderSchema,
   updateOrderStatusSchema,
@@ -39,6 +40,7 @@ router.get('/:orderId', checkPermission(['manage_orders', 'view_orders']), order
 router.put('/:orderId', checkPermission(['manage_orders']), validateRequest(updateOrderSchema), orderController.updateOrder);
 router.patch('/:orderId/online', checkPermission(['manage_orders', 'update_order_status']), validateRequest(updateOnlineOrderSchema), orderController.updateOnlineOrder);
 router.post('/:orderId/settle', requireBillingRole(), checkPermission(['manage_orders']), validateRequest(settleOrderSchema), orderController.settleOrder);
+router.post('/:orderId/mark-paid', requireBillingRole(), checkPermission(['manage_orders']), validateRequest(markOrderPaidSchema), orderController.markOrderPaid);
 
 // Update order status
 router.put('/:orderId/status', checkPermission(['manage_orders', 'update_order_status']), validateRequest(updateOrderStatusSchema), orderController.updateOrderStatus);

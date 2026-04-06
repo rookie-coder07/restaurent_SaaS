@@ -2,7 +2,7 @@ import logger from '../utils/logger.js';
 import supabase from '../config/supabase.js';
 
 export class TableService {
-  static ACTIVE_ORDER_STATUSES = ['awaiting_waiter_approval', 'pending', 'preparing', 'ready', 'served', 'in_progress'];
+  static ACTIVE_ORDER_STATUSES = ['awaiting_waiter_approval', 'pending', 'preparing', 'ready'];
 
   static normalizeTableNumber(value) {
     return String(value ?? '').trim();
@@ -25,8 +25,11 @@ export class TableService {
       restaurantId: table.restaurant_id,
       location: table.location,
       status: table.status,
+      lockedByQr: Boolean(table.locked_by_qr),
       reservedBy: table.reserved_by,
       reservationTime: table.reservation_time,
+      assignedTo: table.assigned_to || '',
+      assignedWaiterName: table.assigned_waiter_name || table.assignedWaiterName || '',
       qrCode: table.qr_code,
       qrCodeData: table.qr_code,
       isActive: table.is_active,
@@ -43,6 +46,10 @@ export class TableService {
   }
 
   static getEffectiveStatus(table, hasActiveOrder = false) {
+    if (table.locked_by_qr) {
+      return 'occupied';
+    }
+
     if (hasActiveOrder) {
       return 'occupied';
     }
@@ -58,10 +65,19 @@ export class TableService {
     return 'available';
   }
 
-  static async getActiveOrderTableIds(restaurantId) {
+  static getNormalizedOrderSource(order = {}) {
+    if (String(order.order_source || '').trim()) {
+      return String(order.order_source).trim().toLowerCase() === 'qr' ? 'qr' : 'manual';
+    }
+
+    const notes = String(order.notes || '');
+    return notes.includes('"orderOrigin":"qr"') ? 'qr' : 'manual';
+  }
+
+  static async getActiveTableStates(restaurantId) {
     const { data: orders, error } = await supabase
       .from('orders')
-      .select('table_id')
+      .select('table_id, order_source, notes')
       .eq('restaurant_id', restaurantId)
       .neq('payment_status', 'paid')
       .in('status', this.ACTIVE_ORDER_STATUSES);
@@ -70,7 +86,70 @@ export class TableService {
       throw error;
     }
 
-    return new Set((orders || []).map((order) => order.table_id).filter(Boolean));
+    const tableStates = new Map();
+
+    (orders || []).forEach((order) => {
+      if (!order.table_id) {
+        return;
+      }
+
+      const current = tableStates.get(order.table_id) || {
+        hasActiveOrder: false,
+        hasQrOrder: false,
+      };
+
+      current.hasActiveOrder = true;
+      current.hasQrOrder = current.hasQrOrder || this.getNormalizedOrderSource(order) === 'qr';
+      tableStates.set(order.table_id, current);
+    });
+
+    return tableStates;
+  }
+
+  static async getAssignedWaiterIdForTable(restaurantId, tableId) {
+    if (!restaurantId || !tableId) {
+      return '';
+    }
+
+    const { data: users, error } = await supabase
+      .from('users')
+      .select('id, assigned_tables')
+      .eq('restaurant_id', restaurantId)
+      .eq('role', 'staff');
+
+    if (error) {
+      throw error;
+    }
+
+    const assignedWaiter = (users || []).find((user) => Array.isArray(user.assigned_tables) && user.assigned_tables.includes(tableId));
+    return assignedWaiter?.id || '';
+  }
+
+  static async attachAssignedWaiterNames(restaurantId, tables = []) {
+    const assignedWaiterIds = Array.from(
+      new Set((tables || []).map((table) => table.assigned_to).filter(Boolean))
+    );
+
+    if (assignedWaiterIds.length === 0) {
+      return tables;
+    }
+
+    const { data: users, error } = await supabase
+      .from('users')
+      .select('id, name')
+      .eq('restaurant_id', restaurantId)
+      .in('id', assignedWaiterIds);
+
+    if (error) {
+      throw error;
+    }
+
+    const waiterNameById = new Map((users || []).map((user) => [user.id, user.name || '']));
+
+    return (tables || []).map((table) => ({
+      ...table,
+      assigned_waiter_name: table.assigned_waiter_name || waiterNameById.get(table.assigned_to) || '',
+    }));
   }
 
   static async syncTableLifecycle(restaurantId, tableId) {
@@ -85,26 +164,47 @@ export class TableService {
       throw tableError || new Error('Table not found');
     }
 
-    const activeTableIds = await this.getActiveOrderTableIds(restaurantId);
-    const hasActiveOrder = activeTableIds.has(tableId);
+    const activeTableStates = await this.getActiveTableStates(restaurantId);
+    const tableState = activeTableStates.get(tableId) || { hasActiveOrder: false, hasQrOrder: false };
+    const hasActiveOrder = tableState.hasActiveOrder;
+    const hasQrOrder = tableState.hasQrOrder;
     const nextStatus = this.getEffectiveStatus(table, hasActiveOrder);
     const shouldClearReservation = hasActiveOrder || nextStatus === 'available';
+    const qrAssignedWaiterId = hasQrOrder ? await this.getAssignedWaiterIdForTable(restaurantId, tableId) : '';
+    const nextAssignedTo = hasQrOrder ? (qrAssignedWaiterId || table.assigned_to || null) : null;
+    const nextLockedByQr = hasQrOrder;
+    const nextAssignmentType =
+      Object.prototype.hasOwnProperty.call(table, 'assignment_type')
+        ? (hasQrOrder ? 'qr' : 'manual')
+        : undefined;
     const needsUpdate =
       table.status !== nextStatus ||
-      (shouldClearReservation && (table.reserved_by || table.reservation_time));
+      Boolean(table.locked_by_qr) !== nextLockedByQr ||
+      (shouldClearReservation && (table.reserved_by || table.reservation_time)) ||
+      String(table.assigned_to || '') !== String(nextAssignedTo || '') ||
+      (nextAssignmentType !== undefined && String(table.assignment_type || '') !== String(nextAssignmentType || ''));
 
     if (!needsUpdate) {
-      return this.transformTable(table);
+      const [enrichedTable] = await this.attachAssignedWaiterNames(restaurantId, [table]);
+      return this.transformTable(enrichedTable);
+    }
+
+    const updatePayload = {
+      status: nextStatus,
+      reserved_by: shouldClearReservation ? null : table.reserved_by,
+      reservation_time: shouldClearReservation ? null : table.reservation_time,
+      assigned_to: nextAssignedTo,
+      locked_by_qr: nextLockedByQr,
+      updated_at: new Date().toISOString(),
+    };
+
+    if (nextAssignmentType !== undefined) {
+      updatePayload.assignment_type = nextAssignmentType;
     }
 
     const { data: updatedTable, error: updateError } = await supabase
       .from('tables')
-      .update({
-        status: nextStatus,
-        reserved_by: shouldClearReservation ? null : table.reserved_by,
-        reservation_time: shouldClearReservation ? null : table.reservation_time,
-        updated_at: new Date().toISOString(),
-      })
+      .update(updatePayload)
       .eq('id', tableId)
       .eq('restaurant_id', restaurantId)
       .select()
@@ -114,7 +214,8 @@ export class TableService {
       throw updateError || new Error('Failed to sync table lifecycle');
     }
 
-    return this.transformTable(updatedTable);
+    const [enrichedTable] = await this.attachAssignedWaiterNames(restaurantId, [updatedTable]);
+    return this.transformTable(enrichedTable);
   }
 
   static async syncRestaurantTableLifecycles(restaurantId) {
@@ -131,29 +232,51 @@ export class TableService {
       return [];
     }
 
-    const activeTableIds = await this.getActiveOrderTableIds(restaurantId);
+    const activeTableStates = await this.getActiveTableStates(restaurantId);
     const updates = tables
       .map((table) => {
-        const hasActiveOrder = activeTableIds.has(table.id);
+        const tableState = activeTableStates.get(table.id) || { hasActiveOrder: false, hasQrOrder: false };
+        const hasActiveOrder = tableState.hasActiveOrder;
+        const hasQrOrder = tableState.hasQrOrder;
         const nextStatus = this.getEffectiveStatus(table, hasActiveOrder);
         const shouldClearReservation = hasActiveOrder || nextStatus === 'available';
-        const needsUpdate =
-          table.status !== nextStatus ||
-          (shouldClearReservation && (table.reserved_by || table.reservation_time));
-
-        if (!needsUpdate) {
-          return null;
-        }
+        const desiredLockedByQr = hasQrOrder;
+        const desiredAssignmentType =
+          Object.prototype.hasOwnProperty.call(table, 'assignment_type')
+            ? (hasQrOrder ? 'qr' : 'manual')
+            : undefined;
 
         return (async () => {
+          const nextAssignedTo = hasQrOrder
+            ? (await this.getAssignedWaiterIdForTable(restaurantId, table.id)) || table.assigned_to || null
+            : null;
+          const needsUpdate =
+            table.status !== nextStatus ||
+            Boolean(table.locked_by_qr) !== desiredLockedByQr ||
+            (shouldClearReservation && (table.reserved_by || table.reservation_time)) ||
+            String(table.assigned_to || '') !== String(nextAssignedTo || '') ||
+            (desiredAssignmentType !== undefined && String(table.assignment_type || '') !== String(desiredAssignmentType || ''));
+
+          if (!needsUpdate) {
+            return;
+          }
+
+          const updatePayload = {
+            status: nextStatus,
+            reserved_by: shouldClearReservation ? null : table.reserved_by,
+            reservation_time: shouldClearReservation ? null : table.reservation_time,
+            assigned_to: nextAssignedTo,
+            locked_by_qr: desiredLockedByQr,
+            updated_at: new Date().toISOString(),
+          };
+
+          if (desiredAssignmentType !== undefined) {
+            updatePayload.assignment_type = desiredAssignmentType;
+          }
+
           const { error: updateError } = await supabase
             .from('tables')
-            .update({
-              status: nextStatus,
-              reserved_by: shouldClearReservation ? null : table.reserved_by,
-              reservation_time: shouldClearReservation ? null : table.reservation_time,
-              updated_at: new Date().toISOString(),
-            })
+            .update(updatePayload)
             .eq('id', table.id)
             .eq('restaurant_id', restaurantId);
 
@@ -247,7 +370,7 @@ export class TableService {
 
       if (error) throw error;
 
-      return this.transformTables(tables);
+      return this.transformTables(await this.attachAssignedWaiterNames(restaurantId, tables));
     } catch (error) {
       logger.error('❌ Get tables error:', error);
       throw error;
@@ -301,7 +424,8 @@ export class TableService {
       if (error || !table) throw error || new Error('Table not found');
 
       logger.info(`✅ Table updated: ${tableId}`);
-      return this.transformTable(table);
+      const [enrichedTable] = await this.attachAssignedWaiterNames(restaurantId, [table]);
+      return this.transformTable(enrichedTable);
     } catch (error) {
       logger.error('❌ Update table error:', error);
       throw error;
@@ -358,7 +482,7 @@ export class TableService {
 
       if (error) throw error;
 
-      return this.transformTables(tables);
+      return this.transformTables(await this.attachAssignedWaiterNames(restaurantId, tables));
     } catch (error) {
       logger.error('❌ Get available tables error:', error);
       throw error;
@@ -414,14 +538,33 @@ export class TableService {
 
       if (activeOrderError) throw activeOrderError;
 
+      const { data: existingTable, error: tableFetchError } = await supabase
+        .from('tables')
+        .select('*')
+        .eq('id', tableId)
+        .eq('restaurant_id', restaurantId)
+        .single();
+
+      if (tableFetchError || !existingTable) {
+        throw tableFetchError || new Error('Table not found');
+      }
+
+      const updatePayload = {
+        status: count > 0 ? 'occupied' : 'available',
+        assigned_to: null,
+        locked_by_qr: false,
+        reserved_by: null,
+        reservation_time: null,
+        updated_at: new Date().toISOString(),
+      };
+
+      if (Object.prototype.hasOwnProperty.call(existingTable, 'assignment_type')) {
+        updatePayload.assignment_type = 'manual';
+      }
+
       const { data: table, error } = await supabase
         .from('tables')
-        .update({
-          status: count > 0 ? 'occupied' : 'available',
-          reserved_by: null,
-          reservation_time: null,
-          updated_at: new Date().toISOString(),
-        })
+        .update(updatePayload)
         .eq('id', tableId)
         .eq('restaurant_id', restaurantId)
         .select()
@@ -430,7 +573,8 @@ export class TableService {
       if (error || !table) throw error || new Error('Table not found');
 
       logger.info(`✅ Table released: ${tableId}`);
-      return this.transformTable(table);
+      const [enrichedTable] = await this.attachAssignedWaiterNames(restaurantId, [table]);
+      return this.transformTable(enrichedTable);
     } catch (error) {
       logger.error('❌ Release table error:', error);
       throw error;
@@ -485,13 +629,14 @@ export class TableService {
       // Manual pagination if needed
       const skip = filters.skip || 0;
       const limit = filters.limit || 100;
-      const paginatedTables = tables?.slice(skip, skip + limit) || [];
+      const enrichedTables = await this.attachAssignedWaiterNames(restaurantId, tables || []);
+      const paginatedTables = enrichedTables?.slice(skip, skip + limit) || [];
 
       logger.info(`📊 Retrieved ${paginatedTables?.length || 0} tables for restaurant ${restaurantId}`);
 
       return {
         tables: this.transformTables(paginatedTables),
-        total: tables?.length || 0,
+        total: enrichedTables?.length || 0,
         limit: limit,
         skip: skip,
       };
@@ -537,7 +682,8 @@ export class TableService {
 
       if (error || !table) throw error || new Error('Table not found');
 
-      return this.transformTable(table);
+      const [enrichedTable] = await this.attachAssignedWaiterNames(restaurantId, [table]);
+      return this.transformTable(enrichedTable);
     } catch (error) {
       logger.error('❌ Get table by QR code error:', error);
       throw error;
@@ -569,6 +715,79 @@ export class TableService {
       };
     } catch (error) {
       logger.error('❌ Generate QR URL error:', error);
+      throw error;
+    }
+  }
+
+  static async claimTable(restaurantId, tableId, waiterId) {
+    try {
+      const { data: existingTable, error: existingTableError } = await supabase
+        .from('tables')
+        .select('*')
+        .eq('id', tableId)
+        .eq('restaurant_id', restaurantId)
+        .single();
+
+      if (existingTableError || !existingTable) {
+        throw existingTableError || new Error('Table not found');
+      }
+
+      if (!existingTable.locked_by_qr) {
+        const [enrichedTable] = await this.attachAssignedWaiterNames(restaurantId, [existingTable]);
+        return this.transformTable(enrichedTable);
+      }
+
+      if (existingTable.assigned_to && existingTable.assigned_to === waiterId) {
+        const [enrichedTable] = await this.attachAssignedWaiterNames(restaurantId, [existingTable]);
+        return this.transformTable(enrichedTable);
+      }
+
+      if (existingTable.assigned_to && existingTable.assigned_to !== waiterId) {
+        throw new Error('This QR table is locked to another waiter');
+      }
+
+      if (String(existingTable.status || '').toLowerCase() !== 'occupied') {
+        const [enrichedTable] = await this.attachAssignedWaiterNames(restaurantId, [existingTable]);
+        return this.transformTable(enrichedTable);
+      }
+
+      const { data: claimedTable, error: claimError } = await supabase
+        .from('tables')
+        .update({
+          assigned_to: waiterId,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', tableId)
+        .eq('restaurant_id', restaurantId)
+        .eq('locked_by_qr', true)
+        .or(`assigned_to.is.null,assigned_to.eq.${waiterId}`)
+        .select()
+        .single();
+
+      if (!claimError && claimedTable) {
+        const [enrichedTable] = await this.attachAssignedWaiterNames(restaurantId, [claimedTable]);
+        return this.transformTable(enrichedTable);
+      }
+
+      const { data: latestTable, error: latestTableError } = await supabase
+        .from('tables')
+        .select('*')
+        .eq('id', tableId)
+        .eq('restaurant_id', restaurantId)
+        .single();
+
+      if (latestTableError || !latestTable) {
+        throw latestTableError || new Error('Table not found');
+      }
+
+      if (latestTable.assigned_to === waiterId) {
+        const [enrichedTable] = await this.attachAssignedWaiterNames(restaurantId, [latestTable]);
+        return this.transformTable(enrichedTable);
+      }
+
+      throw new Error('This QR table is locked to another waiter');
+    } catch (error) {
+      logger.error('Claim table error:', error);
       throw error;
     }
   }

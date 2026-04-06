@@ -135,6 +135,15 @@ export const buildInvoiceData = ({
 
   const createdAt = order.updatedAt || order.createdAt || new Date().toISOString();
   const invoiceDate = billing.invoiceDate || createdAt;
+  const paymentStatus = String(order.paymentStatus || billing.paymentStatus || '').toLowerCase();
+  const paidAmount =
+    paymentStatus === 'paid'
+      ? (
+        billing.paidAmount ||
+        order.settlement?.amountReceived ||
+        computedSummary.grandTotal
+      )
+      : 0;
 
   return {
     restaurantName: restaurant?.name || order?.restaurantName || 'Restaurant',
@@ -142,16 +151,15 @@ export const buildInvoiceData = ({
     phone: restaurant?.phone || '',
     gstin: restaurant?.gstNumber || '',
     fssai: restaurant?.fssai || '',
-    invoiceNumber: billing.invoiceNumber || `INV-${String(order.id || '').slice(-6).toUpperCase()}`,
+    invoiceNumber: billing.invoiceNumber || '',
     invoiceDate,
     orderType: order.orderType || (order.tableId ? 'dine-in' : 'takeaway'),
     tableNumber: order.tableNumber || '',
     cashierName: billing.cashierName || cashierName || '',
     paymentMode: billing.paymentMode || order.paymentMethod || '',
-    paidAmount:
-      billing.paidAmount ||
-      order.settlement?.amountReceived ||
-      computedSummary.grandTotal,
+    paymentStatus,
+    finalAmount: computedSummary.grandTotal,
+    paidAmount,
     customerName: order.online?.customerName || '',
     customerPhone: order.online?.customerPhone || order.loyalty?.customerPhone || '',
     kotReference: order.kitchenTickets?.length
