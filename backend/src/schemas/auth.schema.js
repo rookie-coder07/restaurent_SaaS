@@ -26,6 +26,17 @@ export const changePasswordSchema = Joi.object({
   confirmPassword: Joi.string().valid(Joi.ref('newPassword')).required(),
 });
 
+export const requestPasswordResetSchema = Joi.object({
+  email: Joi.string().email().lowercase().required(),
+  role: Joi.string().valid('manager', 'pos').required(),
+});
+
+export const resetUserPasswordSchema = Joi.object({
+  requestId: Joi.string().uuid().required(),
+  newPassword: Joi.string().min(6).required(),
+  confirmPassword: Joi.string().valid(Joi.ref('newPassword')).required(),
+});
+
 export const createStaffSchema = Joi.object({
   name: Joi.string().trim().min(2).required(),
   email: Joi.string().email().lowercase().required(),

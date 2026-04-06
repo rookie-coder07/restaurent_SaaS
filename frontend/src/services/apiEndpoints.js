@@ -7,6 +7,9 @@ export const authAPI = {
   logout: () => api.post('/v1/auth/logout'),
   getCurrentUser: () => api.get('/v1/auth/me'),
   changePassword: (data) => api.post('/v1/auth/change-password', data),
+  requestPasswordReset: (data) => api.post('/v1/auth/request-password-reset', data),
+  getResetRequests: () => api.get('/v1/reset-requests'),
+  resetUserPassword: (data) => api.post('/v1/manager/reset-user-password', data),
 };
 
 export const restaurantAPI = {

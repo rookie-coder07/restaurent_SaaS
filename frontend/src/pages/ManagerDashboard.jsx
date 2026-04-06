@@ -28,6 +28,7 @@ import { useManagerStore } from '../context/managerStore';
 import Card from '../components/common/Card';
 import StatCard from '../components/common/StatCard';
 import EmptyState from '../components/common/EmptyState';
+import ResetRequestsPanel from '../components/manager/ResetRequestsPanel';
 
 const QUICK_ACTIONS = [
   { label: 'Quick Open Table', href: '/manager/tables', helper: 'Open or reassign a table fast' },
@@ -188,6 +189,8 @@ export default function ManagerDashboard() {
           </Card>
         </div>
       </div>
+
+      <ResetRequestsPanel />
 
       <div className="grid gap-4 xl:grid-cols-2">
         <Card>

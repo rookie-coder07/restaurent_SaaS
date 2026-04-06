@@ -4,6 +4,7 @@ import { ArrowLeft, Eye, EyeOff, Loader, ShieldCheck, Sparkles } from 'lucide-re
 import { useAuth } from '../hooks/useAuth';
 import { useAuthStore } from '../context/authStore';
 import supabase from '../config/supabase';
+import { authAPI } from '../services/apiEndpoints';
 import { validateEmail } from '../utils/validators';
 import { canAccessPortal, resolvePortalHome } from '../utils/portalRouting';
 import { clearPortalSession, getValidPortalSession } from '../utils/authStorage';
@@ -65,6 +66,7 @@ export default function Login({ portal = 'admin', initialModeKey = '' }) {
     [config.modes, selectedModeKey]
   );
   const canResetAdminPassword = portal === 'admin' && !selectedMode?.isStaff && selectedModeKey === 'owner';
+  const canRequestManualReset = Boolean(selectedMode?.isStaff);
 
   useEffect(() => {
     setSelectedModeKey(initialModeKey || config.modes[0]?.key || 'owner');
@@ -120,7 +122,9 @@ export default function Login({ portal = 'admin', initialModeKey = '' }) {
     if (!validateEmail(emailToReset)) {
       setForgotPasswordState({
         isLoading: false,
-        error: 'Enter a valid admin email address.',
+        error: canResetAdminPassword
+          ? 'Enter a valid admin email address.'
+          : 'Enter a valid work email address.',
         success: '',
       });
       return;
@@ -132,25 +136,49 @@ export default function Login({ portal = 'admin', initialModeKey = '' }) {
       success: '',
     });
 
-    const redirectTo = `${window.location.origin}/admin/reset-password`;
-    const { error } = await supabase.auth.resetPasswordForEmail(emailToReset, {
-      redirectTo,
-    });
+    if (canResetAdminPassword) {
+      const redirectTo = `${window.location.origin}/admin/reset-password`;
+      const { error } = await supabase.auth.resetPasswordForEmail(emailToReset, {
+        redirectTo,
+      });
 
-    if (error) {
+      if (error) {
+        setForgotPasswordState({
+          isLoading: false,
+          error: error.message || 'Unable to send reset link right now.',
+          success: '',
+        });
+        return;
+      }
+
       setForgotPasswordState({
         isLoading: false,
-        error: error.message || 'Unable to send reset link right now.',
-        success: '',
+        error: '',
+        success: 'Reset link sent to your email',
       });
       return;
     }
 
-    setForgotPasswordState({
-      isLoading: false,
-      error: '',
-      success: 'Reset link sent to your email',
-    });
+    try {
+      await authAPI.requestPasswordReset({
+        email: emailToReset,
+        role: selectedModeKey === 'manager' ? 'manager' : 'pos',
+      });
+
+      setForgotPasswordState({
+        isLoading: false,
+        error: '',
+        success: 'Request sent to Manager/Admin',
+      });
+      return;
+    } catch (error) {
+      setForgotPasswordState({
+        isLoading: false,
+        error: error.response?.data?.message || 'Unable to send reset request right now.',
+        success: '',
+      });
+      return;
+    }
   };
 
   return (
@@ -245,7 +273,7 @@ export default function Login({ portal = 'admin', initialModeKey = '' }) {
                 {errors.password ? <p className="mt-2 text-sm text-red-500">{errors.password}</p> : null}
               </div>
 
-              {canResetAdminPassword ? (
+              {canResetAdminPassword || canRequestManualReset ? (
                 <div className="flex items-center justify-end">
                   <button
                     type="button"
@@ -271,21 +299,27 @@ export default function Login({ portal = 'admin', initialModeKey = '' }) {
               </Button>
             </form>
 
-            {canResetAdminPassword && showForgotPassword ? (
+            {(canResetAdminPassword || canRequestManualReset) && showForgotPassword ? (
               <form onSubmit={handleForgotPassword} className="mt-5 rounded-[1.5rem] border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-4">
-                <p className="text-sm font-semibold text-[var(--color-text)]">Reset admin password</p>
+                <p className="text-sm font-semibold text-[var(--color-text)]">
+                  {canResetAdminPassword ? 'Reset admin password' : 'Request password reset'}
+                </p>
                 <p className="mt-1 text-sm text-[var(--color-text-muted)]">
-                  Enter your admin email to receive a secure reset link.
+                  {canResetAdminPassword
+                    ? 'Enter your admin email to receive a secure reset link.'
+                    : selectedModeKey === 'manager'
+                      ? 'Send a reset request to Admin. Your password will be reset manually.'
+                      : 'Send a reset request to Manager or Admin. Your password will be reset manually.'}
                 </p>
                 <div className="mt-4">
                   <Input
-                    label="Admin Email"
+                    label={canResetAdminPassword ? 'Admin Email' : 'Work Email'}
                     type="email"
                     name="forgot-email"
                     autoComplete="email"
                     value={forgotEmail}
                     onChange={(e) => setForgotEmail(e.target.value)}
-                    placeholder="owner@restaurant.com"
+                    placeholder={canResetAdminPassword ? 'owner@restaurant.com' : 'staff@restaurant.com'}
                   />
                 </div>
                 <div className="mt-4 flex flex-col-reverse gap-3 sm:flex-row">
@@ -310,7 +344,11 @@ export default function Login({ portal = 'admin', initialModeKey = '' }) {
                     disabled={forgotPasswordState.isLoading}
                   >
                     {forgotPasswordState.isLoading ? <Loader className="h-4 w-4 animate-spin" /> : null}
-                    {forgotPasswordState.isLoading ? 'Sending...' : 'Send Reset Link'}
+                    {forgotPasswordState.isLoading
+                      ? 'Sending...'
+                      : canResetAdminPassword
+                        ? 'Send Reset Link'
+                        : 'Send Reset Request'}
                   </Button>
                 </div>
               </form>

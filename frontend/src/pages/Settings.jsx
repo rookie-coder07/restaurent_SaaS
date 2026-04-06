@@ -4,6 +4,7 @@ import useTheme from '../hooks/useTheme';
 import Card from '../components/common/Card';
 import Button from '../components/common/Button';
 import Input from '../components/common/Input';
+import ChangePasswordCard from '../components/auth/ChangePasswordCard';
 import { restaurantAPI } from '../services/apiEndpoints';
 import { useApi } from '../hooks/useApi';
 import { getRestaurantPrinterSettings } from '../utils/printerConfig';
@@ -22,6 +23,9 @@ const emptyKotPrinter = () => ({
 export default function Settings() {
   const { theme, setTheme, themes } = useTheme();
   const user = useAuthStore((state) => state.user);
+  const userRole = user?.role || '';
+  const isOwner = userRole === 'owner';
+  const isStaffPortalUser = userRole === 'manager' || userRole === 'staff';
   const { data: profileData, loading } = useApi(restaurantAPI.getProfile);
   const [profileForm, setProfileForm] = useState({
     name: '',
@@ -285,9 +289,13 @@ export default function Settings() {
         <div>
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.28em] text-[var(--color-text-subtle)]">Workspace settings</p>
-            <h1 className="mt-2 text-2xl font-bold text-[var(--color-text)] sm:text-3xl">Profile, preferences, and theme</h1>
+            <h1 className="mt-2 text-2xl font-bold text-[var(--color-text)] sm:text-3xl">
+              {isOwner ? 'Profile, preferences, and theme' : 'Account security and theme'}
+            </h1>
             <p className="mt-2 max-w-2xl text-sm leading-6 text-[var(--color-text-muted)]">
-              Keep restaurant identity, workspace behavior, and the theme system aligned in one compact place.
+              {isOwner
+                ? 'Keep restaurant identity, workspace behavior, and the theme system aligned in one compact place.'
+                : 'Change your password securely and keep your workspace comfortable during service.'}
             </p>
           </div>
         </div>
@@ -295,7 +303,8 @@ export default function Settings() {
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
         <div className="space-y-4">
-          <Card className="overflow-hidden p-5">
+          {isOwner ? (
+            <Card className="overflow-hidden p-5">
             <div className="flex items-start gap-3">
               <div className="flex h-10 w-10 items-center justify-center rounded-[var(--radius-control)] bg-[var(--color-primary-soft)] text-[var(--color-primary)]">
                 <UserCircle2 className="h-5 w-5" />
@@ -327,9 +336,11 @@ export default function Settings() {
                 {saveState.profile === 'saving' ? 'Saving...' : 'Save profile'}
               </Button>
             </div>
-          </Card>
+            </Card>
+          ) : null}
 
-          <Card className="overflow-hidden p-5">
+          {isOwner ? (
+            <Card className="overflow-hidden p-5">
             <div className="flex items-start gap-3">
               <div className="flex h-10 w-10 items-center justify-center rounded-[var(--radius-control)] bg-[var(--color-primary-soft)] text-[var(--color-primary)]">
                 <Settings2 className="h-5 w-5" />
@@ -562,9 +573,10 @@ export default function Settings() {
                 {saveState.settings === 'saving' ? 'Saving...' : 'Save settings'}
               </Button>
             </div>
-          </Card>
+            </Card>
+          ) : null}
 
-          {user?.role === 'owner' ? (
+          {isOwner ? (
             <Card className="overflow-hidden p-5">
               <div className="flex items-start gap-3">
                 <div className="flex h-10 w-10 items-center justify-center rounded-[var(--radius-control)] bg-[var(--color-primary-soft)] text-[var(--color-primary)]">
@@ -621,6 +633,17 @@ export default function Settings() {
                 </Button>
               </div>
             </Card>
+          ) : null}
+
+          {isStaffPortalUser ? (
+            <ChangePasswordCard
+              title="Change Password"
+              helper={
+                userRole === 'manager'
+                  ? 'Update your manager account password here. If you ever forget it, request a manual reset from Admin.'
+                  : 'Update your POS password here. If you ever forget it, send a reset request to Manager or Admin.'
+              }
+            />
           ) : null}
         </div>
 

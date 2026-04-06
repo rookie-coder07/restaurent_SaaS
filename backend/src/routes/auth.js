@@ -6,6 +6,7 @@ import {
   loginSchema,
   refreshTokenSchema,
   changePasswordSchema,
+  requestPasswordResetSchema,
 } from '../schemas/auth.schema.js';
 import * as authController from '../controllers/authController.js';
 import { authMiddleware } from '../middleware/auth.js';
@@ -17,6 +18,7 @@ router.post('/register', authLimiter, validateRequest(registerSchema), authContr
 router.post('/login', authLimiter, validateRequest(loginSchema), authController.loginRestaurant);
 router.post('/staff/login', authLimiter, validateRequest(loginSchema), authController.loginStaff);
 router.post('/refresh-token', validateRequest(refreshTokenSchema), authController.refreshToken);
+router.post('/request-password-reset', authLimiter, validateRequest(requestPasswordResetSchema), authController.requestPasswordReset);
 
 // Protected routes
 router.post('/logout', authMiddleware, authController.logout);

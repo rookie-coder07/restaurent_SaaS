@@ -49,6 +49,7 @@ const posMenuItems = [
   { icon: Receipt, label: 'Billing', href: '/pos', roles: ['staff'] },
   { icon: ListOrdered, label: 'Orders', href: '/pos/orders', roles: ['staff'] },
   { icon: LayoutGrid, label: 'Tables', href: '/pos/tables', roles: ['staff'] },
+  { icon: Palette, label: 'Settings', href: '/pos/settings', roles: ['staff'] },
 ];
 
 const kotMenuItems = [

@@ -9,6 +9,11 @@ import analyticsRoutes from './analytics.js';
 import customerRoutes from './customer.js';
 import inventoryRoutes from './inventory.js';
 import takeawayRoutes from './takeaway.js';
+import { authMiddleware } from '../middleware/auth.js';
+import { tenantIsolation } from '../middleware/tenantIsolation.js';
+import { validateRequest } from '../middleware/validation.js';
+import { resetUserPasswordSchema } from '../schemas/auth.schema.js';
+import * as authController from '../controllers/authController.js';
 
 const router = express.Router();
 
@@ -16,6 +21,14 @@ const apiVersion = process.env.API_VERSION || 'v1';
 
 // Public/Auth routes
 router.use(`/${apiVersion}/auth`, authRoutes);
+router.get(`/${apiVersion}/reset-requests`, authMiddleware, tenantIsolation, authController.getResetRequests);
+router.post(
+  `/${apiVersion}/manager/reset-user-password`,
+  authMiddleware,
+  tenantIsolation,
+  validateRequest(resetUserPasswordSchema),
+  authController.resetUserPassword
+);
 
 // Customer routes (public)
 router.use(`/${apiVersion}/customer`, customerRoutes);

@@ -160,6 +160,7 @@ function App() {
             <Route path="/pos" element={withSuspense(<POS />)} />
             <Route path="/pos/orders" element={withSuspense(<POSOrders />)} />
             <Route path="/pos/tables" element={withSuspense(<Tables />)} />
+            <Route path="/pos/settings" element={withSuspense(<Settings />)} />
             <Route path="/pos/bill/:orderId" element={withSuspense(<BillView />)} />
             <Route path="/pos/kot/:orderId" element={withSuspense(<KitchenTicket />)} />
           </Route>

@@ -83,6 +83,17 @@ export const errorHandler = (err, req, res, next) => {
     );
   }
 
+  if (
+    String(err?.message || '').includes('password_reset_requests') ||
+    String(err?.message || '').includes("Could not find the 'password_reset_requests'")
+  ) {
+    return sendError(
+      res,
+      500,
+      'Your database is missing password_reset_requests. Apply the password reset request migration and restart the backend.'
+    );
+  }
+
   const businessMessage = String(err?.message || '');
   const isBusinessRuleError =
     businessMessage.includes('Cash received must be at least the bill total') ||
@@ -94,6 +105,17 @@ export const errorHandler = (err, req, res, next) => {
     businessMessage.includes('Add at least one item before sending to kitchen') ||
     businessMessage.includes('No new kitchen changes to send for this bill') ||
     businessMessage.includes('Not enough stock for') ||
+    businessMessage.includes('No matching account found for this reset request') ||
+    businessMessage.includes('More than one matching account was found') ||
+    businessMessage.includes('A password reset request is already pending for this account') ||
+    businessMessage.includes('Only manager or admin can view reset requests') ||
+    businessMessage.includes('Only manager or admin can reset passwords from requests') ||
+    businessMessage.includes('This reset request has already been handled') ||
+    businessMessage.includes('You are not allowed to process this reset request') ||
+    businessMessage.includes('Requested user account not found') ||
+    businessMessage.includes('Reset request role does not match the target account') ||
+    businessMessage.includes('You cannot reset your own password through reset requests') ||
+    businessMessage.includes('Password reset requests are available only for manager and POS accounts') ||
     businessMessage.includes('Only ') && businessMessage.includes('loyalty points are available');
 
   if (isBusinessRuleError) {

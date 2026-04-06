@@ -120,6 +120,38 @@ export const changePassword = asyncHandler(async (req, res) => {
   return sendSuccess(res, 200, null, 'Password changed successfully');
 });
 
+export const requestPasswordReset = asyncHandler(async (req, res) => {
+  const { email, role } = req.body;
+
+  const result = await AuthService.requestPasswordReset({
+    email,
+    requestedRole: role,
+  });
+
+  return sendSuccess(res, 201, result, 'Password reset request created');
+});
+
+export const getResetRequests = asyncHandler(async (req, res) => {
+  const requests = await AuthService.getPendingResetRequests(req.user.restaurantId, req.user.role);
+
+  return sendSuccess(res, 200, {
+    items: requests,
+  }, 'Pending reset requests fetched');
+});
+
+export const resetUserPassword = asyncHandler(async (req, res) => {
+  const { requestId, newPassword } = req.body;
+
+  const result = await AuthService.resetUserPasswordFromRequest({
+    restaurantId: req.user.restaurantId,
+    actor: req.user,
+    requestId,
+    newPassword,
+  });
+
+  return sendSuccess(res, 200, result, 'Password reset completed');
+});
+
 export const getCurrentUser = asyncHandler(async (req, res) => {
   const currentUser = await AuthService.getCurrentUserProfile(req.user);
 

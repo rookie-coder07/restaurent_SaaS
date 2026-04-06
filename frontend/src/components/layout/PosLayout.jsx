@@ -16,6 +16,10 @@ const PAGE_META = {
     section: 'POS Tables',
     title: 'Live Floor View',
   },
+  '/pos/settings': {
+    section: 'POS Settings',
+    title: 'Account Settings',
+  },
 };
 
 export default function PosLayout({ children }) {
