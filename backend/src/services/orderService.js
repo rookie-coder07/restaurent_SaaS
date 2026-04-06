@@ -28,10 +28,13 @@ export class OrderService {
   static ONLINE_PAYMENT_STATES = ['pending', 'paid', 'cash_on_delivery', 'failed', 'refunded'];
   static inFlightCreateRequests = new Map();
   static restaurantTimezoneCache = new Map();
+  static restaurantTimezoneInFlight = new Map();
   static RESTAURANT_TIMEZONE_CACHE_TTL_MS = 5 * 60 * 1000;
   static menuCatalogCache = new Map();
+  static menuCatalogInFlight = new Map();
   static MENU_CATALOG_CACHE_TTL_MS = 60 * 1000;
   static displayOrderSequenceCache = new Map();
+  static displayOrderSequenceInFlight = new Map();
   static DISPLAY_ORDER_SEQUENCE_CACHE_TTL_MS = 60 * 1000;
 
   static emitOrderEvent(restaurantId, type, order, extra = {}) {
@@ -206,23 +209,37 @@ export class OrderService {
       return cachedEntry.timezone;
     }
 
-    const { data: restaurant, error } = await supabase
-      .from('restaurants')
-      .select('timezone')
-      .eq('id', restaurantId)
-      .single();
-
-    if (error || !restaurant) {
-      throw error || new Error('Restaurant not found');
+    const existingPromise = this.restaurantTimezoneInFlight.get(cacheKey);
+    if (existingPromise) {
+      return await existingPromise;
     }
 
-    const timezone = restaurant.timezone || 'Asia/Kolkata';
-    this.restaurantTimezoneCache.set(cacheKey, {
-      timezone,
-      expiresAt: Date.now() + this.RESTAURANT_TIMEZONE_CACHE_TTL_MS,
-    });
+    const fetchPromise = (async () => {
+      try {
+        const { data: restaurant, error } = await supabase
+          .from('restaurants')
+          .select('timezone')
+          .eq('id', restaurantId)
+          .single();
 
-    return timezone;
+        if (error || !restaurant) {
+          throw error || new Error('Restaurant not found');
+        }
+
+        const timezone = restaurant.timezone || 'Asia/Kolkata';
+        this.restaurantTimezoneCache.set(cacheKey, {
+          timezone,
+          expiresAt: Date.now() + this.RESTAURANT_TIMEZONE_CACHE_TTL_MS,
+        });
+
+        return timezone;
+      } finally {
+        this.restaurantTimezoneInFlight.delete(cacheKey);
+      }
+    })();
+
+    this.restaurantTimezoneInFlight.set(cacheKey, fetchPromise);
+    return await fetchPromise;
   }
 
   static getMenuCatalogCacheKey(restaurantId, menuItemIds = []) {
@@ -254,48 +271,62 @@ export class OrderService {
       return cachedEntry.value;
     }
 
-    const { data: menuItems, error: menuItemsError } = await supabase
-      .from('menu_items')
-      .select('id, name, price, category_id, tags')
-      .eq('restaurant_id', restaurantId)
-      .in('id', normalizedMenuItemIds)
-      .eq('status', 'active');
-
-    if (menuItemsError) {
-      throw menuItemsError;
+    const existingPromise = this.menuCatalogInFlight.get(cacheKey);
+    if (existingPromise) {
+      return await existingPromise;
     }
 
-    const categoryIds = Array.from(
-      new Set((menuItems || []).map((item) => item.category_id).filter(Boolean))
-    );
+    const fetchPromise = (async () => {
+      try {
+        const { data: menuItems, error: menuItemsError } = await supabase
+          .from('menu_items')
+          .select('id, name, price, category_id, tags')
+          .eq('restaurant_id', restaurantId)
+          .in('id', normalizedMenuItemIds)
+          .eq('status', 'active');
 
-    let categoryMap = new Map();
+        if (menuItemsError) {
+          throw menuItemsError;
+        }
 
-    if (categoryIds.length > 0) {
-      const { data: categories, error: categoryError } = await supabase
-        .from('menu_categories')
-        .select('id, name')
-        .eq('restaurant_id', restaurantId)
-        .in('id', categoryIds);
+        const categoryIds = Array.from(
+          new Set((menuItems || []).map((item) => item.category_id).filter(Boolean))
+        );
 
-      if (categoryError) {
-        throw categoryError;
+        let categoryMap = new Map();
+
+        if (categoryIds.length > 0) {
+          const { data: categories, error: categoryError } = await supabase
+            .from('menu_categories')
+            .select('id, name')
+            .eq('restaurant_id', restaurantId)
+            .in('id', categoryIds);
+
+          if (categoryError) {
+            throw categoryError;
+          }
+
+          categoryMap = new Map((categories || []).map((category) => [category.id, category.name]));
+        }
+
+        const snapshot = {
+          menuItems: menuItems || [],
+          categoryMap,
+        };
+
+        this.menuCatalogCache.set(cacheKey, {
+          value: snapshot,
+          expiresAt: now + this.MENU_CATALOG_CACHE_TTL_MS,
+        });
+
+        return snapshot;
+      } finally {
+        this.menuCatalogInFlight.delete(cacheKey);
       }
+    })();
 
-      categoryMap = new Map((categories || []).map((category) => [category.id, category.name]));
-    }
-
-    const snapshot = {
-      menuItems: menuItems || [],
-      categoryMap,
-    };
-
-    this.menuCatalogCache.set(cacheKey, {
-      value: snapshot,
-      expiresAt: now + this.MENU_CATALOG_CACHE_TTL_MS,
-    });
-
-    return snapshot;
+    this.menuCatalogInFlight.set(cacheKey, fetchPromise);
+    return await fetchPromise;
   }
 
   static getDisplayOrderSequenceCacheKey(restaurantId, dateKey) {
@@ -313,28 +344,41 @@ export class OrderService {
       return this.formatDisplayOrderNumber(dateKey, cachedEntry.nextSequence);
     }
 
-    const prefix = `ORD-${dateKey.replace(/-/g, '')}-`;
-    const { data, error } = await supabase
-      .from('orders')
-      .select('display_order_number')
-      .eq('restaurant_id', restaurantId)
-      .like('display_order_number', `${prefix}%`)
-      .order('display_order_number', { ascending: false })
-      .limit(1);
-
-    if (error) {
-      throw error;
+    const existingPromise = this.displayOrderSequenceInFlight.get(cacheKey);
+    if (existingPromise) {
+      await existingPromise;
+      return await this.reserveDisplayOrderNumber(restaurantId, timezone, createdAt);
     }
 
-    const latestSequence = this.extractDisplayOrderSequence(data?.[0]?.display_order_number, dateKey);
-    const nextSequence = latestSequence + 1;
+    const warmupPromise = (async () => {
+      try {
+        const prefix = `ORD-${dateKey.replace(/-/g, '')}-`;
+        const { data, error } = await supabase
+          .from('orders')
+          .select('display_order_number')
+          .eq('restaurant_id', restaurantId)
+          .like('display_order_number', `${prefix}%`)
+          .order('display_order_number', { ascending: false })
+          .limit(1);
 
-    this.displayOrderSequenceCache.set(cacheKey, {
-      nextSequence,
-      expiresAt: now + this.DISPLAY_ORDER_SEQUENCE_CACHE_TTL_MS,
-    });
+        if (error) {
+          throw error;
+        }
 
-    return this.formatDisplayOrderNumber(dateKey, nextSequence);
+        const latestSequence = this.extractDisplayOrderSequence(data?.[0]?.display_order_number, dateKey);
+
+        this.displayOrderSequenceCache.set(cacheKey, {
+          nextSequence: latestSequence,
+          expiresAt: now + this.DISPLAY_ORDER_SEQUENCE_CACHE_TTL_MS,
+        });
+      } finally {
+        this.displayOrderSequenceInFlight.delete(cacheKey);
+      }
+    })();
+
+    this.displayOrderSequenceInFlight.set(cacheKey, warmupPromise);
+    await warmupPromise;
+    return await this.reserveDisplayOrderNumber(restaurantId, timezone, createdAt);
   }
 
   static async assignDisplayOrderNumber(restaurantId, orderId, createdAt, timezone = 'Asia/Kolkata') {
@@ -1442,23 +1486,6 @@ export class OrderService {
       const normalizedOrderType = this.normalizeOrderType(orderData.orderType, orderData.tableId ? 'dine-in' : 'takeaway');
       const resolvedTableId = normalizedOrderType === 'dine-in' ? orderData.tableId : null;
       const normalizedOrderSource = this.normalizeOrderSource(orderData.orderSource || orderData.origin, orderData.origin === 'qr' ? 'qr' : 'manual');
-
-      if (normalizedRequestId) {
-        const { data: existingRequestedOrder, error: existingRequestedOrderError } = await supabase
-          .from('orders')
-          .select('id')
-          .eq('restaurant_id', finalRestaurantId)
-          .eq('request_id', normalizedRequestId)
-          .maybeSingle();
-
-        if (existingRequestedOrderError) {
-          throw existingRequestedOrderError;
-        }
-
-        if (existingRequestedOrder?.id) {
-          return await this.getOrderById(finalRestaurantId, existingRequestedOrder.id);
-        }
-      }
 
       if (normalizedOrderType === 'dine-in' && resolvedTableId) {
         const existingOpenBill = await this.getActiveOrderByTable(finalRestaurantId, resolvedTableId);
