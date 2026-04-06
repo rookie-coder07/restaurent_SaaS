@@ -1,19 +1,45 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 export const usePolling = (apiFunction, interval = 5000, shouldPoll = true) => {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const isMountedRef = useRef(true);
+  const inFlightRef = useRef(false);
+  const latestDataRef = useRef(null);
+
+  useEffect(() => () => {
+    isMountedRef.current = false;
+  }, []);
+
   const fetchData = useCallback(async () => {
+    if (inFlightRef.current) {
+      return latestDataRef.current;
+    }
+
+    inFlightRef.current = true;
     try {
-      setLoading(true);
+      if (isMountedRef.current) {
+        setLoading(true);
+      }
       const response = await apiFunction();
-      setData(response.data?.data || response.data);
-      setError(null);
+      const nextData = response.data?.data || response.data;
+      if (isMountedRef.current) {
+        setData(nextData);
+        setError(null);
+      }
+      latestDataRef.current = nextData;
+      return nextData;
     } catch (err) {
-      setError(err.response?.data?.message || err.message);
+      if (isMountedRef.current) {
+        setError(err.response?.data?.message || err.message);
+      }
+      throw err;
     } finally {
-      setLoading(false);
+      inFlightRef.current = false;
+      if (isMountedRef.current) {
+        setLoading(false);
+      }
     }
   }, [apiFunction]);
 

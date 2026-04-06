@@ -1708,7 +1708,7 @@ export class OrderService {
 
       const { data: restaurantSettings, error: restaurantSettingsError } = await supabase
         .from('restaurants')
-        .select('*')
+        .select('id, enable_gst, default_gst_percent, default_cgst_percent, default_sgst_percent')
         .eq('id', restaurantId)
         .single();
 
@@ -2342,7 +2342,21 @@ export class OrderService {
       const { data: orders, error } = await supabase
         .from('orders')
         .select(`
-          *,
+          id,
+          restaurant_id,
+          table_id,
+          status,
+          total_amount,
+          final_amount,
+          display_order_number,
+          request_id,
+          payment_method,
+          payment_status,
+          order_type,
+          order_source,
+          notes,
+          created_at,
+          updated_at,
           order_items (
             id,
             menu_item_id,
@@ -2507,7 +2521,21 @@ export class OrderService {
       const { data: orders, error } = await supabase
         .from('orders')
         .select(`
-          *,
+          id,
+          restaurant_id,
+          table_id,
+          status,
+          total_amount,
+          final_amount,
+          display_order_number,
+          request_id,
+          payment_method,
+          payment_status,
+          order_type,
+          order_source,
+          notes,
+          created_at,
+          updated_at,
         order_items (
           id,
           menu_item_id,
@@ -2759,7 +2787,21 @@ export class OrderService {
       const { data: orders, error } = await supabase
         .from('orders')
         .select(`
-          *,
+          id,
+          restaurant_id,
+          table_id,
+          status,
+          total_amount,
+          final_amount,
+          display_order_number,
+          request_id,
+          payment_method,
+          payment_status,
+          order_type,
+          order_source,
+          notes,
+          created_at,
+          updated_at,
         order_items (
           id,
           menu_item_id,

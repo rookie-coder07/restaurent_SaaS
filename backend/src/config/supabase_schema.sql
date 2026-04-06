@@ -243,6 +243,8 @@ CREATE INDEX idx_order_items_order_id ON order_items(order_id);
 CREATE INDEX idx_order_items_sent_to_kitchen ON order_items(order_id, sent_to_kitchen);
 CREATE INDEX idx_kitchen_tickets_order_id ON kitchen_tickets(order_id);
 CREATE INDEX idx_tables_restaurant_id ON tables(restaurant_id);
+CREATE INDEX idx_tables_status ON tables(status);
+CREATE INDEX idx_orders_restaurant_status ON orders(restaurant_id, status);
 CREATE INDEX idx_daily_analytics_restaurant_id ON daily_analytics(restaurant_id);
 CREATE INDEX idx_daily_analytics_date ON daily_analytics(date);
 CREATE INDEX idx_inventory_items_restaurant_id ON inventory_items(restaurant_id);

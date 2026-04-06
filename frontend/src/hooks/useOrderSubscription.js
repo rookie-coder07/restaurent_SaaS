@@ -95,6 +95,7 @@ export const useOrderItemsSubscription = (orderId, onItemsUpdate) => {
 
 export const useOrderCountSubscription = (restaurantId, onCountUpdate) => {
   const onCountUpdateRef = useRef(onCountUpdate);
+  const debounceTimeoutRef = useRef(null);
 
   useEffect(() => {
     onCountUpdateRef.current = onCountUpdate;
@@ -130,6 +131,16 @@ export const useOrderCountSubscription = (restaurantId, onCountUpdate) => {
       }
     };
 
+    const scheduleRefetch = () => {
+      if (debounceTimeoutRef.current) {
+        clearTimeout(debounceTimeoutRef.current);
+      }
+
+      debounceTimeoutRef.current = setTimeout(() => {
+        refetchCounts();
+      }, 250);
+    };
+
     channel
       .on(
         'postgres_changes',
@@ -139,11 +150,14 @@ export const useOrderCountSubscription = (restaurantId, onCountUpdate) => {
           table: 'orders',
           filter: buildRestaurantFilter(restaurantId),
         },
-        refetchCounts
+        scheduleRefetch
       )
       .subscribe();
 
     return () => {
+      if (debounceTimeoutRef.current) {
+        clearTimeout(debounceTimeoutRef.current);
+      }
       supabase.removeChannel(channel);
     };
   }, [restaurantId]);

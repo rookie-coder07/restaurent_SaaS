@@ -7,6 +7,8 @@ export const useApi = (apiFunction, deps = []) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const apiFunctionRef = useRef(apiFunction);
+  const activeRequestRef = useRef(0);
+  const inFlightPromiseRef = useRef(null);
 
   useEffect(() => {
     apiFunctionRef.current = apiFunction;
@@ -20,20 +22,48 @@ export const useApi = (apiFunction, deps = []) => {
 
   const execute = useCallback(
     async (...args) => {
-      try {
-        setLoading(true);
-        setError(null);
+      if (inFlightPromiseRef.current) {
+        return inFlightPromiseRef.current;
+      }
 
-        const response = await apiFunctionRef.current(...args);
-        const result = response.data?.data || response;
-        setData(result);
-        return result;
-      } catch (err) {
-        const errorMessage = err.response?.data?.message || err.message;
-        setError(errorMessage);
-        throw err;
+      const requestId = activeRequestRef.current + 1;
+      activeRequestRef.current = requestId;
+
+      const requestPromise = (async () => {
+        try {
+          setLoading(true);
+          setError(null);
+
+          const response = await apiFunctionRef.current(...args);
+          const result = response.data?.data || response;
+          if (activeRequestRef.current === requestId) {
+            setData(result);
+          }
+          return result;
+        } catch (err) {
+          const errorMessage = err.response?.data?.message || err.message;
+          if (activeRequestRef.current === requestId) {
+            setError(errorMessage);
+          }
+          throw err;
+        } finally {
+          if (activeRequestRef.current === requestId) {
+            setLoading(false);
+          }
+          if (inFlightPromiseRef.current === requestPromise) {
+            inFlightPromiseRef.current = null;
+          }
+        }
+      })();
+
+      inFlightPromiseRef.current = requestPromise;
+
+      try {
+        return await requestPromise;
       } finally {
-        setLoading(false);
+        if (inFlightPromiseRef.current === requestPromise) {
+          inFlightPromiseRef.current = null;
+        }
       }
     },
     []
@@ -48,19 +78,28 @@ export const useApi = (apiFunction, deps = []) => {
   }, [execute, restaurantId, ...deps]);
 
   const refetch = useCallback(async () => {
+    const requestId = activeRequestRef.current + 1;
+    activeRequestRef.current = requestId;
+
     try {
       setLoading(true);
       setError(null);
       const response = await apiFunctionRef.current();
       const result = response.data?.data || response;
-      setData(result);
+      if (activeRequestRef.current === requestId) {
+        setData(result);
+      }
       return result;
     } catch (err) {
       const errorMessage = err.response?.data?.message || err.message;
-      setError(errorMessage);
+      if (activeRequestRef.current === requestId) {
+        setError(errorMessage);
+      }
       throw err;
     } finally {
-      setLoading(false);
+      if (activeRequestRef.current === requestId) {
+        setLoading(false);
+      }
     }
   }, []);
 
