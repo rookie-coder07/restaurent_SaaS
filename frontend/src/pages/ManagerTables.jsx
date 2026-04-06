@@ -5,6 +5,7 @@ import useAutoRefresh from '../hooks/useAutoRefresh';
 import { orderAPI, restaurantAPI, tableAPI } from '../services/apiEndpoints';
 import { useManagerStore } from '../context/managerStore';
 import { getTableActivity } from '../utils/managerPortal';
+import { subscribeToOrderEvents } from '../utils/liveOrderEvents';
 import Card from '../components/common/Card';
 import Button from '../components/common/Button';
 import Modal from '../components/common/Modal';
@@ -14,7 +15,6 @@ export default function ManagerTables() {
   const { data: tablesData = {}, loading, refetch: refetchTables } = useApi(() => tableAPI.getTables({ limit: 200 }));
   const { data: ordersData = {}, refetch: refetchOrders } = useApi(orderAPI.getOpenBills);
   const { data: staffData = {}, refetch: refetchStaff } = useApi(() => restaurantAPI.getStaff({ limit: 100, skip: 0, isActive: true }));
-  const tableAssignments = useManagerStore((state) => state.tableAssignments);
   const tableClosures = useManagerStore((state) => state.tableClosures);
   const tableTransfers = useManagerStore((state) => state.tableTransfers);
   const tableMerges = useManagerStore((state) => state.tableMerges);
@@ -35,12 +35,25 @@ export default function ManagerTables() {
   const tables = tablesData?.tables || [];
   const openBills = Array.isArray(ordersData) ? ordersData : [];
   const waiters = (staffData?.staff || []).filter((member) => member.role === 'staff');
+  const persistedTableAssignments = useMemo(
+    () =>
+      waiters.reduce((accumulator, waiter) => {
+        (waiter.assignedTables || []).forEach((tableId) => {
+          if (tableId) {
+            accumulator[tableId] = waiter.id;
+          }
+        });
+
+        return accumulator;
+      }, {}),
+    [waiters]
+  );
   const enrichedTables = useMemo(
     () =>
       tables.map((table) =>
-        getTableActivity(table, openBills, tableAssignments, tableClosures, tableTransfers, tableMerges, tables)
+        getTableActivity(table, openBills, persistedTableAssignments, tableClosures, tableTransfers, tableMerges, tables)
       ),
-    [openBills, tableAssignments, tableClosures, tableMerges, tableTransfers, tables]
+    [openBills, persistedTableAssignments, tableClosures, tableMerges, tableTransfers, tables]
   );
   const visibleTables = useMemo(
     () => enrichedTables.filter((table) => !table.isMergedSecondary),
@@ -56,7 +69,7 @@ export default function ManagerTables() {
   );
   const freeTables = visibleTables.filter((table) => table.effectiveStatus === 'open').length;
   const occupiedTables = visibleTables.filter((table) => table.effectiveStatus === 'busy').length;
-  const assignedWaiter = selectedTable ? waiters.find((waiter) => waiter.id === tableAssignments[selectedTable.id]) : null;
+  const assignedWaiter = selectedTable ? waiters.find((waiter) => waiter.id === persistedTableAssignments[selectedTable.id]) : null;
   const mergeOptions = useMemo(
     () =>
       visibleTables.filter(
@@ -82,6 +95,14 @@ export default function ManagerTables() {
 
   useAutoRefresh(() => Promise.allSettled([refetchTables(), refetchOrders(), refetchStaff()]), 12000);
 
+  useEffect(() => {
+    const cleanup = subscribeToOrderEvents(() => {
+      Promise.allSettled([refetchTables(), refetchOrders()]);
+    });
+
+    return cleanup;
+  }, [refetchOrders, refetchTables]);
+
   const closeMergePicker = () => {
     setShowMergePicker(false);
     setMergeSelection([]);
@@ -92,21 +113,73 @@ export default function ManagerTables() {
     await Promise.all([refetchTables(), refetchOrders()]);
   };
 
-  const handleAssign = (tableId, waiterId) => {
-    assignTable(tableId, waiterId);
-    logWaiterActivity({ waiterId, action: 'assigned_table', tableId });
-    setSuccess('Waiter assigned to table.');
+  const handleAssign = async (tableId, waiterId) => {
+    const targetWaiter = waiters.find((waiter) => waiter.id === waiterId);
+    if (!targetWaiter) {
+      setError('Selected waiter was not found.');
+      return;
+    }
+
+    setSubmitting(true);
     setError('');
+
+    try {
+      const currentlyAssignedWaiter = waiters.find((waiter) => (waiter.assignedTables || []).includes(tableId));
+      const nextTargetAssignments = Array.from(
+        new Set([...(targetWaiter.assignedTables || []).filter(Boolean), tableId])
+      );
+      const updateRequests = [
+        restaurantAPI.updateStaff(waiterId, { assignedTables: nextTargetAssignments }),
+      ];
+
+      if (currentlyAssignedWaiter && currentlyAssignedWaiter.id !== waiterId) {
+        updateRequests.push(
+          restaurantAPI.updateStaff(currentlyAssignedWaiter.id, {
+            assignedTables: (currentlyAssignedWaiter.assignedTables || []).filter((assignedTableId) => assignedTableId !== tableId),
+          })
+        );
+      }
+
+      await Promise.all(updateRequests);
+      assignTable(tableId, waiterId);
+      logWaiterActivity({ waiterId, action: 'assigned_table', tableId });
+      await Promise.allSettled([refetchStaff(), refetchTables(), refetchOrders()]);
+      setSuccess('Waiter assigned to table.');
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || requestError.message || 'Failed to assign waiter to table.');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
-  const handleUnassign = () => {
+  const handleUnassign = async () => {
     if (!selectedTable) {
       return;
     }
 
-    unassignTable(selectedTable.id);
-    setSuccess('Waiter unassigned from table.');
+    const currentWaiter = waiters.find((waiter) => (waiter.assignedTables || []).includes(selectedTable.id));
+    if (!currentWaiter) {
+      setSuccess('This table is already unassigned.');
+      setError('');
+      return;
+    }
+
+    setSubmitting(true);
     setError('');
+
+    try {
+      await restaurantAPI.updateStaff(currentWaiter.id, {
+        assignedTables: (currentWaiter.assignedTables || []).filter((tableId) => tableId !== selectedTable.id),
+      });
+      unassignTable(selectedTable.id);
+      logWaiterActivity({ waiterId: currentWaiter.id, action: 'unassigned_table', tableId: selectedTable.id });
+      await Promise.allSettled([refetchStaff(), refetchTables(), refetchOrders()]);
+      setSuccess('Waiter unassigned from table.');
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || requestError.message || 'Failed to clear the waiter assignment.');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const handleMerge = async () => {
@@ -266,11 +339,10 @@ export default function ManagerTables() {
                 {waiters.map((waiter) => (
                   <Button
                     key={waiter.id}
-                    variant={tableAssignments[selectedTable.id] === waiter.id ? 'secondary' : 'primary'}
+                    variant={persistedTableAssignments[selectedTable.id] === waiter.id ? 'secondary' : 'primary'}
                     onClick={() => handleAssign(selectedTable.id, waiter.id)}
-                  >
-                    <UserPlus2 className="h-4 w-4" />
-                    Assign {waiter.name}
+                    disabled={submitting}
+                  >                    Assign {waiter.name}
                   </Button>
                 ))}
               </div>

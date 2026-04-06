@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
 import useAutoRefresh from '../hooks/useAutoRefresh';
-import { orderAPI, restaurantAPI } from '../services/apiEndpoints';
+import { menuAPI, orderAPI, restaurantAPI } from '../services/apiEndpoints';
 import { useAuthStore } from '../context/authStore';
 import { useManagerStore } from '../context/managerStore';
 import { formatCurrency, formatDate, formatDisplayOrderNumber } from '../utils/formatters';
@@ -16,21 +16,88 @@ import Button from '../components/common/Button';
 import Input from '../components/common/Input';
 import Modal from '../components/common/Modal';
 import Toast from '../components/common/Toast';
+import MenuPanel from '../components/pos/MenuPanel';
 
-function getBillSummary(order) {
+function normalizeId(value) {
+  return value?.id || value?._id || value || '';
+}
+
+function normalizeCategory(category) {
+  return {
+    id: normalizeId(category),
+    name: category?.name || 'Uncategorized',
+  };
+}
+
+function normalizeMenuItem(item) {
+  return {
+    id: normalizeId(item),
+    name: item?.name || 'Untitled item',
+    description: item?.description || '',
+    price: Number(item?.unitPrice ?? item?.unit_price ?? item?.price ?? 0),
+    categoryId: item?.categoryId || item?.category_id || item?.category?.id || item?.category?._id || '',
+    isAvailable: item?.isAvailable !== false && item?.status !== 'inactive',
+  };
+}
+
+function getBillSummary(
+  order,
+  {
+    managerDiscountPercent = 0,
+    billingSettings = null,
+    defaultServiceCharge = 0,
+  } = {}
+) {
   const billing = order?.billing || order?.settlement?.billing || {};
   const settlement = order?.settlement || {};
-  const grandTotal = Number(
-    billing.grandTotal ??
-    settlement.finalTotal ??
-    order?.totalAmount ??
-    order?.total ??
-    0
+  const itemSubtotal = Number(
+    ((order?.items || order?.orderItems || []).reduce(
+      (sum, item) => sum + Number(item.quantity || item.qty || 0) * Number(item.unitPrice ?? item.price ?? 0),
+      0
+    )).toFixed(2)
   );
+  const storedGrandTotal = Number(billing.grandTotal ?? settlement.finalTotal ?? 0);
+  const fallbackGrandTotal = Number(order?.totalAmount ?? order?.total ?? itemSubtotal ?? 0);
+  const hasComputedInputs =
+    itemSubtotal > 0 ||
+    Number(billing.subtotal || 0) > 0 ||
+    Number(billing.orderDiscountAmount || 0) > 0 ||
+    Number(managerDiscountPercent || 0) > 0 ||
+    Number(billing.serviceCharge ?? defaultServiceCharge ?? 0) > 0;
+  const computedSummary = hasComputedInputs
+    ? calculateInvoiceSummary({
+        subtotal: Number(billing.subtotal || itemSubtotal || fallbackGrandTotal || 0),
+        orderDiscountAmount: Number(
+          billing.orderDiscountAmount ??
+            Math.max(0, Number(((itemSubtotal || 0) - Number(order?.totalAmount ?? order?.total ?? itemSubtotal ?? 0)).toFixed(2)))
+        ),
+        managerDiscountPercent,
+        loyaltyRedeemedAmount:
+          billing.loyaltyRedeemedAmount ??
+          order?.settlement?.loyalty?.redeemedAmount ??
+          order?.loyalty?.redeemedAmount ??
+          0,
+        packingCharge: Number(billing.packingCharge || 0),
+        serviceCharge: Number(billing.serviceCharge ?? defaultServiceCharge ?? 0),
+        deliveryCharge: Number(billing.deliveryCharge || 0),
+        cgstRate:
+          billing.cgstRate !== undefined && billing.cgstRate !== null
+            ? Number(billing.cgstRate)
+            : Number(billingSettings?.cgstRate || 0),
+        sgstRate:
+          billing.sgstRate !== undefined && billing.sgstRate !== null
+            ? Number(billing.sgstRate)
+            : Number(billingSettings?.sgstRate || 0),
+      })
+    : null;
+  const grandTotal =
+    storedGrandTotal > 0
+      ? storedGrandTotal
+      : Number(computedSummary?.grandTotal ?? fallbackGrandTotal);
   const paidAmount = Number(
-    billing.paidAmount ??
-    settlement.amountReceived ??
-    (String(order?.paymentStatus || '').toLowerCase() === 'paid' ? grandTotal : 0)
+    Number(billing.paidAmount ?? settlement.amountReceived ?? 0) > 0
+      ? Number(billing.paidAmount ?? settlement.amountReceived ?? 0)
+      : (String(order?.paymentStatus || '').toLowerCase() === 'paid' ? grandTotal : 0)
   );
 
   return {
@@ -42,11 +109,18 @@ function getBillSummary(order) {
   };
 }
 
+function normalizePhoneForDisplay(value) {
+  const digits = String(value || '').replace(/[^\d]/g, '');
+  return digits.length > 10 ? digits.slice(-10) : digits;
+}
+
 export default function ManagerBills() {
   const navigate = useNavigate();
   const { data: ordersData = {}, loading, execute: reloadOrders, refetch: refetchOrders } = useApi(() =>
     orderAPI.getOrders({ limit: 150 })
   );
+  const { data: menuData = {} } = useApi(() => menuAPI.getItems({ limit: 300 }));
+  const { data: categoriesData = {} } = useApi(menuAPI.getCategories);
   const { data: restaurantProfile = {}, refetch: refetchProfile } = useApi(restaurantAPI.getProfile);
   const user = useAuthStore((state) => state.user);
   const approvedDiscounts = useManagerStore((state) => state.approvedDiscounts);
@@ -65,6 +139,10 @@ export default function ManagerBills() {
   const [error, setError] = useState('');
   const [managerAlertMessage, setManagerAlertMessage] = useState('');
   const [actioningBillId, setActioningBillId] = useState('');
+  const [editingBill, setEditingBill] = useState(null);
+  const [editingItems, setEditingItems] = useState([]);
+  const [editSearchTerm, setEditSearchTerm] = useState('');
+  const [editActiveCategory, setEditActiveCategory] = useState('all');
   const hasPrimedAlertsRef = useRef(false);
   const previousUnpaidIdsRef = useRef(new Set());
 
@@ -83,10 +161,60 @@ export default function ManagerBills() {
     () => (ordersData?.items || []).filter((order) => order?.status !== 'cancelled'),
     [ordersData?.items]
   );
+  const menuItems = useMemo(
+    () => (menuData?.items || []).map(normalizeMenuItem).filter((item) => item.isAvailable),
+    [menuData]
+  );
+  const numericServiceCharge = Math.max(0, Number(restaurantProfile?.defaultServiceCharge || 0));
+  const restaurantBillingSettings = useMemo(
+    () => getRestaurantBillingSettings(restaurantProfile),
+    [restaurantProfile]
+  );
+  const editCategories = useMemo(() => {
+    const normalizedCategories = (categoriesData?.categories || []).map(normalizeCategory);
+    const query = String(editSearchTerm || '').trim().toLowerCase();
+    const searchedItems = !query
+      ? menuItems
+      : menuItems.filter((item) =>
+          [item.name, item.description]
+            .filter(Boolean)
+            .some((value) => String(value).toLowerCase().includes(query))
+        );
+
+    const groupedItems = normalizedCategories
+      .map((category) => ({
+        ...category,
+        items: searchedItems.filter((item) => String(item.categoryId || '') === String(category.id)),
+      }))
+      .filter((category) => category.items.length > 0);
+
+    const uncategorizedItems = searchedItems.filter(
+      (item) => !groupedItems.some((category) => category.items.some((categoryItem) => categoryItem.id === item.id))
+    );
+
+    const groups = [{ id: 'all', name: 'All', items: searchedItems }, ...groupedItems];
+
+    if (uncategorizedItems.length > 0) {
+      groups.push({ id: 'uncategorized', name: 'Uncategorized', items: uncategorizedItems });
+    }
+
+    return groups;
+  }, [categoriesData, editSearchTerm, menuItems]);
   const unpaidBills = useMemo(() => bills.filter(isUnpaid), [bills]);
   const pendingAmount = useMemo(
-    () => unpaidBills.reduce((sum, order) => sum + getBillSummary(order).dueAmount, 0),
-    [unpaidBills]
+    () =>
+      unpaidBills.reduce((sum, order) => {
+        const approval = order?.approvedDiscount || (order?.id ? approvedDiscounts[order.id] : null);
+        return (
+          sum +
+          getBillSummary(order, {
+            managerDiscountPercent: approval?.percent || 0,
+            billingSettings: restaurantBillingSettings,
+            defaultServiceCharge: numericServiceCharge,
+          }).dueAmount
+        );
+      }, 0),
+    [approvedDiscounts, numericServiceCharge, restaurantBillingSettings, unpaidBills]
   );
   const orderedBills = useMemo(
     () =>
@@ -101,30 +229,24 @@ export default function ManagerBills() {
       }),
     [bills]
   );
-  const billsByTable = useMemo(() => {
-    const grouped = new Map();
-    bills.forEach((bill) => {
-      const key = bill.tableNumber || 'Walk-in';
-      const existing = grouped.get(key) || [];
-      existing.push(bill);
-      grouped.set(key, existing);
-    });
-    return Array.from(grouped.entries());
-  }, [bills]);
-  const activeBillSummary = getBillSummary(payingBill);
   const activeApproval = payingBill?.approvedDiscount || (payingBill?.id ? approvedDiscounts[payingBill.id] : null);
+  const activeBillSummary = getBillSummary(payingBill, {
+    managerDiscountPercent: activeApproval?.percent || 0,
+    billingSettings: restaurantBillingSettings,
+    defaultServiceCharge: numericServiceCharge,
+  });
   const activeBilling = payingBill?.billing || payingBill?.settlement?.billing || {};
   const subtotalFromItems = useMemo(
     () =>
       Number(
-        ((payingBill?.items || []).reduce(
+        (((payingBill?.items || payingBill?.orderItems || [])).reduce(
           (sum, item) => sum + Number(item.quantity || item.qty || 0) * Number(item.unitPrice ?? item.price ?? 0),
           0
         )).toFixed(2)
       ),
     [payingBill]
   );
-  const previewSubtotal = Number(activeBilling.subtotal || subtotalFromItems || 0);
+  const previewSubtotal = Number(activeBilling.subtotal || subtotalFromItems || payingBill?.totalAmount || payingBill?.total || 0);
   const previewOrderDiscountAmount = Math.max(
     0,
     Number(
@@ -133,11 +255,6 @@ export default function ManagerBills() {
         Math.max(0, previewSubtotal - Number(payingBill?.totalAmount || payingBill?.total || 0))
       ).toFixed(2)
     )
-  );
-  const numericServiceCharge = Math.max(0, Number(restaurantProfile?.defaultServiceCharge || 0));
-  const restaurantBillingSettings = useMemo(
-    () => getRestaurantBillingSettings(restaurantProfile),
-    [restaurantProfile]
   );
   const previewSummaryBeforeLoyalty = useMemo(
     () =>
@@ -175,10 +292,32 @@ export default function ManagerBills() {
       }),
     [activeApproval?.percent, activeBilling.deliveryCharge, activeBilling.packingCharge, loyaltyRedeemPreview, numericServiceCharge, previewOrderDiscountAmount, previewSubtotal, restaurantBillingSettings]
   );
-  const billTotalWithServiceCharge = previewSummaryBeforeLoyalty.grandTotal;
-  const payableAfterLoyalty = previewSummary.grandTotal;
+  const billTotalWithServiceCharge = Number(previewSummaryBeforeLoyalty.grandTotal || activeBillSummary.grandTotal || 0);
+  const payableAfterLoyalty = Number(previewSummary.grandTotal || billTotalWithServiceCharge || 0);
   const paymentGap = Math.max(0, Number((payableAfterLoyalty - numericAmountReceived).toFixed(2)));
   const changeDue = Math.max(0, Number((numericAmountReceived - payableAfterLoyalty).toFixed(2)));
+  const editingSubtotal = useMemo(
+    () =>
+      Number(
+        editingItems
+          .reduce(
+            (sum, item) => sum + Number(item.quantity || 0) * Number(item.unitPrice ?? item.price ?? 0),
+            0
+          )
+          .toFixed(2)
+      ),
+    [editingItems]
+  );
+  const editingSummary = useMemo(
+    () =>
+      calculateInvoiceSummary({
+        subtotal: editingSubtotal,
+        serviceCharge: numericServiceCharge,
+        cgstRate: restaurantBillingSettings.cgstRate,
+        sgstRate: restaurantBillingSettings.sgstRate,
+      }),
+    [editingSubtotal, numericServiceCharge, restaurantBillingSettings]
+  );
 
   useEffect(() => {
     const refreshManagerBills = () => {
@@ -218,12 +357,22 @@ export default function ManagerBills() {
       return;
     }
 
-    const freshSummary = getBillSummary(payingBill);
+    const freshSummary = getBillSummary(payingBill, {
+      managerDiscountPercent: activeApproval?.percent || 0,
+      billingSettings: restaurantBillingSettings,
+      defaultServiceCharge: numericServiceCharge,
+    });
     setAmountReceived(String(freshSummary.grandTotal));
     setLoyaltyPhone('');
     setLoyaltyProfile(null);
     setRedeemPoints('');
   }, [payingBill, paymentMethod]);
+
+  useEffect(() => {
+    if (!editCategories.some((category) => category.id === editActiveCategory)) {
+      setEditActiveCategory(editCategories[0]?.id || 'all');
+    }
+  }, [editActiveCategory, editCategories]);
 
   const handleCheckLoyalty = async () => {
     const phoneToCheck = String(loyaltyPhone || '').trim();
@@ -238,11 +387,12 @@ export default function ManagerBills() {
     try {
       const response = await orderAPI.getLoyaltyProfile(phoneToCheck);
       const profile = response.data?.data || null;
+      const resolvedPhone = normalizePhoneForDisplay(profile?.customerPhone || phoneToCheck);
       setLoyaltyProfile(profile);
       setRedeemPoints('');
       setSuccess(
-        profile?.customerPhone
-          ? `Loyalty balance loaded for ${profile.customerPhone}.`
+        resolvedPhone
+          ? `Loyalty balance loaded for ${resolvedPhone}.`
           : 'No loyalty history found for this number yet.'
       );
     } catch (requestError) {
@@ -372,7 +522,12 @@ export default function ManagerBills() {
 
     try {
       const freshBill = await fetchFreshBill(bill);
-      const summary = getBillSummary(freshBill);
+      const approval = freshBill?.approvedDiscount || (freshBill?.id ? approvedDiscounts[freshBill.id] : null);
+      const summary = getBillSummary(freshBill, {
+        managerDiscountPercent: approval?.percent || 0,
+        billingSettings: restaurantBillingSettings,
+        defaultServiceCharge: numericServiceCharge,
+      });
       setPayingBill(freshBill);
       setPaymentMethod(summary.paymentMethod || 'cash');
       setAmountReceived(String(summary.grandTotal));
@@ -412,6 +567,126 @@ export default function ManagerBills() {
     }
   };
 
+  const openEditBill = async (bill) => {
+    setActioningBillId(bill.id);
+    setError('');
+
+    try {
+      const freshBill = await fetchFreshBill(bill);
+      setEditingBill(freshBill);
+      setEditingItems(
+        (freshBill.items || freshBill.orderItems || []).map((item) => ({
+          menuItemId: item.menuItemId || item.id,
+          quantity: Number(item.quantity || item.qty || 0),
+          unitPrice: Number(item.unitPrice ?? item.price ?? 0),
+          name: item.name || 'Item',
+          itemNote: item.itemNote || item.note || '',
+          modifiers: item.modifiers || [],
+        }))
+      );
+      setEditSearchTerm('');
+      setEditActiveCategory('all');
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || 'Failed to open bill editor.');
+    } finally {
+      setActioningBillId('');
+    }
+  };
+
+  const addMenuItemToBillEdit = (menuItemOrId) => {
+    const resolvedMenuItem =
+      typeof menuItemOrId === 'object' && menuItemOrId !== null
+        ? menuItemOrId
+        : menuItems.find((item) => String(item.id) === String(menuItemOrId));
+
+    if (!resolvedMenuItem?.id) {
+      return;
+    }
+
+    setEditingItems((current) => {
+      const existing = current.find((item) => String(item.menuItemId) === String(resolvedMenuItem.id));
+      if (existing) {
+        return current.map((item) =>
+          String(item.menuItemId) === String(resolvedMenuItem.id)
+            ? { ...item, quantity: Number(item.quantity || 0) + 1 }
+            : item
+        );
+      }
+
+      return [
+        ...current,
+        {
+          menuItemId: resolvedMenuItem.id,
+          quantity: 1,
+          unitPrice: Number(resolvedMenuItem.price || 0),
+          name: resolvedMenuItem.name,
+          itemNote: '',
+          modifiers: [],
+        },
+      ];
+    });
+  };
+
+  const changeEditedItemQuantity = (menuItemId, delta) => {
+    setEditingItems((current) =>
+      current
+        .map((item) =>
+          String(item.menuItemId) === String(menuItemId)
+            ? { ...item, quantity: Number(item.quantity || 0) + delta }
+            : item
+        )
+        .filter((item) => Number(item.quantity || 0) > 0)
+    );
+  };
+
+  const getEditedItemQuantity = (menuItemId) =>
+    editingItems.find((item) => String(item.menuItemId) === String(menuItemId))?.quantity || 0;
+
+  const saveBillEdits = async () => {
+    if (!editingBill?.id) {
+      return;
+    }
+
+    if (editingItems.length === 0) {
+      setError('Keep at least one item in the bill.');
+      return;
+    }
+
+    setActioningBillId(editingBill.id);
+    setError('');
+
+    try {
+      const payload = {
+        orderType: editingBill.orderType,
+        ...(editingBill.tableId ? { tableId: editingBill.tableId } : {}),
+        items: editingItems.map((item) => ({
+          menuItemId: item.menuItemId,
+          quantity: Number(item.quantity || 0),
+          unitPrice: Number(item.unitPrice ?? item.price ?? 0),
+          name: item.name || '',
+          itemNote: item.itemNote || '',
+          modifiers: item.modifiers || [],
+        })),
+        totalAmount: editingSubtotal,
+      };
+
+      await orderAPI.updateOrder(editingBill.id, payload);
+      const refreshedBillResponse = await orderAPI.getOrder(editingBill.id);
+      const refreshedBill = refreshedBillResponse.data?.data || editingBill;
+      setEditingBill(null);
+      setEditingItems([]);
+      if (payingBill?.id === refreshedBill.id) {
+        setPayingBill(refreshedBill);
+      }
+      await reloadOrders();
+      setSuccess(`${formatDisplayOrderNumber(refreshedBill)} updated before settlement.`);
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || 'Failed to update the bill.');
+    } finally {
+      setActioningBillId('');
+    }
+  };
+
   if (loading && bills.length === 0) {
     return (
       <div className="flex h-full items-center justify-center">
@@ -443,35 +718,7 @@ export default function ManagerBills() {
         </Card>
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-[0.92fr,1.08fr]">
-        <Card className="p-5">
-          <p className="text-sm text-[var(--text-secondary)]">Live bill per table</p>
-          <h2 className="mt-1 text-xl font-semibold text-[var(--text-primary)]">Table billing view</h2>
-          <div className="mt-4 space-y-3">
-            {billsByTable.map(([tableNumber, tableBills]) => {
-              const tablePending = tableBills.reduce((sum, bill) => sum + getBillSummary(bill).dueAmount, 0);
-              return (
-                <div key={String(tableNumber)} className="rounded-2xl bg-[var(--bg-card-muted)] p-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <p className="font-semibold text-[var(--text-primary)]">Table {tableNumber}</p>
-                    <p className="text-sm text-[var(--text-secondary)]">{tableBills.length} bill(s)</p>
-                  </div>
-                  <div className="mt-3 flex items-end justify-between gap-3">
-                    <div>
-                      <p className="text-xs uppercase tracking-[0.18em] text-[var(--text-secondary)]">Pending</p>
-                      <p className="mt-1 text-lg font-bold text-[var(--text-primary)]">{formatCurrency(tablePending)}</p>
-                    </div>
-                    <p className="text-sm text-[var(--text-secondary)]">
-                      {tableBills.filter(isUnpaid).length} unpaid
-                    </p>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </Card>
-
-        <div className="space-y-4">
+      <div className="space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-[var(--radius-card)] border border-[var(--border-color)] bg-[var(--bg-card)] px-4 py-3 shadow-[var(--shadow-card)]">
             <div className="flex items-start gap-3">
               <BellRing className="mt-0.5 h-5 w-5 text-[var(--color-primary)]" />
@@ -486,78 +733,94 @@ export default function ManagerBills() {
             </Button>
           </div>
 
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
           {orderedBills.map((bill) => {
             const approval = bill?.approvedDiscount || approvedDiscounts[bill.id];
-            const summary = getBillSummary(bill);
+            const summary = getBillSummary(bill, {
+              managerDiscountPercent: approval?.percent || 0,
+              billingSettings: restaurantBillingSettings,
+              defaultServiceCharge: numericServiceCharge,
+            });
             const unpaid = isUnpaid(bill);
 
             return (
-              <Card key={bill.id} className="p-4 sm:p-5">
-                <div className="flex flex-col gap-3 rounded-[1.4rem] bg-[var(--bg-card-muted)] p-4 sm:flex-row sm:items-start sm:justify-between">
+              <Card key={bill.id} className="flex h-full flex-col p-2.5">
+                <div className="flex min-h-[10.5rem] flex-col gap-2 rounded-[1.2rem] bg-[var(--bg-card-muted)] p-3">
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
                       <p className="text-sm font-bold text-[var(--text-primary)]">{formatDisplayOrderNumber(bill)}</p>
-                      <span className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${unpaid ? 'bg-amber-400/15 text-amber-300' : 'bg-emerald-500/15 text-emerald-300'}`}>
-                        {unpaid ? 'Unpaid' : 'Settled'}
+                      <span
+                        className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.16em] ${
+                          unpaid
+                            ? 'border-amber-400/40 bg-amber-400/15 text-amber-300'
+                            : 'border-emerald-400/45 bg-emerald-500 text-white shadow-[0_10px_30px_rgba(16,185,129,0.28)]'
+                        }`}
+                      >
+                        {unpaid ? 'Unpaid' : 'Paid'}
                       </span>
                     </div>
-                    <p className="mt-2 text-base font-semibold text-[var(--text-primary)]">Table {bill.tableNumber || 'Walk-in'}</p>
-                    <p className="mt-1 text-sm text-[var(--text-secondary)]">{formatDate(bill.createdAt)}</p>
+                    <p className="mt-1 text-sm font-semibold text-[var(--text-primary)]">Table {bill.tableNumber || 'Walk-in'}</p>
+                    <p className="mt-0.5 text-xs text-[var(--text-secondary)]">{formatDate(bill.createdAt)}</p>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-3 sm:min-w-[17rem]">
-                    <div className="rounded-2xl bg-[var(--bg-card)] px-3 py-3">
-                      <p className="text-[11px] uppercase tracking-[0.18em] text-[var(--text-secondary)]">Bill Total</p>
-                      <p className="mt-1 text-lg font-bold text-[var(--text-primary)]">{formatCurrency(summary.grandTotal)}</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="rounded-xl bg-[var(--bg-card)] px-3 py-2.5">
+                      <p className="text-[10px] uppercase tracking-[0.16em] text-[var(--text-secondary)]">Bill Total</p>
+                      <p className="mt-0.5 text-base font-bold text-[var(--text-primary)]">{formatCurrency(summary.grandTotal)}</p>
                     </div>
-                    <div className="rounded-2xl bg-[var(--bg-card)] px-3 py-3">
-                      <p className="text-[11px] uppercase tracking-[0.18em] text-[var(--text-secondary)]">
-                        {unpaid ? 'Due Now' : 'Paid Amount'}
+                    <div className="rounded-xl bg-[var(--bg-card)] px-3 py-2.5">
+                      <p className="text-[10px] uppercase tracking-[0.16em] text-[var(--text-secondary)]">
+                        {unpaid ? 'Payable' : 'Paid Amount'}
                       </p>
-                      <p className={`mt-1 text-lg font-bold ${unpaid ? 'text-amber-300' : 'text-emerald-300'}`}>
-                        {formatCurrency(unpaid ? summary.dueAmount : summary.paidAmount)}
+                      <p className={`mt-0.5 text-base font-bold ${unpaid ? 'text-amber-300' : 'text-emerald-400'}`}>
+                        {formatCurrency(unpaid ? summary.grandTotal : summary.paidAmount)}
                       </p>
                     </div>
                   </div>
                 </div>
 
-                <div className="mt-3 grid gap-3 lg:grid-cols-[1fr,auto]">
-                  <div className="grid gap-3 sm:grid-cols-3">
-                    <div className="rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card)] px-4 py-3">
-                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--text-secondary)]">Payment</p>
-                      <p className="mt-1 text-sm font-semibold text-[var(--text-primary)]">
+                <div className="mt-2 flex flex-1 flex-col gap-2">
+                  <div className="grid gap-2">
+                    <div className="rounded-xl border border-[var(--border-color)] bg-[var(--bg-card)] px-3 py-2.5">
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-secondary)]">Payment</p>
+                      <p className="mt-0.5 break-words text-xs font-semibold text-[var(--text-primary)]">
                         {(summary.paymentMethod || 'cash').toUpperCase()} • {summary.paymentStatus}
                       </p>
                     </div>
-                    <div className="rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card)] px-4 py-3">
-                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--text-secondary)]">Discount</p>
-                      <p className="mt-1 text-sm font-semibold text-[var(--text-primary)]">
+                    <div className="rounded-xl border border-[var(--border-color)] bg-[var(--bg-card)] px-3 py-2.5">
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-secondary)]">Discount</p>
+                      <p className="mt-0.5 break-words text-xs font-semibold text-[var(--text-primary)]">
                         {approval ? `${approval.percent}% approved` : 'No discount approved'}
                       </p>
                       {approval?.approvedBy ? (
-                        <p className="mt-1 text-xs text-[var(--text-secondary)]">By {approval.approvedBy}</p>
+                        <p className="mt-0.5 break-words text-[11px] text-[var(--text-secondary)]">By {approval.approvedBy}</p>
                       ) : null}
                     </div>
-                    <div className="rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card)] px-4 py-3">
-                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--text-secondary)]">Status</p>
-                      <p className="mt-1 text-sm font-semibold text-[var(--text-primary)]">
-                        {unpaid ? 'Awaiting manager payment' : 'Ready to print'}
+                    <div className="rounded-xl border border-[var(--border-color)] bg-[var(--bg-card)] px-3 py-2.5">
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-secondary)]">Status</p>
+                      <p className={`mt-0.5 break-words text-xs font-semibold ${unpaid ? 'text-[var(--text-primary)]' : 'text-emerald-400'}`}>
+                        {unpaid ? 'Awaiting manager payment' : 'Paid and ready to print'}
                       </p>
                     </div>
                   </div>
 
-                  <div className="flex flex-wrap gap-2">
-                    <Button variant="secondary" onClick={() => setSelectedBill(bill)}>
+                  <div className="mt-auto grid gap-2">
+                    <Button variant="secondary" className="w-full px-3 py-2 text-xs" onClick={() => setSelectedBill(bill)}>
                       <BadgePercent className="h-4 w-4" />
                       Approve Discount
                     </Button>
                     {unpaid ? (
-                      <Button onClick={() => openPayBill(bill)} disabled={actioningBillId === bill.id}>
-                        <Wallet className="h-4 w-4" />
-                        {actioningBillId === bill.id ? 'Loading...' : 'Settle Bill'}
-                      </Button>
+                      <div className="grid grid-cols-2 gap-2">
+                        <Button variant="secondary" className="w-full px-3 py-2 text-xs" onClick={() => openEditBill(bill)} disabled={actioningBillId === bill.id}>
+                          {actioningBillId === bill.id ? 'Loading...' : 'Edit'}
+                        </Button>
+                        <Button className="w-full px-3 py-2 text-xs" onClick={() => openPayBill(bill)} disabled={actioningBillId === bill.id}>
+                          <Wallet className="h-4 w-4" />
+                          {actioningBillId === bill.id ? 'Loading...' : 'Settle'}
+                        </Button>
+                      </div>
                     ) : (
-                      <Button variant="secondary" onClick={() => openPrintedBill(bill)} disabled={actioningBillId === bill.id}>
+                      <Button variant="secondary" className="w-full px-3 py-2 text-xs" onClick={() => openPrintedBill(bill)} disabled={actioningBillId === bill.id}>
                         <Receipt className="h-4 w-4" />
                         {actioningBillId === bill.id ? 'Loading...' : 'Print Bill'}
                       </Button>
@@ -567,7 +830,7 @@ export default function ManagerBills() {
               </Card>
             );
           })}
-        </div>
+          </div>
       </div>
 
       <Modal
@@ -635,7 +898,7 @@ export default function ManagerBills() {
             />
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-3">
+          <div className="grid gap-3 sm:grid-cols-2">
             <div className="rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card)] px-4 py-3">
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--text-secondary)]">Bill Total</p>
               <p className="mt-1 text-lg font-bold text-[var(--text-primary)]">{formatCurrency(billTotalWithServiceCharge)}</p>
@@ -643,14 +906,6 @@ export default function ManagerBills() {
             <div className="rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card)] px-4 py-3">
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--text-secondary)]">Paid Amount</p>
               <p className="mt-1 text-lg font-bold text-[var(--text-primary)]">{formatCurrency(numericAmountReceived)}</p>
-            </div>
-            <div className="rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card)] px-4 py-3">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--text-secondary)]">
-                {paymentMethod === 'cash' ? 'Change Due' : 'Balance'}
-              </p>
-              <p className={`mt-1 text-lg font-bold ${paymentGap > 0 ? 'text-amber-300' : 'text-emerald-300'}`}>
-                {formatCurrency(paymentMethod === 'cash' ? changeDue : paymentGap)}
-              </p>
             </div>
           </div>
 
@@ -761,6 +1016,118 @@ export default function ManagerBills() {
             </Button>
           </div>
         </div>
+      </Modal>
+
+      <Modal
+        title={editingBill ? `Edit ${formatDisplayOrderNumber(editingBill)} Before Settlement` : 'Edit bill'}
+        isOpen={Boolean(editingBill)}
+        onClose={() => {
+          if (actioningBillId === editingBill?.id) {
+            return;
+          }
+          setEditingBill(null);
+          setEditingItems([]);
+        }}
+        maxWidth="max-w-6xl"
+      >
+        {editingBill ? (
+          <div className="grid gap-4 lg:grid-cols-[1.45fr,0.95fr]">
+            <div className="space-y-3">
+              <div>
+                <p className="text-sm text-[var(--text-secondary)]">Adjust missed items or quantity before settlement.</p>
+              </div>
+              <MenuPanel
+                categories={editCategories}
+                activeCategoryId={editActiveCategory}
+                onCategoryChange={setEditActiveCategory}
+                onAddItem={addMenuItemToBillEdit}
+                onIncreaseItem={addMenuItemToBillEdit}
+                onDecreaseItem={(menuItemId) => changeEditedItemQuantity(menuItemId, -1)}
+                getItemQuantity={getEditedItemQuantity}
+                searchValue={editSearchTerm}
+                onSearchChange={setEditSearchTerm}
+                loading={false}
+                error=""
+              />
+            </div>
+
+            <div className="space-y-4">
+              <div className="rounded-2xl bg-[var(--bg-card-muted)] p-4">
+                <p className="text-sm text-[var(--text-secondary)]">Current bill</p>
+                <p className="mt-1 text-2xl font-bold text-[var(--text-primary)]">{formatCurrency(editingSummary.grandTotal)}</p>
+                <p className="mt-1 text-sm text-[var(--text-secondary)]">
+                  {editingBill.tableNumber ? `Table ${editingBill.tableNumber}` : 'Walk-in'} • {formatDate(editingBill.createdAt)}
+                </p>
+              </div>
+
+              <div className="max-h-[24rem] space-y-3 overflow-y-auto rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card)] p-4">
+                {editingItems.length === 0 ? (
+                  <p className="text-sm text-[var(--text-secondary)]">Add items to continue.</p>
+                ) : (
+                  editingItems.map((item) => (
+                    <div key={`${editingBill.id}-${item.menuItemId}`} className="flex items-center justify-between gap-3 rounded-2xl bg-[var(--bg-card-muted)] p-3">
+                      <div className="min-w-0">
+                        <p className="font-semibold text-[var(--text-primary)]">{item.name}</p>
+                        <p className="text-xs text-[var(--text-secondary)]">{formatCurrency(item.unitPrice)} each</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => changeEditedItemQuantity(item.menuItemId, -1)}
+                          className="h-9 w-9 rounded-full bg-[var(--bg-card)] text-[var(--text-primary)]"
+                        >
+                          -
+                        </button>
+                        <span className="w-7 text-center font-bold text-[var(--text-primary)]">{item.quantity}</span>
+                        <button
+                          type="button"
+                          onClick={() => changeEditedItemQuantity(item.menuItemId, 1)}
+                          className="h-9 w-9 rounded-full bg-[var(--color-primary)] text-white"
+                        >
+                          +
+                        </button>
+                      </div>
+                      <p className="font-semibold text-[var(--text-primary)]">
+                        {formatCurrency(Number(item.quantity || 0) * Number(item.unitPrice ?? item.price ?? 0))}
+                      </p>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              <div className="space-y-2 rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card)] p-4 text-sm">
+                <div className="flex justify-between text-[var(--text-secondary)]"><span>Subtotal</span><span>{formatCurrency(editingSummary.subtotal)}</span></div>
+                <div className="flex justify-between text-[var(--text-secondary)]"><span>CGST ({editingSummary.cgstRate}%)</span><span>{formatCurrency(editingSummary.cgstAmount)}</span></div>
+                <div className="flex justify-between text-[var(--text-secondary)]"><span>SGST ({editingSummary.sgstRate}%)</span><span>{formatCurrency(editingSummary.sgstAmount)}</span></div>
+                {numericServiceCharge > 0 ? (
+                  <div className="flex justify-between text-[var(--text-secondary)]"><span>Service charge</span><span>{formatCurrency(numericServiceCharge)}</span></div>
+                ) : null}
+                <div className="flex justify-between text-lg font-bold text-[var(--text-primary)]"><span>Updated total</span><span>{formatCurrency(editingSummary.grandTotal)}</span></div>
+              </div>
+
+              <div className="flex flex-col-reverse gap-3 sm:flex-row">
+                <Button
+                  variant="secondary"
+                  className="w-full sm:flex-1"
+                  onClick={() => {
+                    setEditingBill(null);
+                    setEditingItems([]);
+                  }}
+                  disabled={actioningBillId === editingBill.id}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  className="w-full sm:flex-1"
+                  onClick={saveBillEdits}
+                  disabled={actioningBillId === editingBill.id || editingItems.length === 0}
+                >
+                  {actioningBillId === editingBill.id ? 'Saving...' : 'Save Bill Changes'}
+                </Button>
+              </div>
+            </div>
+          </div>
+        ) : null}
       </Modal>
     </div>
   );

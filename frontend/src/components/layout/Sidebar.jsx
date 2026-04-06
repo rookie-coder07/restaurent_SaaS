@@ -37,6 +37,7 @@ const managerMenuItems = [
   { icon: BarChart3, label: 'Dashboard', href: '/manager', roles: ['manager'] },
   { icon: TableProperties, label: 'Tables', href: '/manager/tables', roles: ['manager'] },
   { icon: ClipboardList, label: 'Orders', href: '/manager/orders', roles: ['manager'] },
+  { icon: ListOrdered, label: 'Takeaway Orders', href: '/manager/takeaway-orders', roles: ['manager'] },
   { icon: ChefHat, label: 'Kitchen', href: '/manager/kitchen', roles: ['manager'] },
   { icon: Users, label: 'Waiters', href: '/manager/waiters', roles: ['manager'] },
   { icon: PackageSearch, label: 'Inventory', href: '/manager/inventory', roles: ['manager'] },

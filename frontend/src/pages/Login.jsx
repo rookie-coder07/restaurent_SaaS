@@ -3,6 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { ArrowLeft, Eye, EyeOff, Loader, ShieldCheck, Sparkles } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { useAuthStore } from '../context/authStore';
+import supabase from '../config/supabase';
 import { validateEmail } from '../utils/validators';
 import { canAccessPortal, resolvePortalHome } from '../utils/portalRouting';
 import { clearPortalSession, getValidPortalSession } from '../utils/authStorage';
@@ -51,11 +52,19 @@ export default function Login({ portal = 'admin', initialModeKey = '' }) {
   const [errors, setErrors] = useState({});
   const [showPassword, setShowPassword] = useState(false);
   const [selectedModeKey, setSelectedModeKey] = useState(initialModeKey || config.modes[0]?.key || 'owner');
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [forgotPasswordState, setForgotPasswordState] = useState({
+    isLoading: false,
+    error: '',
+    success: '',
+  });
 
   const selectedMode = useMemo(
     () => config.modes.find((mode) => mode.key === selectedModeKey) || config.modes[0],
     [config.modes, selectedModeKey]
   );
+  const canResetAdminPassword = portal === 'admin' && !selectedMode?.isStaff && selectedModeKey === 'owner';
 
   useEffect(() => {
     setSelectedModeKey(initialModeKey || config.modes[0]?.key || 'owner');
@@ -104,6 +113,46 @@ export default function Login({ portal = 'admin', initialModeKey = '' }) {
     }
   };
 
+  const handleForgotPassword = async (event) => {
+    event.preventDefault();
+
+    const emailToReset = String(forgotEmail || formData.email || '').trim().toLowerCase();
+    if (!validateEmail(emailToReset)) {
+      setForgotPasswordState({
+        isLoading: false,
+        error: 'Enter a valid admin email address.',
+        success: '',
+      });
+      return;
+    }
+
+    setForgotPasswordState({
+      isLoading: true,
+      error: '',
+      success: '',
+    });
+
+    const redirectTo = `${window.location.origin}/admin/reset-password`;
+    const { error } = await supabase.auth.resetPasswordForEmail(emailToReset, {
+      redirectTo,
+    });
+
+    if (error) {
+      setForgotPasswordState({
+        isLoading: false,
+        error: error.message || 'Unable to send reset link right now.',
+        success: '',
+      });
+      return;
+    }
+
+    setForgotPasswordState({
+      isLoading: false,
+      error: '',
+      success: 'Reset link sent to your email',
+    });
+  };
+
   return (
     <div className="min-h-screen bg-[var(--color-bg)] px-4 py-6 sm:px-6 lg:px-8">
       <div className="mx-auto flex min-h-[calc(100vh-3rem)] w-full max-w-5xl items-center justify-center">
@@ -126,6 +175,8 @@ export default function Login({ portal = 'admin', initialModeKey = '' }) {
             </div>
 
             {authError ? <Toast type="error" message={authError} /> : null}
+            {forgotPasswordState.error ? <Toast type="error" message={forgotPasswordState.error} /> : null}
+            {forgotPasswordState.success ? <Toast type="success" message={forgotPasswordState.success} /> : null}
 
             <form onSubmit={handleSubmit} className="mt-6 space-y-5">
               {config.modes.length > 1 ? (
@@ -194,11 +245,76 @@ export default function Login({ portal = 'admin', initialModeKey = '' }) {
                 {errors.password ? <p className="mt-2 text-sm text-red-500">{errors.password}</p> : null}
               </div>
 
+              {canResetAdminPassword ? (
+                <div className="flex items-center justify-end">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowForgotPassword((current) => !current);
+                      setForgotEmail((current) => current || formData.email);
+                      setForgotPasswordState({
+                        isLoading: false,
+                        error: '',
+                        success: '',
+                      });
+                    }}
+                    className="text-sm font-semibold text-[var(--color-primary)] transition hover:opacity-80"
+                  >
+                    Forgot Password?
+                  </button>
+                </div>
+              ) : null}
+
               <Button type="submit" fullWidth size="lg" disabled={isLoading}>
                 {isLoading ? <Loader className="h-4 w-4 animate-spin" /> : null}
                 {isLoading ? 'Logging in...' : `Open ${selectedModeKey === 'manager' ? 'Manager Portal' : config.badge}`}
               </Button>
             </form>
+
+            {canResetAdminPassword && showForgotPassword ? (
+              <form onSubmit={handleForgotPassword} className="mt-5 rounded-[1.5rem] border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-4">
+                <p className="text-sm font-semibold text-[var(--color-text)]">Reset admin password</p>
+                <p className="mt-1 text-sm text-[var(--color-text-muted)]">
+                  Enter your admin email to receive a secure reset link.
+                </p>
+                <div className="mt-4">
+                  <Input
+                    label="Admin Email"
+                    type="email"
+                    name="forgot-email"
+                    autoComplete="email"
+                    value={forgotEmail}
+                    onChange={(e) => setForgotEmail(e.target.value)}
+                    placeholder="owner@restaurant.com"
+                  />
+                </div>
+                <div className="mt-4 flex flex-col-reverse gap-3 sm:flex-row">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    className="w-full sm:flex-1"
+                    onClick={() => {
+                      setShowForgotPassword(false);
+                      setForgotPasswordState({
+                        isLoading: false,
+                        error: '',
+                        success: '',
+                      });
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="submit"
+                    className="w-full sm:flex-1"
+                    disabled={forgotPasswordState.isLoading}
+                  >
+                    {forgotPasswordState.isLoading ? <Loader className="h-4 w-4 animate-spin" /> : null}
+                    {forgotPasswordState.isLoading ? 'Sending...' : 'Send Reset Link'}
+                  </Button>
+                </div>
+              </form>
+            ) : null}
 
             {portal === 'admin' ? (
               <div className="mt-6 rounded-[1.5rem] border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-4 text-center">

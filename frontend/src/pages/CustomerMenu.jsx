@@ -568,11 +568,19 @@ export default function CustomerMenu() {
                             className="relative block w-full overflow-hidden bg-[var(--bg-card-muted)] text-left"
                           >
                             <div className="aspect-[4/3] w-full">
-                              <img
-                                src={itemImageUrl}
-                                alt={item.name}
-                                className="h-full w-full object-cover transition duration-500 hover:scale-[1.04]"
-                              />
+                              {itemImageUrl ? (
+                                <img
+                                  src={itemImageUrl}
+                                  alt={item.name}
+                                  className="h-full w-full object-cover transition duration-500 hover:scale-[1.04]"
+                                />
+                              ) : (
+                                <div className="flex h-full w-full items-center justify-center bg-[var(--bg-card-muted)]">
+                                  <span className="rounded-full border border-[var(--border-color)] bg-[var(--bg-card)] px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--text-secondary)]">
+                                    No Image
+                                  </span>
+                                </div>
+                              )}
                             </div>
                             <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-slate-950/90 via-slate-950/20 to-transparent px-4 pb-4 pt-14">
                               <div className="flex items-center justify-between gap-3">
@@ -591,9 +599,11 @@ export default function CustomerMenu() {
                             <div className="flex items-start justify-between gap-3">
                               <div className="min-w-0">
                                 <h3 className="break-words text-lg font-bold text-[var(--text-primary)]">{item.name}</h3>
-                                <p className="mt-2 line-clamp-2 text-sm leading-6 text-[var(--text-secondary)]">
-                                  {item.description || 'A delicious dish prepared fresh for your table.'}
-                                </p>
+                                {item.description ? (
+                                  <p className="mt-2 line-clamp-2 text-sm leading-6 text-[var(--text-secondary)]">
+                                    {item.description}
+                                  </p>
+                                ) : null}
                               </div>
                               <span className="shrink-0 rounded-full bg-[var(--bg-card-muted)] px-3 py-1 text-sm font-semibold text-[var(--text-primary)]">
                                 {formatCurrency(item.price)}

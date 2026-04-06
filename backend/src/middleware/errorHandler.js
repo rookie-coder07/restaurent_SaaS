@@ -83,6 +83,23 @@ export const errorHandler = (err, req, res, next) => {
     );
   }
 
+  const businessMessage = String(err?.message || '');
+  const isBusinessRuleError =
+    businessMessage.includes('Cash received must be at least the bill total') ||
+    businessMessage.includes('Cash received amount is required for cash settlement') ||
+    businessMessage.includes('Unsupported payment method') ||
+    businessMessage.includes('Order is already settled') ||
+    businessMessage.includes('Cancelled orders cannot be settled') ||
+    businessMessage.includes('Order total must be greater than zero before settlement') ||
+    businessMessage.includes('Add at least one item before sending to kitchen') ||
+    businessMessage.includes('No new kitchen changes to send for this bill') ||
+    businessMessage.includes('Not enough stock for') ||
+    businessMessage.includes('Only ') && businessMessage.includes('loyalty points are available');
+
+  if (isBusinessRuleError) {
+    return sendError(res, 400, businessMessage);
+  }
+
   // Handle custom AppError
   if (err.statusCode) {
     return sendError(res, err.statusCode, err.message);

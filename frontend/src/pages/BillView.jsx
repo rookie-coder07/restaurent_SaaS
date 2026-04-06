@@ -131,6 +131,10 @@ export default function BillView() {
     () => resolvePaperWidthMm(location, restaurant),
     [location, restaurant]
   );
+  const totalDiscountAmount = useMemo(
+    () => Number((invoice?.summary?.orderDiscountAmount || 0) + (invoice?.summary?.managerDiscountAmount || 0)),
+    [invoice]
+  );
 
   const handlePrint = async () => {
     if (!invoice) {
@@ -237,7 +241,7 @@ export default function BillView() {
             <div className="thermal-separator">--------------------------------</div>
 
             <div className="thermal-meta">
-              <span>Invoice No</span>
+              <span>Bill No</span>
               <span className="thermal-align-right">{invoice.invoiceNumber}</span>
               <span>Date & Time</span>
               <span className="thermal-align-right">{new Date(invoice.invoiceDate).toLocaleString('en-IN')}</span>
@@ -273,7 +277,9 @@ export default function BillView() {
 
             <div className="thermal-summary">
               <div className="thermal-summary-row"><span>Subtotal</span><span>{formatCurrency(invoice.summary.subtotal)}</span></div>
-              <div className="thermal-summary-row"><span>Discount</span><span>-{formatCurrency(invoice.summary.orderDiscountAmount + invoice.summary.managerDiscountAmount)}</span></div>
+              {totalDiscountAmount > 0 ? (
+                <div className="thermal-summary-row"><span>Discount</span><span>-{formatCurrency(totalDiscountAmount)}</span></div>
+              ) : null}
               <div className="thermal-summary-row"><span>Taxable</span><span>{formatCurrency(invoice.summary.taxableAmount)}</span></div>
               <div className="thermal-summary-row"><span>CGST ({invoice.summary.cgstRate}%)</span><span>{formatCurrency(invoice.summary.cgstAmount)}</span></div>
               <div className="thermal-summary-row"><span>SGST ({invoice.summary.sgstRate}%)</span><span>{formatCurrency(invoice.summary.sgstAmount)}</span></div>

@@ -90,6 +90,8 @@ export const requireRole = (allowedRoles = []) => {
   };
 };
 
+export const requireAdminAccess = () => requireRole(['owner']);
+
 export const requireBillingRole = () => {
   return (req, res, next) => {
     try {

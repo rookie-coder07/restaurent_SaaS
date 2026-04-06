@@ -1,12 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, Bike, Loader, Receipt, ShoppingBag, Store, TableProperties, Utensils } from 'lucide-react';
-import { orderAPI, restaurantAPI } from '../services/apiEndpoints';
+import { ArrowLeft, Loader, Receipt, Store, TableProperties } from 'lucide-react';
+import { authAPI, orderAPI, restaurantAPI } from '../services/apiEndpoints';
 import MenuPanel from '../components/pos/MenuPanel';
 import CartPanel from '../components/pos/CartPanel';
 import OrderControls from '../components/pos/OrderControls';
-import OnlineOrderInbox from '../components/pos/OnlineOrderInbox';
-import OnlineOrderDetailsPanel from '../components/pos/OnlineOrderDetailsPanel';
 import PaymentPanel from '../components/pos/PaymentPanel';
 import Modal from '../components/common/Modal';
 import Toast from '../components/common/Toast';
@@ -18,6 +16,7 @@ import { useApi } from '../hooks/useApi';
 import { buildInvoiceData, calculateInvoiceSummary, getRestaurantBillingSettings } from '../utils/invoice';
 import { playLoudBuzzer } from '../utils/alerts';
 import { autoPrintBill, autoPrintKot } from '../utils/printerService';
+import { syncPortalSessionUser } from '../utils/sessionUserSync';
 
 function formatOrderStatusLabel(status) {
   if (!status) {
@@ -125,73 +124,15 @@ function buildDraftFromOrder(order) {
   };
 }
 
-function formatDateTimeInputValue(value) {
-  if (!value) {
-    return '';
-  }
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return '';
-  }
-
-  const offsetDate = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
-  return offsetDate.toISOString().slice(0, 16);
-}
-
-function normalizeOnlineDraft(order = null) {
-  const online = order?.online || {};
-
-  return {
-    source: online.source || 'direct',
-    promisedAt: formatDateTimeInputValue(online.promisedAt),
-    paymentState: online.paymentState || 'pending',
-    customerName: online.customerName || '',
-    customerPhone: online.customerPhone || '',
-    customerAddress: online.customerAddress || '',
-    channelOrderId: online.channelOrderId || '',
-  };
-}
-
-function createOnlineDraftSignature({
-  orderType = '',
-  source = '',
-  promisedAt = '',
-  paymentState = '',
-  customerName = '',
-  customerPhone = '',
-  customerAddress = '',
-  channelOrderId = '',
-} = {}) {
-  if (!orderType || orderType === 'dine-in') {
-    return 'dine-in';
-  }
-
-  return JSON.stringify({
-    orderType,
-    source,
-    promisedAt,
-    paymentState,
-    customerName: customerName.trim(),
-    customerPhone: customerPhone.trim(),
-    customerAddress: customerAddress.trim(),
-    channelOrderId: channelOrderId.trim(),
-  });
-}
-
-function serializePromisedAt(value) {
-  if (!value) {
-    return null;
-  }
-
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? null : date.toISOString();
-}
-
 function isOrderClosedForBilling(order) {
   const status = String(order?.status || '').toLowerCase();
   const paymentStatus = String(order?.paymentStatus || '').toLowerCase();
   return status === 'cancelled' || status === 'completed' || paymentStatus === 'paid';
+}
+
+function normalizePhoneForDisplay(value) {
+  const digits = String(value || '').replace(/[^\d]/g, '');
+  return digits.length > 10 ? digits.slice(-10) : digits;
 }
 
 export default function POS() {
@@ -210,13 +151,9 @@ export default function POS() {
   const categoryError = usePosStore((state) => state.categoryError);
   const tableError = usePosStore((state) => state.tableError);
   const openBillsData = usePosStore((state) => state.openBillsData);
-  const cachedOnlineInbox = usePosStore((state) => state.onlineInbox);
-  const cachedOnlineInboxError = usePosStore((state) => state.onlineInboxError);
-  const onlineInboxLoading = usePosStore((state) => state.onlineInboxLoading);
   const currentWorkspace = usePosStore((state) => state.currentWorkspace);
   const preloadCoreData = usePosStore((state) => state.preloadCoreData);
   const refreshTableOverview = usePosStore((state) => state.refreshTableOverview);
-  const refreshCachedOnlineInbox = usePosStore((state) => state.refreshOnlineInbox);
   const setCurrentWorkspace = usePosStore((state) => state.setCurrentWorkspace);
   const resetCurrentWorkspace = usePosStore((state) => state.resetCurrentWorkspace);
   const saveWorkspaceDraft = usePosStore((state) => state.saveWorkspaceDraft);
@@ -232,15 +169,13 @@ export default function POS() {
   const incomingBillingMessage = pendingBillingTarget?.message || '';
   const initialWorkspace = {
     ...currentWorkspace,
-    orderType:
-      currentWorkspace.orderType ||
-      (incomingTableId ? 'dine-in' : ''),
+    orderType: 'dine-in',
     selectedTableId: incomingTableId || currentWorkspace.selectedTableId || '',
     pinnedOrderId: incomingOrderId || currentWorkspace.pinnedOrderId || '',
   };
 
   const [cartItems, setCartItems] = useState(initialWorkspace.cartItems || []);
-  const [orderType, setOrderType] = useState(initialWorkspace.orderType || '');
+  const [orderType, setOrderType] = useState('dine-in');
   const [selectedTableId, setSelectedTableId] = useState(initialWorkspace.selectedTableId || '');
   const [discountType, setDiscountType] = useState(initialWorkspace.discountType || 'flat');
   const [discountValue, setDiscountValue] = useState(initialWorkspace.discountValue || '');
@@ -256,7 +191,6 @@ export default function POS() {
   const [cashReceived, setCashReceived] = useState(initialWorkspace.cashReceived || '');
   const [paymentNote, setPaymentNote] = useState(initialWorkspace.paymentNote || '');
   const [packingCharge, setPackingCharge] = useState(initialWorkspace.packingCharge || '');
-  const [deliveryCharge, setDeliveryCharge] = useState(initialWorkspace.deliveryCharge || '');
   const [pinnedOrderId, setPinnedOrderId] = useState(initialWorkspace.pinnedOrderId || '');
   const [editingItemId, setEditingItemId] = useState('');
   const [showItemDetailsModal, setShowItemDetailsModal] = useState(false);
@@ -273,9 +207,6 @@ export default function POS() {
   const [loyaltyProfile, setLoyaltyProfile] = useState(null);
   const [redeemPoints, setRedeemPoints] = useState('');
   const [isCheckingLoyalty, setIsCheckingLoyalty] = useState(false);
-  const [onlineInbox, setOnlineInbox] = useState(cachedOnlineInbox || []);
-  const [onlineInboxError, setOnlineInboxError] = useState(cachedOnlineInboxError || '');
-  const [updatingOnlineOrderId, setUpdatingOnlineOrderId] = useState('');
   const [isSwitchingTable, setIsSwitchingTable] = useState(false);
   const [waiterAlertMessage, setWaiterAlertMessage] = useState('');
   const qrAlertedOrderIdsRef = useRef(new Set());
@@ -319,6 +250,10 @@ export default function POS() {
     () => waiterTables.find((table) => table.id === selectedTableId) || null,
     [selectedTableId, waiterTables]
   );
+  const canAccessSelectedTable = useMemo(
+    () => !selectedTableId || !isWaiterAccount || assignedTableIds.includes(selectedTableId),
+    [assignedTableIds, isWaiterAccount, selectedTableId]
+  );
   const openBillByTableId = useMemo(() => {
     const nextMap = new Map();
 
@@ -348,42 +283,71 @@ export default function POS() {
   }, [incomingBillingMessage]);
 
   useEffect(() => {
+    if (!isWaiterAccount || canAccessSelectedTable) {
+      return;
+    }
+
+    setSelectedTableId('');
+    setPinnedOrderId('');
+    setActiveOrder(null);
+    setCartItems([]);
+    setDiscountType('flat');
+    setDiscountValue('');
+    setPaymentMethod('cash');
+    setCashReceived('');
+    setPaymentNote('');
+    setPackingCharge('');
+    setSubmitError(null);
+    setSubmitSuccess(null);
+    clearWorkspaceDraft(getPosWorkspaceDraftKey('dine-in', selectedTableId));
+    syncBillingSearchParams();
+  }, [canAccessSelectedTable, clearWorkspaceDraft, isWaiterAccount, selectedTableId]);
+
+  useEffect(() => {
     preloadCoreData().catch(() => {
       // Individual store error states handle the UI.
     });
     refreshTableOverview().catch(() => {
       // Shared store error state handles the UI.
     });
-    refreshCachedOnlineInbox().catch(() => {
-      // Shared store error state handles the UI.
-    });
-  }, [preloadCoreData, refreshCachedOnlineInbox, refreshTableOverview]);
-
-  useEffect(() => {
-    setOnlineInbox(cachedOnlineInbox || []);
-    setOnlineInboxError(cachedOnlineInboxError || '');
-  }, [cachedOnlineInbox, cachedOnlineInboxError]);
+  }, [preloadCoreData, refreshTableOverview]);
 
   useEffect(() => {
     if (!isWaiterAccount) {
       return undefined;
     }
 
+    const syncCurrentWaiter = () =>
+      authAPI
+        .getCurrentUser()
+        .then((response) => {
+          const latestUser = response.data?.data?.user;
+
+          if (latestUser?.id === user?.id) {
+            syncPortalSessionUser('pos', latestUser);
+          }
+        })
+        .catch(() => {
+          // Auth/api layers already handle session errors.
+        });
+
     const refreshAssignedQueue = () => {
-      refreshTableOverview({
-        force: true,
-        silent: true,
-        includeTables: false,
-        includeOpenBills: true,
-      }).catch(() => {
-        // Shared store error state handles the UI.
-      });
+      Promise.allSettled([
+        syncCurrentWaiter(),
+        refreshTableOverview({
+          force: true,
+          silent: true,
+          includeTables: false,
+          includeOpenBills: true,
+        }),
+      ]);
     };
 
+    syncCurrentWaiter();
     const intervalId = window.setInterval(refreshAssignedQueue, 8000);
 
     return () => window.clearInterval(intervalId);
-  }, [isWaiterAccount, refreshTableOverview]);
+  }, [isWaiterAccount, refreshTableOverview, user?.id]);
 
   useEffect(() => {
     const nextIds = new Set(pendingAssignedQrOrders.map((order) => order.id).filter(Boolean));
@@ -459,17 +423,6 @@ export default function POS() {
   }, [activeCategoryId, categories]);
 
   useEffect(() => {
-    if (orderType !== 'dine-in') {
-      setIsLoadingTableOrder(false);
-      setIsSwitchingTable(false);
-    }
-  }, [orderType]);
-
-  useEffect(() => {
-    if (orderType !== 'dine-in') {
-      return undefined;
-    }
-
     if (!selectedTableId) {
       setCartItems([]);
       setDiscountType('flat');
@@ -481,6 +434,10 @@ export default function POS() {
       resetOnlineDraft();
       setIsLoadingTableOrder(false);
       setIsSwitchingTable(false);
+      return undefined;
+    }
+
+    if (!canAccessSelectedTable) {
       return undefined;
     }
 
@@ -577,6 +534,7 @@ export default function POS() {
     };
   }, [
     cacheTableOrder,
+    canAccessSelectedTable,
     clearWorkspaceDraft,
     orderType,
     pinnedOrderId,
@@ -667,11 +625,11 @@ export default function POS() {
         loyaltyRedeemedAmount: loyaltyDiscountPreview,
         packingCharge,
         serviceCharge: defaultServiceCharge,
-        deliveryCharge,
+        deliveryCharge: 0,
         cgstRate: restaurantBillingSettings.cgstRate,
         sgstRate: restaurantBillingSettings.sgstRate,
       }).grandTotal,
-    [defaultServiceCharge, deliveryCharge, discountAmount, loyaltyDiscountPreview, packingCharge, restaurantBillingSettings, subtotal]
+    [defaultServiceCharge, discountAmount, loyaltyDiscountPreview, packingCharge, restaurantBillingSettings, subtotal]
   );
   const invoicePreview = useMemo(
     () =>
@@ -681,11 +639,11 @@ export default function POS() {
         loyaltyRedeemedAmount: loyaltyDiscountPreview,
         packingCharge,
         serviceCharge: defaultServiceCharge,
-        deliveryCharge,
+        deliveryCharge: 0,
         cgstRate: restaurantBillingSettings.cgstRate,
         sgstRate: restaurantBillingSettings.sgstRate,
       }),
-    [defaultServiceCharge, deliveryCharge, discountAmount, loyaltyDiscountPreview, packingCharge, restaurantBillingSettings, subtotal]
+    [defaultServiceCharge, discountAmount, loyaltyDiscountPreview, packingCharge, restaurantBillingSettings, subtotal]
   );
 
   const isEditingActiveBill = Boolean(activeOrder?.id);
@@ -712,34 +670,6 @@ export default function POS() {
     () => createItemsSignature(activeOrder?.items || []),
     [activeOrder]
   );
-  const onlineDraftSignature = useMemo(
-    () =>
-      createOnlineDraftSignature({
-        orderType,
-        source: onlineSource,
-        promisedAt,
-        paymentState: onlinePaymentState,
-        customerName,
-        customerPhone,
-        customerAddress,
-        channelOrderId,
-      }),
-    [channelOrderId, customerAddress, customerName, customerPhone, onlinePaymentState, onlineSource, orderType, promisedAt]
-  );
-  const activeOrderOnlineSignature = useMemo(
-    () =>
-      createOnlineDraftSignature({
-        orderType: activeOrder?.orderType || (activeOrder?.tableId ? 'dine-in' : ''),
-        source: activeOrder?.online?.source || 'direct',
-        promisedAt: formatDateTimeInputValue(activeOrder?.online?.promisedAt),
-        paymentState: activeOrder?.online?.paymentState || 'pending',
-        customerName: activeOrder?.online?.customerName || '',
-        customerPhone: activeOrder?.online?.customerPhone || '',
-        customerAddress: activeOrder?.online?.customerAddress || '',
-        channelOrderId: activeOrder?.online?.channelOrderId || '',
-      }),
-    [activeOrder]
-  );
   const hasUnsavedChanges = useMemo(() => {
     if (!isEditingActiveBill) {
       return false;
@@ -747,20 +677,17 @@ export default function POS() {
 
     const savedTotal = Number(activeOrder?.totalAmount ?? activeOrder?.total ?? 0);
     return (
-      (activeOrder?.orderType || (activeOrder?.tableId ? 'dine-in' : '')) !== orderType ||
+      (activeOrder?.orderType || 'dine-in') !== orderType ||
       cartSignature !== activeOrderSignature ||
-      onlineDraftSignature !== activeOrderOnlineSignature ||
       Math.abs(savedTotal - finalTotal) > 0.009 ||
       normalizePaymentMethod(activeOrder?.paymentMethod) !== paymentMethod
     );
   }, [
     activeOrder,
-    activeOrderOnlineSignature,
     activeOrderSignature,
     cartSignature,
     finalTotal,
     isEditingActiveBill,
-    onlineDraftSignature,
     orderType,
     paymentMethod,
   ]);
@@ -819,7 +746,6 @@ export default function POS() {
     setCashReceived(workspace.cashReceived || '');
     setPaymentNote(workspace.paymentNote || '');
     setPackingCharge(workspace.packingCharge || '');
-    setDeliveryCharge(workspace.deliveryCharge || '');
     setOnlineSource(workspace.onlineSource || 'direct');
     setPromisedAt(workspace.promisedAt || '');
     setOnlinePaymentState(workspace.onlinePaymentState || 'pending');
@@ -838,11 +764,9 @@ export default function POS() {
     }
 
     const restoredDraft = buildDraftFromOrder(order);
-    const restoredOnlineDraft = normalizeOnlineDraft(order);
-
     setActiveOrder(order);
     setPinnedOrderId(order.id || '');
-    setOrderType(order.orderType || (order.tableId ? 'dine-in' : 'delivery'));
+    setOrderType('dine-in');
     setSelectedTableId(order.tableId || '');
     setCartItems(restoredDraft.cartItems);
     setDiscountType(restoredDraft.discountType);
@@ -851,15 +775,14 @@ export default function POS() {
     setCashReceived('');
     setPaymentNote('');
     setPackingCharge(order?.billing?.packingCharge ? String(order.billing.packingCharge) : '');
-    setDeliveryCharge(order?.billing?.deliveryCharge ? String(order.billing.deliveryCharge) : '');
-    setOnlineSource(restoredOnlineDraft.source);
-    setPromisedAt(restoredOnlineDraft.promisedAt);
-    setOnlinePaymentState(restoredOnlineDraft.paymentState);
-    setCustomerName(restoredOnlineDraft.customerName);
-    setCustomerPhone(restoredOnlineDraft.customerPhone);
-    setCustomerAddress(restoredOnlineDraft.customerAddress);
-    setChannelOrderId(restoredOnlineDraft.channelOrderId);
-    setLoyaltyPhone(restoredOnlineDraft.customerPhone);
+    setOnlineSource('direct');
+    setPromisedAt('');
+    setOnlinePaymentState('pending');
+    setCustomerName('');
+    setCustomerPhone('');
+    setCustomerAddress('');
+    setChannelOrderId('');
+    setLoyaltyPhone('');
     setLoyaltyProfile(order.loyalty?.customerPhone ? {
       customerPhone: order.loyalty.customerPhone,
       pointsBalance: order.loyalty.availablePointsAfter || 0,
@@ -868,8 +791,8 @@ export default function POS() {
       totalRedeemedPoints: order.loyalty.redeemedPoints || 0,
     } : null);
     setRedeemPoints('');
-    saveWorkspaceDraft(getPosWorkspaceDraftKey(order.orderType || (order.tableId ? 'dine-in' : 'delivery'), order.tableId || ''), {
-      orderType: order.orderType || (order.tableId ? 'dine-in' : 'delivery'),
+    saveWorkspaceDraft(getPosWorkspaceDraftKey('dine-in', order.tableId || ''), {
+      orderType: 'dine-in',
       selectedTableId: order.tableId || '',
       pinnedOrderId: order.id || '',
       cartItems: restoredDraft.cartItems,
@@ -879,13 +802,13 @@ export default function POS() {
       paymentMethod: restoredDraft.paymentMethod,
       cashReceived: '',
       paymentNote: '',
-      onlineSource: restoredOnlineDraft.source,
-      promisedAt: restoredOnlineDraft.promisedAt,
-      onlinePaymentState: restoredOnlineDraft.paymentState,
-      customerName: restoredOnlineDraft.customerName,
-      customerPhone: restoredOnlineDraft.customerPhone,
-      customerAddress: restoredOnlineDraft.customerAddress,
-      channelOrderId: restoredOnlineDraft.channelOrderId,
+      onlineSource: 'direct',
+      promisedAt: '',
+      onlinePaymentState: 'pending',
+      customerName: '',
+      customerPhone: '',
+      customerAddress: '',
+      channelOrderId: '',
     });
     if (syncUrl) {
       syncBillingSearchParams({
@@ -893,10 +816,6 @@ export default function POS() {
         orderId: order.id || '',
       });
     }
-  };
-
-  const refreshOnlineInbox = async () => {
-    await refreshCachedOnlineInbox({ force: true });
   };
 
   const clearBillDraft = () => {
@@ -908,7 +827,6 @@ export default function POS() {
     setCashReceived('');
     setPaymentNote('');
     setPackingCharge('');
-    setDeliveryCharge('');
     setEditingItemId('');
     setShowItemDetailsModal(false);
     setItemNoteDraft('');
@@ -930,11 +848,12 @@ export default function POS() {
     try {
       const response = await orderAPI.getLoyaltyProfile(phoneToCheck);
       const profile = response.data?.data || null;
+      const resolvedPhone = normalizePhoneForDisplay(profile?.customerPhone || phoneToCheck);
       setLoyaltyProfile(profile);
       setRedeemPoints('');
       setSubmitSuccess(
-        profile?.customerPhone
-          ? `Loyalty balance loaded for ${profile.customerPhone}.`
+        resolvedPhone
+          ? `Loyalty balance loaded for ${resolvedPhone}.`
           : 'No loyalty history found for this number yet.'
       );
     } catch (error) {
@@ -957,7 +876,6 @@ export default function POS() {
       cashReceived,
       paymentNote,
       packingCharge,
-      deliveryCharge,
       onlineSource,
       promisedAt,
       onlinePaymentState,
@@ -990,7 +908,6 @@ export default function POS() {
     packingCharge,
     promisedAt,
     pinnedOrderId,
-    deliveryCharge,
     saveWorkspaceDraft,
     selectedTableId,
     setCurrentWorkspace,
@@ -1028,6 +945,11 @@ export default function POS() {
   };
 
   const handleSelectTable = (tableId) => {
+    if (isWaiterAccount && !assignedTableIds.includes(tableId)) {
+      setSubmitError('This waiter can only open assigned tables.');
+      return;
+    }
+
     const existingOrder = openBillByTableId.get(tableId);
 
     setPinnedOrderId(existingOrder?.id || '');
@@ -1052,7 +974,7 @@ export default function POS() {
 
   const handleChangeType = () => {
     setPinnedOrderId('');
-    setOrderType('');
+    setOrderType('dine-in');
     setSelectedTableId('');
     clearBillDraft();
     syncBillingSearchParams();
@@ -1140,11 +1062,6 @@ export default function POS() {
       return false;
     }
 
-    if (orderType !== 'dine-in' && !onlineSource) {
-      setSubmitError('Choose the order source before saving this online order.');
-      return false;
-    }
-
     return true;
   };
 
@@ -1182,16 +1099,16 @@ export default function POS() {
       modifiers: item.modifiers || [],
     })),
     total: finalTotal,
-    order_type: orderType,
-    table_id: orderType === 'dine-in' ? selectedTableId : null,
+    order_type: 'dine-in',
+    table_id: selectedTableId,
     paymentMethod,
-    source: orderType === 'dine-in' ? null : onlineSource,
-    promisedAt: orderType === 'dine-in' ? null : serializePromisedAt(promisedAt),
-    paymentState: orderType === 'dine-in' ? null : onlinePaymentState,
-    customerName: orderType === 'dine-in' ? '' : customerName.trim(),
-    customerPhone: orderType === 'dine-in' ? '' : customerPhone.trim(),
-    customerAddress: orderType === 'dine-in' ? '' : customerAddress.trim(),
-    channelOrderId: orderType === 'dine-in' ? '' : channelOrderId.trim(),
+    source: null,
+    promisedAt: null,
+    paymentState: null,
+    customerName: '',
+    customerPhone: '',
+    customerAddress: '',
+    channelOrderId: '',
   });
 
   const handleSubmit = async () => {
@@ -1227,8 +1144,6 @@ export default function POS() {
       refreshTableOverview({ force: true }).catch(() => {
         // Shared store state updates in the background.
       });
-      refreshOnlineInbox();
-
       setSubmitSuccess(
         responseMessage.includes('existing bill')
           ? responseMessage
@@ -1293,8 +1208,6 @@ export default function POS() {
       refreshTableOverview({ force: true }).catch(() => {
         // Shared store state updates in the background.
       });
-      refreshOnlineInbox();
-
       setSubmitSuccess(`${formatDisplayOrderNumber(updatedOrder)} sent to kitchen successfully.`);
       let autoPrintError = '';
       try {
@@ -1367,7 +1280,7 @@ export default function POS() {
         redeemPoints: loyaltyDiscountPreview,
         packingCharge: Number(packingCharge || 0),
         serviceCharge: defaultServiceCharge,
-        deliveryCharge: Number(deliveryCharge || 0),
+        deliveryCharge: 0,
       });
       const settledOrder = settleResponse.data?.data;
       const formattedOrderNumber = formatDisplayOrderNumber(settledOrder || orderToSettle);
@@ -1396,7 +1309,7 @@ export default function POS() {
 
       clearBillDraft();
       setPinnedOrderId('');
-      setOrderType('');
+      setOrderType('dine-in');
       setSelectedTableId('');
       syncBillingSearchParams();
       if (settledTableId) {
@@ -1414,7 +1327,6 @@ export default function POS() {
       refreshTableOverview({ force: true }).catch(() => {
         // Shared store state updates in the background.
       });
-      refreshOnlineInbox();
       setSubmitSuccess(
         settlementChangeDue > 0
           ? `${formattedOrderNumber} settled via ${paymentMethod.toUpperCase()}. Return ${formatCurrency(settlementChangeDue)} change.`
@@ -1437,80 +1349,7 @@ export default function POS() {
     }
   };
 
-  const handleCreateOnlineOrder = () => {
-    setPinnedOrderId('');
-    setSelectedTableId('');
-    clearBillDraft();
-    setOrderType('delivery');
-    setSubmitError(null);
-    setSubmitSuccess('Started a fresh online order. Add items, set source and promise time, then save or send to kitchen.');
-    syncBillingSearchParams();
-  };
-
-  const handleOpenOnlineOrder = (order) => {
-    applyOrderToWorkspace(order);
-    setSubmitError(null);
-    setSubmitSuccess(`${formatDisplayOrderNumber(order)} opened in the POS workspace.`);
-    if (user?.id && order?.tableId) {
-      logWaiterActivity({
-        waiterId: user.id,
-        action: 'opened_order',
-        tableId: order.tableId,
-        orderId: order.id,
-      });
-    }
-  };
-
-  const handleUpdateOnlineWorkflow = async (order, workflowStatus) => {
-    setUpdatingOnlineOrderId(order.id);
-    setSubmitError(null);
-    setSubmitSuccess(null);
-
-    try {
-      const response = await orderAPI.updateOnlineOrder(order.id, {
-        workflowStatus,
-      });
-      const updatedOrder = response.data?.data || order;
-
-      if (activeOrder?.id === updatedOrder.id) {
-        applyOrderToWorkspace(updatedOrder);
-      }
-
-      refreshTableOverview({ force: true }).catch(() => {
-        // Shared store state updates in the background.
-      });
-      await refreshOnlineInbox();
-      setSubmitSuccess(`${formatDisplayOrderNumber(updatedOrder)} marked ${workflowStatus.replace(/_/g, ' ')}.`);
-    } catch (error) {
-      setSubmitError(error.response?.data?.message || 'Failed to update the online order workflow.');
-    } finally {
-      setUpdatingOnlineOrderId('');
-    }
-  };
-
-  const shouldChooseTableFirst = orderType === 'dine-in' && !selectedTableId;
-  const shouldChooseServiceModeFirst = !orderType;
-
-  const serviceModes = [
-    {
-      id: 'dine-in',
-      label: 'Dine-In',
-      description: 'Waiter selects a table, then takes the order.',
-      icon: Utensils,
-    },
-    {
-      id: 'takeaway',
-      label: 'Takeaway',
-      description: 'Direct menu entry without table selection.',
-      icon: ShoppingBag,
-    },
-    {
-      id: 'delivery',
-      label: 'Delivery',
-      description: 'Take order quickly for delivery billing.',
-      icon: Bike,
-    },
-  ];
+  const shouldChooseTableFirst = !selectedTableId;
 
   return (
     <div className="compact-page space-y-4">
@@ -1564,64 +1403,9 @@ export default function POS() {
         </div>
       </section>
 
-      <OnlineOrderInbox
-        orders={onlineInbox}
-        loading={onlineInboxLoading}
-        selectedOrderId={activeOrder?.id || ''}
-        updatingOrderId={updatingOnlineOrderId}
-        onOpenOrder={handleOpenOnlineOrder}
-        onCreateOrder={handleCreateOnlineOrder}
-        onRefresh={refreshOnlineInbox}
-        onUpdateWorkflow={handleUpdateOnlineWorkflow}
-      />
-
-      {onlineInboxError ? (
-        <section className="rounded-[1.6rem] border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
-          {onlineInboxError}
-        </section>
-      ) : null}
-
-      {shouldChooseServiceModeFirst ? (
-        <section className="rounded-[2rem] border border-[var(--border-color)] bg-[var(--bg-card)] p-5 shadow-[var(--shadow-card)]">
-          <div className="mb-5">
-            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--text-secondary)]">Step 1</p>
-            <h2 className="mt-2 text-2xl font-bold text-[var(--text-primary)]">Choose service type</h2>
-            <p className="mt-2 text-sm text-[var(--text-secondary)]">
-              Start with how the order is being taken. If it is dine-in, we will ask for the table next.
-            </p>
-          </div>
-
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            {serviceModes.map((mode) => {
-              const Icon = mode.icon;
-              return (
-                <button
-                  key={mode.id}
-                  type="button"
-                  onClick={() => {
-                    handleOrderTypeChange(mode.id);
-                  }}
-                  className="rounded-[1.7rem] border border-[var(--border-color)] bg-[linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.02))] p-5 text-left shadow-[var(--shadow-card)] transition hover:-translate-y-0.5 hover:border-[var(--color-primary)] hover:bg-[var(--color-primary-soft)]"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-[var(--bg-card-muted)] text-[var(--color-primary)]">
-                      <Icon className="h-6 w-6" />
-                    </div>
-                    <span className="rounded-full bg-[var(--bg-card-muted)] px-3 py-1 text-xs font-bold uppercase tracking-[0.16em] text-[var(--color-primary)]">
-                      Start
-                    </span>
-                  </div>
-
-                  <h3 className="mt-5 text-2xl font-black text-[var(--text-primary)]">{mode.label}</h3>
-                  <p className="mt-2 text-sm font-medium text-[var(--text-secondary)]">{mode.description}</p>
-                </button>
-              );
-            })}
-          </div>
-        </section>
-      ) : shouldChooseTableFirst ? (
+      {shouldChooseTableFirst ? (
         <section className="rounded-[var(--radius-card)] border border-[var(--border-color)] bg-[var(--bg-card)] p-4 sm:p-5 shadow-[var(--shadow-card)]">
-          <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div className="mb-5">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--text-secondary)]">Step 2</p>
               <h2 className="mt-2 text-2xl font-bold text-[var(--text-primary)]">Select table for the waiter order</h2>
@@ -1629,15 +1413,6 @@ export default function POS() {
                 Pick a table first. After that, the menu opens so the waiter can take the order.
               </p>
             </div>
-
-            <button
-              type="button"
-              onClick={handleChangeType}
-              className="inline-flex items-center gap-2 rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card-muted)] px-4 py-3 text-sm font-semibold text-[var(--text-primary)] transition hover:bg-[var(--color-primary-soft)]"
-            >
-              <ArrowLeft className="h-4 w-4" />
-              Change Service Type
-            </button>
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
@@ -1782,51 +1557,9 @@ export default function POS() {
                     onClick={handleChangeType}
                     className="rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card-muted)] px-4 py-3 text-sm font-semibold text-[var(--text-primary)] transition hover:bg-[var(--color-primary-soft)]"
                   >
-                    Change Type
+                    Change Table
                   </button>
                 </div>
-              </div>
-            ) : orderType ? (
-              <div className="flex flex-col gap-4 rounded-[var(--radius-card)] border border-[var(--border-color)] bg-[var(--bg-card)] px-4 py-4 shadow-[var(--shadow-card)] lg:flex-row lg:items-center lg:justify-between">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--text-secondary)]">Service Type</p>
-                  <p className="mt-1 text-xl font-bold text-[var(--text-primary)]">
-                    {orderType === 'takeaway' ? 'Takeaway' : 'Delivery'}
-                  </p>
-                  <div className="mt-3 flex flex-wrap items-center gap-2">
-                    {orderType !== 'dine-in' ? (
-                      <span className="rounded-full bg-[var(--bg-card-muted)] px-3 py-1 text-xs font-bold uppercase tracking-[0.16em] text-[var(--color-primary)]">
-                        {onlineSource || 'direct'}
-                      </span>
-                    ) : null}
-                    {activeOrder?.id ? (
-                      <span className="rounded-full bg-[var(--bg-card-muted)] px-3 py-1 text-xs font-bold uppercase tracking-[0.16em] text-[var(--text-primary)]">
-                        {formatDisplayOrderNumber(activeOrder)}
-                      </span>
-                    ) : null}
-                    {activeOrder?.online?.workflowStatus ? (
-                      <span className="rounded-full bg-amber-500/10 px-3 py-1 text-xs font-bold uppercase tracking-[0.16em] text-amber-300">
-                        {activeOrder.online.workflowStatus.replace(/_/g, ' ')}
-                      </span>
-                    ) : null}
-                  </div>
-                  {orderType !== 'dine-in' ? (
-                    <div className="mt-3 flex flex-wrap items-center gap-3 text-sm font-semibold text-[var(--text-secondary)]">
-                      <span>Promise: <span className="text-[var(--text-primary)]">{promisedAt ? promisedAt.replace('T', ' ') : 'Not set'}</span></span>
-                      <span>Channel payment: <span className="text-[var(--text-primary)]">{onlinePaymentState}</span></span>
-                      {customerName ? (
-                        <span>Customer: <span className="text-[var(--text-primary)]">{customerName}</span></span>
-                      ) : null}
-                    </div>
-                  ) : null}
-                </div>
-                <button
-                  type="button"
-                  onClick={handleChangeType}
-                  className="rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card-muted)] px-4 py-3 text-sm font-semibold text-[var(--text-primary)] transition hover:bg-[var(--color-primary-soft)]"
-                >
-                  Change Type
-                </button>
               </div>
             ) : null}
 
@@ -1857,25 +1590,6 @@ export default function POS() {
               canManageBilling={canManageBilling}
             />
 
-            <OnlineOrderDetailsPanel
-              orderType={orderType}
-              source={onlineSource}
-              promisedAt={promisedAt}
-              paymentState={onlinePaymentState}
-              customerName={customerName}
-              customerPhone={customerPhone}
-              customerAddress={customerAddress}
-              channelOrderId={channelOrderId}
-              onSourceChange={setOnlineSource}
-              onPromisedAtChange={setPromisedAt}
-              onPaymentStateChange={setOnlinePaymentState}
-              onCustomerNameChange={setCustomerName}
-              onCustomerPhoneChange={setCustomerPhone}
-              onCustomerAddressChange={setCustomerAddress}
-              onChannelOrderIdChange={setChannelOrderId}
-              disabled={isLoadingTableOrder || isSubmitting || isSettling || isSendingToKitchen}
-            />
-
             {canManageBilling ? (
               <PaymentPanel
                 paymentMethod={paymentMethod}
@@ -1890,8 +1604,6 @@ export default function POS() {
                 onPaymentNoteChange={setPaymentNote}
                 packingCharge={packingCharge}
                 onPackingChargeChange={setPackingCharge}
-                deliveryCharge={deliveryCharge}
-                onDeliveryChargeChange={setDeliveryCharge}
                 invoicePreview={invoicePreview}
                 activeOrder={activeOrder}
                 loyaltyPhone={loyaltyPhone}

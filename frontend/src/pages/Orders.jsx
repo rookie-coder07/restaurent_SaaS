@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Loader, ShoppingCart, RotateCcw } from 'lucide-react';
 import { useApi } from '../hooks/useApi';
 import useAutoRefresh from '../hooks/useAutoRefresh';
@@ -13,6 +14,7 @@ import EmptyState from '../components/common/EmptyState';
 import StatCard from '../components/common/StatCard';
 import PaginationControls from '../components/common/PaginationControls';
 import useResponsivePagination from '../hooks/useResponsivePagination';
+import { useAuthStore } from '../context/authStore';
 import { getOrderSourceLabel } from '../utils/managerPortal';
 
 const STATUS_STYLES = {
@@ -29,11 +31,24 @@ function isSettledOrder(order) {
   return order?.status === 'completed' || order?.paymentStatus === 'paid';
 }
 
+function isQrOrderWaitingForFirstKot(order) {
+  return (
+    order?.origin === 'qr' &&
+    order?.orderType === 'dine-in' &&
+    order?.status === 'awaiting_waiter_approval' &&
+    (!Array.isArray(order?.kitchenTickets) || order.kitchenTickets.length === 0)
+  );
+}
+
 function formatPaymentMethodLabel(value) {
   return String(value || 'cash').toUpperCase();
 }
 
 export default function Orders() {
+  const navigate = useNavigate();
+  const user = useAuthStore((state) => state.user);
+  const isManagerUser = user?.role === 'manager';
+  const canDeleteOrders = user?.role === 'owner';
   const { data: ordersData = {}, loading, execute: refetchOrders, refetch: refetchOrdersLatest } = useApi(() => orderAPI.getOrders({ limit: 100 }));
   const { data: tablesData = {}, refetch: refetchTables } = useApi(() => tableAPI.getTables({}));
 
@@ -55,7 +70,9 @@ export default function Orders() {
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const [pendingDeletionQueue, setPendingDeletionQueue] = useState([]);
   const [deleteClock, setDeleteClock] = useState(Date.now());
+  const [deletePassword, setDeletePassword] = useState('');
   const pendingDeletionQueueRef = useRef([]);
+  const requiresDeletePassword = user?.role === 'owner';
 
   const orders = ordersData?.items || [];
   const tables = tablesData?.tables || [];
@@ -194,7 +211,13 @@ export default function Orders() {
 
   const finalizePendingDeletion = async (entry) => {
     try {
-      await Promise.all(entry.orderIds.map((orderId) => orderAPI.softDeleteOrder(orderId, {})));
+      await Promise.all(
+        entry.orderIds.map((orderId) =>
+          orderAPI.softDeleteOrder(orderId, {
+            currentPassword: entry.currentPassword || '',
+          })
+        )
+      );
       removePendingDeletionEntry(entry.id);
       await refetchOrders();
       setSuccess(
@@ -223,6 +246,7 @@ export default function Orders() {
       label: uniqueOrders.length === 1 ? formatDisplayOrderNumber(uniqueOrders[0]) : `${uniqueOrders.length} orders`,
       expiresAt: Date.now() + 10000,
       timeoutId: null,
+      currentPassword: requiresDeletePassword ? deletePassword : '',
     };
 
     entry.timeoutId = window.setTimeout(() => {
@@ -258,8 +282,13 @@ export default function Orders() {
     try {
       setIsDeletingOrder(true);
       setError(null);
+      if (requiresDeletePassword && !deletePassword.trim()) {
+        setError('Enter admin password to delete previous orders.');
+        return;
+      }
       queueDeletion([pendingDeleteOrder]);
       setPendingDeleteOrder(null);
+      setDeletePassword('');
     } catch (err) {
       setError(err.response?.data?.message || 'Failed to queue this order for deletion.');
     } finally {
@@ -316,8 +345,13 @@ export default function Orders() {
     try {
       setIsBulkDeletingOrders(true);
       setError(null);
+      if (requiresDeletePassword && !deletePassword.trim()) {
+        setError('Enter admin password to delete previous orders.');
+        return;
+      }
       queueDeletion(selectedBulkOrders);
       setShowBulkDeleteModal(false);
+      setDeletePassword('');
     } catch (err) {
       setError(err.response?.data?.message || 'Failed to queue selected orders for deletion.');
     } finally {
@@ -337,7 +371,7 @@ export default function Orders() {
     <div className="space-y-6">
       {success ? <Toast type="success" message={success} /> : null}
       {error ? <Toast type="error" message={error} /> : null}
-      {pendingDeletionQueue.length > 0 ? (
+      {canDeleteOrders && pendingDeletionQueue.length > 0 ? (
         <Card className="border-amber-200 bg-amber-50">
           <div className="flex flex-col gap-3">
             {pendingDeletionQueue.map((entry) => {
@@ -513,19 +547,23 @@ export default function Orders() {
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
-                <Button variant="secondary" onClick={selectTimelineOrders} disabled={timelineOrders.length === 0}>
-                  Select Timeline
-                </Button>
-                <Button variant="danger" onClick={deleteTimelineOrders} disabled={timelineOrders.length === 0}>
-                  Delete Timeline
-                </Button>
+                {canDeleteOrders ? (
+                  <>
+                    <Button variant="secondary" onClick={selectTimelineOrders} disabled={timelineOrders.length === 0}>
+                      Select Timeline
+                    </Button>
+                    <Button variant="danger" onClick={deleteTimelineOrders} disabled={timelineOrders.length === 0}>
+                      Delete Timeline
+                    </Button>
+                  </>
+                ) : null}
               </div>
             </div>
           </div>
         ) : null}
       </Card>
 
-      {selectedBulkOrders.length > 0 ? (
+      {canDeleteOrders && selectedBulkOrders.length > 0 ? (
         <Card className="border-[var(--color-primary)]/20 bg-[var(--color-primary-soft)]/40">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div>
@@ -554,7 +592,7 @@ export default function Orders() {
         <EmptyState
           icon={ShoppingCart}
           title="No orders found"
-          description="Try adjusting the filters or create a new order to get started."
+          description="Try adjusting the filters to view the right billing and order history."
         />
       ) : (
         <div className="space-y-4">
@@ -563,7 +601,7 @@ export default function Orders() {
               <table className="min-w-full">
                 <thead className="bg-[var(--color-surface-muted)]">
                   <tr className="text-left text-xs uppercase tracking-[0.14em] text-[var(--color-text-subtle)]">
-                    <th className="px-4 py-4 font-semibold">Select</th>
+                    {canDeleteOrders ? <th className="px-4 py-4 font-semibold">Select</th> : null}
                     <th className="px-4 py-4 font-semibold">S.No.</th>
                     <th className="px-4 py-4 font-semibold">Order</th>
                     <th className="px-4 py-4 font-semibold">Table</th>
@@ -576,14 +614,16 @@ export default function Orders() {
                 <tbody>
                   {paginatedOrders.map((order, index) => (
                     <tr key={order.id} className="border-t border-[var(--color-border)] text-sm">
-                      <td className="px-4 py-4 align-top">
-                        <input
-                          type="checkbox"
-                          checked={selectedOrderIds.includes(order.id)}
-                          onChange={() => toggleOrderSelection(order.id)}
-                          className="mt-1 h-4 w-4 rounded border-[var(--color-border)]"
-                        />
-                      </td>
+                      {canDeleteOrders ? (
+                        <td className="px-4 py-4 align-top">
+                          <input
+                            type="checkbox"
+                            checked={selectedOrderIds.includes(order.id)}
+                            onChange={() => toggleOrderSelection(order.id)}
+                            className="mt-1 h-4 w-4 rounded border-[var(--color-border)]"
+                          />
+                        </td>
+                      ) : null}
                       <td className="px-4 py-4 align-top font-semibold text-[var(--color-primary)]">{pageStart + index + 1}</td>
                       <td className="px-4 py-4 align-top">
                         <p className="font-semibold text-[var(--color-text)]">
@@ -613,11 +653,17 @@ export default function Orders() {
                       </td>
                       <td className="px-4 py-4 align-top">
                         <div className="flex flex-wrap gap-2">
+                          {isQrOrderWaitingForFirstKot(order) ? (
+                            <p className="w-full text-xs font-semibold text-amber-700">
+                              Waiter must generate the first KOT before progress can change.
+                            </p>
+                          ) : null}
                           {order.status !== 'completed' && order.status !== 'cancelled' ? (
                             <select
                               value={order.status}
                               onChange={(e) => handleStatusUpdate(order.id, e.target.value)}
                               className="input min-w-[150px]"
+                              disabled={isQrOrderWaitingForFirstKot(order)}
                             >
                               <option value="awaiting_waiter_approval">Waiting</option>
                               <option value="pending">Pending</option>
@@ -627,9 +673,16 @@ export default function Orders() {
                               <option value="cancelled">Cancelled</option>
                             </select>
                           ) : null}
-                          <Button variant="danger" onClick={() => setPendingDeleteOrder(order)}>
-                            Delete
-                          </Button>
+                          {isManagerUser && !isSettledOrder(order) && order.status !== 'cancelled' ? (
+                            <Button onClick={() => navigate('/manager/bills')}>
+                              Settle Bill
+                            </Button>
+                          ) : null}
+                          {canDeleteOrders ? (
+                            <Button variant="danger" onClick={() => setPendingDeleteOrder(order)}>
+                              Delete
+                            </Button>
+                          ) : null}
                           <Button variant="secondary" onClick={() => openOrderDetails(order)}>
                             Details
                           </Button>
@@ -662,12 +715,14 @@ export default function Orders() {
                       <p className="mt-1 text-sm text-[var(--color-text-muted)]">Table {order.tableNumber || 'N/A'}</p>
                       <p className="mt-1 text-sm text-[var(--color-text-muted)]">{formatDate(order.createdAt)}</p>
                     </div>
-                    <input
-                      type="checkbox"
-                      checked={selectedOrderIds.includes(order.id)}
-                      onChange={() => toggleOrderSelection(order.id)}
-                      className="mt-1 h-4 w-4 rounded border-[var(--color-border)]"
-                    />
+                    {canDeleteOrders ? (
+                      <input
+                        type="checkbox"
+                        checked={selectedOrderIds.includes(order.id)}
+                        onChange={() => toggleOrderSelection(order.id)}
+                        className="mt-1 h-4 w-4 rounded border-[var(--color-border)]"
+                      />
+                    ) : null}
                   </div>
 
                   <div className="flex flex-wrap items-center gap-2">
@@ -699,11 +754,17 @@ export default function Orders() {
                   </div>
 
                   <div className="flex flex-col gap-3">
+                    {isQrOrderWaitingForFirstKot(order) ? (
+                      <p className="text-xs font-semibold text-amber-700">
+                        Waiter must generate the first KOT before progress can change.
+                      </p>
+                    ) : null}
                     {order.status !== 'completed' && order.status !== 'cancelled' ? (
                       <select
                         value={order.status}
                         onChange={(e) => handleStatusUpdate(order.id, e.target.value)}
                         className="input"
+                        disabled={isQrOrderWaitingForFirstKot(order)}
                       >
                         <option value="awaiting_waiter_approval">Waiting for Waiter</option>
                         <option value="pending">Pending</option>
@@ -714,9 +775,16 @@ export default function Orders() {
                       </select>
                     ) : null}
                     <div className="flex flex-col gap-3 sm:flex-row">
-                      <Button variant="danger" onClick={() => setPendingDeleteOrder(order)}>
-                        Delete Order
-                      </Button>
+                      {isManagerUser && !isSettledOrder(order) && order.status !== 'cancelled' ? (
+                        <Button onClick={() => navigate('/manager/bills')}>
+                          Settle Bill
+                        </Button>
+                      ) : null}
+                      {canDeleteOrders ? (
+                        <Button variant="danger" onClick={() => setPendingDeleteOrder(order)}>
+                          Delete Order
+                        </Button>
+                      ) : null}
                       <Button variant="secondary" onClick={() => openOrderDetails(order)}>
                         View Details
                       </Button>
@@ -807,108 +875,135 @@ export default function Orders() {
         ) : null}
       </Modal>
 
-      <Modal
-        title={pendingDeleteOrder ? `Delete ${formatDisplayOrderNumber(pendingDeleteOrder)}` : 'Delete Order'}
-        isOpen={Boolean(pendingDeleteOrder)}
-        onClose={() => {
-          if (isDeletingOrder) {
-            return;
-          }
+      {canDeleteOrders ? (
+        <>
+          <Modal
+            title={pendingDeleteOrder ? `Delete ${formatDisplayOrderNumber(pendingDeleteOrder)}` : 'Delete Order'}
+            isOpen={Boolean(pendingDeleteOrder)}
+            onClose={() => {
+              if (isDeletingOrder) {
+                return;
+              }
 
-          setPendingDeleteOrder(null);
-        }}
-        maxWidth="max-w-lg"
-      >
-        <div className="space-y-4">
-          <div className="rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm font-medium text-red-300">
-            This order will be removed from the list now. You can undo it for 10 seconds before it is deleted permanently.
-          </div>
+              setPendingDeleteOrder(null);
+            }}
+            maxWidth="max-w-lg"
+          >
+            <div className="space-y-4">
+              <div className="rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm font-medium text-red-300">
+                This order will be removed from the list now. You can undo it for 10 seconds before it is deleted permanently.
+              </div>
 
-          <div className="flex flex-col-reverse gap-3 sm:flex-row">
-            <Button
-              type="button"
-              variant="secondary"
-              className="w-full sm:flex-1"
-              onClick={() => {
-                setPendingDeleteOrder(null);
-              }}
-              disabled={isDeletingOrder}
-            >
-              Keep Order
-            </Button>
-            <Button
-              type="button"
-              variant="danger"
-              className="w-full sm:flex-1"
-              onClick={handleDeleteOrder}
-              disabled={isDeletingOrder}
-            >
-              {isDeletingOrder ? 'Deleting...' : 'Confirm Delete'}
-            </Button>
-          </div>
-        </div>
-      </Modal>
-
-      <Modal
-        title={`Delete ${selectedBulkOrders.length} Selected Order${selectedBulkOrders.length === 1 ? '' : 's'}`}
-        isOpen={showBulkDeleteModal}
-        onClose={() => {
-          if (isBulkDeletingOrders) {
-            return;
-          }
-
-          setShowBulkDeleteModal(false);
-        }}
-        maxWidth="max-w-lg"
-      >
-        <div className="space-y-4">
-          <div className="rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm font-medium text-red-300">
-            The selected orders will be removed from the list now. You can undo them for 10 seconds before they are deleted permanently.
-          </div>
-
-          <div className="rounded-2xl bg-[var(--color-surface-muted)] p-4">
-            <p className="text-sm font-semibold text-[var(--color-text)]">Selected orders</p>
-            <div className="mt-3 space-y-2">
-              {selectedBulkOrders.slice(0, 6).map((order) => (
-                <div key={order.id} className="flex items-center justify-between gap-3 text-sm">
-                  <span className="text-[var(--color-text)]">{formatDisplayOrderNumber(order)}</span>
-                  <span className="text-[var(--color-text-muted)]">
-                    {formatCurrency(order.totalAmount || order.total || 0)}
-                  </span>
-                </div>
-              ))}
-              {selectedBulkOrders.length > 6 ? (
-                <p className="text-xs text-[var(--color-text-muted)]">
-                  +{selectedBulkOrders.length - 6} more selected order{selectedBulkOrders.length - 6 === 1 ? '' : 's'}
-                </p>
+              {requiresDeletePassword ? (
+                <Input
+                  label="Admin Password"
+                  type="password"
+                  value={deletePassword}
+                  onChange={(event) => setDeletePassword(event.target.value)}
+                  placeholder="Enter your current password"
+                />
               ) : null}
-            </div>
-          </div>
 
-          <div className="flex flex-col-reverse gap-3 sm:flex-row">
-            <Button
-              type="button"
-              variant="secondary"
-              className="w-full sm:flex-1"
-              onClick={() => {
-                setShowBulkDeleteModal(false);
-              }}
-              disabled={isBulkDeletingOrders}
-            >
-              Keep Orders
-            </Button>
-            <Button
-              type="button"
-              variant="danger"
-              className="w-full sm:flex-1"
-              onClick={handleBulkDeleteOrders}
-              disabled={isBulkDeletingOrders || selectedBulkOrders.length === 0}
-            >
-              {isBulkDeletingOrders ? 'Deleting...' : 'Confirm Bulk Delete'}
-            </Button>
-          </div>
-        </div>
-      </Modal>
+              <div className="flex flex-col-reverse gap-3 sm:flex-row">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="w-full sm:flex-1"
+                  onClick={() => {
+                    setPendingDeleteOrder(null);
+                    setDeletePassword('');
+                  }}
+                  disabled={isDeletingOrder}
+                >
+                  Keep Order
+                </Button>
+                <Button
+                  type="button"
+                  variant="danger"
+                  className="w-full sm:flex-1"
+                  onClick={handleDeleteOrder}
+                  disabled={isDeletingOrder}
+                >
+                  {isDeletingOrder ? 'Deleting...' : 'Confirm Delete'}
+                </Button>
+              </div>
+            </div>
+          </Modal>
+
+          <Modal
+            title={`Delete ${selectedBulkOrders.length} Selected Order${selectedBulkOrders.length === 1 ? '' : 's'}`}
+            isOpen={showBulkDeleteModal}
+            onClose={() => {
+              if (isBulkDeletingOrders) {
+                return;
+              }
+
+              setShowBulkDeleteModal(false);
+              setDeletePassword('');
+            }}
+            maxWidth="max-w-lg"
+          >
+            <div className="space-y-4">
+              <div className="rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm font-medium text-red-300">
+                The selected orders will be removed from the list now. You can undo them for 10 seconds before they are deleted permanently.
+              </div>
+
+              {requiresDeletePassword ? (
+                <Input
+                  label="Admin Password"
+                  type="password"
+                  value={deletePassword}
+                  onChange={(event) => setDeletePassword(event.target.value)}
+                  placeholder="Enter your current password"
+                />
+              ) : null}
+
+              <div className="rounded-2xl bg-[var(--color-surface-muted)] p-4">
+                <p className="text-sm font-semibold text-[var(--color-text)]">Selected orders</p>
+                <div className="mt-3 space-y-2">
+                  {selectedBulkOrders.slice(0, 6).map((order) => (
+                    <div key={order.id} className="flex items-center justify-between gap-3 text-sm">
+                      <span className="text-[var(--color-text)]">{formatDisplayOrderNumber(order)}</span>
+                      <span className="text-[var(--color-text-muted)]">
+                        {formatCurrency(order.totalAmount || order.total || 0)}
+                      </span>
+                    </div>
+                  ))}
+                  {selectedBulkOrders.length > 6 ? (
+                    <p className="text-xs text-[var(--color-text-muted)]">
+                      +{selectedBulkOrders.length - 6} more selected order{selectedBulkOrders.length - 6 === 1 ? '' : 's'}
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+
+              <div className="flex flex-col-reverse gap-3 sm:flex-row">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="w-full sm:flex-1"
+                  onClick={() => {
+                    setShowBulkDeleteModal(false);
+                    setDeletePassword('');
+                  }}
+                  disabled={isBulkDeletingOrders}
+                >
+                  Keep Orders
+                </Button>
+                <Button
+                  type="button"
+                  variant="danger"
+                  className="w-full sm:flex-1"
+                  onClick={handleBulkDeleteOrders}
+                  disabled={isBulkDeletingOrders || selectedBulkOrders.length === 0}
+                >
+                  {isBulkDeletingOrders ? 'Deleting...' : 'Confirm Bulk Delete'}
+                </Button>
+              </div>
+            </div>
+          </Modal>
+        </>
+      ) : null}
     </div>
   );
 }

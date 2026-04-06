@@ -231,4 +231,51 @@ describe('Backend deployment smoke', () => {
     expect(response.body.success).toBe(false);
     expect(response.body.message).toBe('Unauthorized: Only manager can perform billing actions');
   });
+
+  test('PUT /api/v1/restaurants/settings/invoice blocks manager access', async () => {
+    const token = jwt.sign(
+      {
+        userId: 'manager-1',
+        restaurantId: 'rest-1',
+        email: 'manager@example.com',
+        role: 'manager',
+      },
+      process.env.JWT_SECRET
+    );
+
+    const response = await request(app)
+      .put('/api/v1/restaurants/settings/invoice')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        prefix: 'INV',
+        startingNumber: 1001,
+      });
+
+    expect(response.status).toBe(403);
+    expect(response.body.success).toBe(false);
+  });
+
+  test('PUT /api/v1/restaurants/settings/invoice validates owner payloads before any write happens', async () => {
+    const token = jwt.sign(
+      {
+        userId: 'owner-1',
+        restaurantId: 'rest-1',
+        email: 'owner@example.com',
+        role: 'owner',
+      },
+      process.env.JWT_SECRET
+    );
+
+    const response = await request(app)
+      .put('/api/v1/restaurants/settings/invoice')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        prefix: 'bad prefix!',
+        startingNumber: 0,
+      });
+
+    expect(response.status).toBe(400);
+    expect(response.body.success).toBe(false);
+    expect(response.body.message).toBe('Validation error');
+  });
 });

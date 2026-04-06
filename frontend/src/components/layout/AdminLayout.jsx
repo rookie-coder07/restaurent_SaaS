@@ -1,6 +1,9 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useAuthStore } from '../../context/authStore';
+import Toast from '../common/Toast';
+import { playLoudBuzzer } from '../../utils/alerts';
+import { subscribeToOrderEvents } from '../../utils/liveOrderEvents';
 import Navbar from './Navbar';
 import Sidebar from './Sidebar';
 
@@ -47,11 +50,15 @@ const PAGE_META = {
   },
   '/manager/orders': {
     section: 'Orders',
-    title: 'Order Operations',
+    title: 'Order History & Settlement',
+  },
+  '/manager/takeaway-orders': {
+    section: 'Takeaway',
+    title: 'Takeaway Order Desk',
   },
   '/manager/tables': {
     section: 'Tables',
-    title: 'Floor Control',
+    title: 'Table Control',
   },
   '/manager/kitchen': {
     section: 'Kitchen',
@@ -81,8 +88,10 @@ export default function AdminLayout({ children }) {
 
 export function AdminLayoutInner({ children, portal = 'admin' }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [managerAlertMessage, setManagerAlertMessage] = useState('');
   const location = useLocation();
   const userRole = useAuthStore((state) => state.user?.role);
+  const knownManagerOrderIdsRef = useRef(new Set());
 
   const pageMeta = useMemo(
     () =>
@@ -98,8 +107,58 @@ export function AdminLayoutInner({ children, portal = 'admin' }) {
     [location.pathname, portal, userRole]
   );
 
+  useEffect(() => {
+    if (userRole !== 'manager') {
+      knownManagerOrderIdsRef.current = new Set();
+      return undefined;
+    }
+
+    if (location.pathname.startsWith('/manager/kitchen')) {
+      return undefined;
+    }
+
+    const cleanup = subscribeToOrderEvents((payload) => {
+      const eventType = String(payload?.type || '');
+      const orderId = String(payload?.orderId || '').trim();
+      const eventTimestamp = payload?.updatedAt || payload?.createdAt || payload?.emittedAt || '';
+      const eventAgeMs = eventTimestamp ? Date.now() - new Date(eventTimestamp).getTime() : 0;
+      const isFreshEvent = !eventTimestamp || Number.isNaN(eventAgeMs) || eventAgeMs <= 20000;
+      const shouldBuzzManager =
+        eventType === 'order.created' ||
+        eventType === 'order.sent_to_kitchen' ||
+        (eventType === 'order.status_updated' && String(payload?.status || '').trim().toLowerCase() === 'pending');
+
+      if (!eventType.startsWith('order.') || !orderId) {
+        return;
+      }
+
+      if (!knownManagerOrderIdsRef.current.has(orderId) && isFreshEvent) {
+        knownManagerOrderIdsRef.current.add(orderId);
+
+        if (shouldBuzzManager) {
+          playLoudBuzzer('manager');
+          setManagerAlertMessage(
+            payload?.tableNumber
+              ? `New order received for table ${payload.tableNumber}.`
+              : 'New order received.'
+          );
+        }
+      }
+    });
+
+    return cleanup;
+  }, [location.pathname, userRole]);
+
   return (
     <div className="h-screen overflow-hidden bg-[var(--bg-main)] text-[var(--text-primary)]">
+      {managerAlertMessage ? (
+        <Toast
+          type="warning"
+          message={managerAlertMessage}
+          onClose={() => setManagerAlertMessage('')}
+          autoDismissMs={5200}
+        />
+      ) : null}
       <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
 
       <div className="flex h-screen min-h-0 flex-col lg:pl-72">

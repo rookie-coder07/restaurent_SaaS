@@ -20,28 +20,37 @@ function buildPrintShell({ title, paperWidthMm, bodyMarkup }) {
       <style>
         @page { size: ${paperWidthMm}mm auto; margin: 0; }
         html, body {
-          width: ${paperWidthMm}mm;
+          width: 100%;
           margin: 0;
           padding: 0;
           background: #ffffff;
           color: #000000;
-          font-family: "Courier New", Courier, monospace;
+          font-family: Arial, "Helvetica Neue", Helvetica, sans-serif;
           font-size: 12px;
+          font-weight: 700;
           line-height: 1.2;
+          letter-spacing: 0.01em;
+          text-rendering: geometricPrecision;
+          -webkit-font-smoothing: none;
+          print-color-adjust: exact;
+          -webkit-print-color-adjust: exact;
         }
         body {
+          display: flex;
+          justify-content: center;
           box-sizing: border-box;
         }
         .receipt {
           width: ${paperWidthMm}mm;
           max-width: ${paperWidthMm}mm;
+          margin: 0 auto;
           padding: 4mm;
           box-sizing: border-box;
         }
         .center { text-align: center; }
-        .title { font-size: 16px; font-weight: 700; }
-        .subtitle { font-size: 13px; font-weight: 700; margin-top: 2px; }
-        .muted { font-size: 11px; }
+        .title { font-size: 16px; font-weight: 800; }
+        .subtitle { font-size: 13px; font-weight: 800; margin-top: 2px; }
+        .muted { font-size: 11px; font-weight: 700; }
         .separator {
           white-space: pre;
           overflow: hidden;
@@ -66,7 +75,7 @@ function buildPrintShell({ title, paperWidthMm, bodyMarkup }) {
           gap: 6px;
           align-items: start;
         }
-        .strong { font-weight: 700; }
+        .strong { font-weight: 800; }
         .right { text-align: right; }
         .item-name {
           white-space: normal;
@@ -80,6 +89,9 @@ function buildPrintShell({ title, paperWidthMm, bodyMarkup }) {
           display: grid;
           grid-template-columns: 1fr auto;
           gap: 3px 8px;
+        }
+        .receipt, .receipt * {
+          font-weight: inherit;
         }
       </style>
     </head>
@@ -109,6 +121,12 @@ export function buildBillPrintHtml({ order, restaurant, invoice, cashierName }) 
   const loyaltySummary = resolvedInvoice.loyalty?.redeemedAmount
     ? `<div class="summary"><span>Loyalty</span><span>-${escapeHtml(formatCurrency(resolvedInvoice.loyalty.redeemedAmount))}</span></div>`
     : '';
+  const totalDiscountAmount = Number(
+    (resolvedInvoice.summary?.orderDiscountAmount || 0) + (resolvedInvoice.summary?.managerDiscountAmount || 0)
+  );
+  const discountSummary = totalDiscountAmount > 0
+    ? `<div class="summary"><span>Discount</span><span>-${escapeHtml(formatCurrency(totalDiscountAmount))}</span></div>`
+    : '';
 
   const qrMarkup = resolvedInvoice.paymentQrCodeUrl
     ? `<div class="center" style="margin-top:8px;"><img src="${escapeHtml(resolvedInvoice.paymentQrCodeUrl)}" alt="Payment QR" style="max-width:100%;height:auto;max-height:110px;" /></div>`
@@ -126,7 +144,7 @@ export function buildBillPrintHtml({ order, restaurant, invoice, cashierName }) 
     </div>
     <div class="separator">--------------------------------</div>
     <div class="meta">
-      <span>Invoice No</span><span class="right">${escapeHtml(resolvedInvoice.invoiceNumber || '-')}</span>
+      <span>Bill No</span><span class="right">${escapeHtml(resolvedInvoice.invoiceNumber || '-')}</span>
       <span>Date & Time</span><span class="right">${escapeHtml(new Date(resolvedInvoice.invoiceDate || Date.now()).toLocaleString('en-IN'))}</span>
       <span>Order</span><span class="right">${escapeHtml(resolvedInvoice.orderNumber || '-')}</span>
       <span>Table</span><span class="right">${escapeHtml(resolvedInvoice.tableNumber || 'Walk-in')}</span>
@@ -140,7 +158,7 @@ export function buildBillPrintHtml({ order, restaurant, invoice, cashierName }) 
     <div class="separator">--------------------------------</div>
     <div class="summary">
       <span>Subtotal</span><span>${escapeHtml(formatCurrency(resolvedInvoice.summary.subtotal))}</span>
-      <span>Discount</span><span>-${escapeHtml(formatCurrency(resolvedInvoice.summary.orderDiscountAmount + resolvedInvoice.summary.managerDiscountAmount))}</span>
+      ${discountSummary}
       <span>Taxable</span><span>${escapeHtml(formatCurrency(resolvedInvoice.summary.taxableAmount))}</span>
       <span>CGST (${escapeHtml(resolvedInvoice.summary.cgstRate)}%)</span><span>${escapeHtml(formatCurrency(resolvedInvoice.summary.cgstAmount))}</span>
       <span>SGST (${escapeHtml(resolvedInvoice.summary.sgstRate)}%)</span><span>${escapeHtml(formatCurrency(resolvedInvoice.summary.sgstAmount))}</span>

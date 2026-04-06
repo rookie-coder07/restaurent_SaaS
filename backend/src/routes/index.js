@@ -8,6 +8,7 @@ import tableRoutes from './table.js';
 import analyticsRoutes from './analytics.js';
 import customerRoutes from './customer.js';
 import inventoryRoutes from './inventory.js';
+import takeawayRoutes from './takeaway.js';
 
 const router = express.Router();
 
@@ -23,6 +24,7 @@ router.use(`/${apiVersion}/customer`, customerRoutes);
 router.use(`/${apiVersion}/restaurants`, restaurantRoutes);
 router.use(`/${apiVersion}/menu`, menuRoutes);
 router.use(`/${apiVersion}/orders`, orderRoutes);
+router.use(`/${apiVersion}/takeaway`, takeawayRoutes);
 router.use(`/${apiVersion}/kitchen`, kitchenRoutes);
 router.use(`/${apiVersion}/tables`, tableRoutes);
 router.use(`/${apiVersion}/analytics`, analyticsRoutes);

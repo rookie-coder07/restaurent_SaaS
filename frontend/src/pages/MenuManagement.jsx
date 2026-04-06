@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { AlertCircle, Edit2, Loader, Plus, Trash2, Upload } from 'lucide-react';
 import { useApi } from '../hooks/useApi';
-import { inventoryAPI, menuAPI } from '../services/apiEndpoints';
+import { menuAPI } from '../services/apiEndpoints';
 import { formatCurrency } from '../utils/formatters';
 import { getMenuItemImageUrl } from '../utils/menuItemImage';
 import Card from '../components/common/Card';
@@ -23,7 +23,6 @@ function createEmptyFormData() {
     image: null,
     imagePreview: '',
     imageName: '',
-    ingredients: [],
   };
 }
 
@@ -48,11 +47,6 @@ export default function MenuManagement() {
     error: categoriesError,
     execute: refetchCategories,
   } = useApi(() => menuAPI.getCategories());
-  const {
-    data: inventoryData = {},
-    error: inventoryError,
-  } = useApi(inventoryAPI.getItems);
-
   const [activeTab, setActiveTab] = useState('items');
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState('all');
   const [showItemModal, setShowItemModal] = useState(false);
@@ -82,11 +76,6 @@ export default function MenuManagement() {
       })),
     [categoriesData]
   );
-  const inventoryItems = useMemo(
-    () => (inventoryData?.items || []).map((item) => ({ ...item, id: item.id || item._id || '' })),
-    [inventoryData]
-  );
-
   const categoryItemsMap = useMemo(() => {
     const map = new Map();
 
@@ -114,7 +103,7 @@ export default function MenuManagement() {
 
   const availableItems = items.filter((item) => item.isAvailable).length;
   const unavailableItems = items.length - availableItems;
-  const fetchError = error || itemsError || categoriesError || inventoryError;
+  const fetchError = error || itemsError || categoriesError;
 
   const resetMessages = () => {
     setError(null);
@@ -148,38 +137,8 @@ export default function MenuManagement() {
       image: null,
       imagePreview: item.imageUrl || item.image_url || item.cloudinaryImageUrl || '',
       imageName: '',
-      ingredients: Array.isArray(item.ingredients)
-        ? item.ingredients.map((ingredient) => ({
-            itemId: ingredient.itemId || ingredient.inventoryItemId,
-            quantity: ingredient.quantity || '',
-            unit: ingredient.unit || 'g',
-          }))
-        : [],
     });
     setShowItemModal(true);
-  };
-
-  const handleAddIngredientRow = () => {
-    setFormData((current) => ({
-      ...current,
-      ingredients: [...current.ingredients, { itemId: '', quantity: '', unit: 'g' }],
-    }));
-  };
-
-  const handleIngredientChange = (index, field, value) => {
-    setFormData((current) => ({
-      ...current,
-      ingredients: current.ingredients.map((ingredient, ingredientIndex) =>
-        ingredientIndex === index ? { ...ingredient, [field]: value } : ingredient
-      ),
-    }));
-  };
-
-  const handleRemoveIngredient = (index) => {
-    setFormData((current) => ({
-      ...current,
-      ingredients: current.ingredients.filter((_, ingredientIndex) => ingredientIndex !== index),
-    }));
   };
 
   const handleImageChange = (event) => {
@@ -239,13 +198,6 @@ export default function MenuManagement() {
         categoryId: formData.categoryId || '',
         preparationTime: Number(formData.preparationTime),
         tags: formData.tags.split(',').map((tag) => tag.trim()).filter(Boolean),
-        ingredients: formData.ingredients
-          .filter((ingredient) => ingredient.itemId && Number(ingredient.quantity) > 0)
-          .map((ingredient) => ({
-            itemId: ingredient.itemId,
-            quantity: Number(ingredient.quantity),
-            unit: ingredient.unit,
-          })),
       };
 
       if (formData.image) {
@@ -420,15 +372,21 @@ export default function MenuManagement() {
                   <div className="grid grid-cols-1 gap-4">
                     {filteredItems.map((item) => (
                       <Card key={item.id} className="overflow-hidden p-4 sm:p-5">
+                        {(() => {
+                          const itemImageUrl = getMenuItemImageUrl(item);
+
+                          return (
                         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                           <div className="flex min-w-0 flex-col gap-4 sm:flex-1 sm:flex-row sm:items-start">
-                            <div className="flex h-28 w-full items-center justify-center rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card-muted)] p-3 sm:h-24 sm:w-24 sm:flex-shrink-0">
-                              <img
-                                src={getMenuItemImageUrl(item)}
-                                alt={item.name}
-                                className="h-full w-full rounded-xl object-contain"
-                              />
-                            </div>
+                            {itemImageUrl ? (
+                              <div className="flex h-28 w-full items-center justify-center rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card-muted)] p-3 sm:h-24 sm:w-24 sm:flex-shrink-0">
+                                <img
+                                  src={itemImageUrl}
+                                  alt={item.name}
+                                  className="h-full w-full rounded-xl object-contain"
+                                />
+                              </div>
+                            ) : null}
 
                             <div className="min-w-0 flex-1">
                               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -436,9 +394,11 @@ export default function MenuManagement() {
                                   <h3 className="break-words text-base font-semibold text-[var(--text-primary)] sm:text-lg">
                                     {item.name}
                                   </h3>
-                                  <p className="mt-1 break-words text-sm leading-6 text-[var(--text-secondary)]">
-                                    {item.description || 'No description added yet.'}
-                                  </p>
+                                  {item.description ? (
+                                    <p className="mt-1 break-words text-sm leading-6 text-[var(--text-secondary)]">
+                                      {item.description}
+                                    </p>
+                                  ) : null}
                                   <p className="mt-2 text-xs font-medium uppercase tracking-[0.18em] text-[var(--text-secondary)]">
                                     {categories.find((category) => String(category.id) === String(item.categoryId))?.name || 'Uncategorized'}
                                   </p>
@@ -450,39 +410,6 @@ export default function MenuManagement() {
                                 </div>
                               </div>
 
-                              <div className="mt-3 flex flex-wrap gap-2">
-                                {(item.tags || []).length > 0 ? (
-                                  item.tags.map((tag, index) => (
-                                    <span
-                                      key={`${item.id}-${tag}-${index}`}
-                                      className="rounded-full border border-[var(--color-primary-soft)] bg-[var(--color-primary-soft)] px-2.5 py-1 text-xs text-[var(--color-primary)]"
-                                    >
-                                      {tag}
-                                    </span>
-                                  ))
-                                ) : (
-                                  <span className="rounded-full border border-[var(--border-color)] bg-[var(--bg-card-muted)] px-2.5 py-1 text-xs text-[var(--text-secondary)]">
-                                    No tags
-                                  </span>
-                                )}
-                              </div>
-
-                              <div className="mt-3 flex flex-wrap gap-2">
-                                {(item.ingredients || []).length > 0 ? (
-                                  item.ingredients.slice(0, 4).map((ingredient, index) => (
-                                    <span
-                                      key={`${item.id}-ingredient-${index}`}
-                                      className="rounded-full border border-amber-500/20 bg-amber-500/10 px-2.5 py-1 text-xs text-amber-300"
-                                    >
-                                      {ingredient.inventoryItemName || 'Ingredient'} • {ingredient.quantity} {ingredient.unit}
-                                    </span>
-                                  ))
-                                ) : (
-                                  <span className="rounded-full border border-[var(--border-color)] bg-[var(--bg-card-muted)] px-2.5 py-1 text-xs text-[var(--text-secondary)]">
-                                    No recipe linked
-                                  </span>
-                                )}
-                              </div>
                             </div>
                           </div>
 
@@ -497,6 +424,8 @@ export default function MenuManagement() {
                             </Button>
                           </div>
                         </div>
+                          );
+                        })()}
                       </Card>
                     ))}
                   </div>
@@ -598,12 +527,12 @@ export default function MenuManagement() {
           </div>
 
           <label className="block space-y-2">
-            <span className="text-sm font-medium text-[var(--text-primary)]">Description</span>
+            <span className="text-sm font-medium text-[var(--text-primary)]">Description <span className="text-[var(--text-secondary)]">(Optional)</span></span>
             <textarea
               value={formData.description}
               onChange={(event) => setFormData((current) => ({ ...current, description: event.target.value }))}
               className="input min-h-[96px] resize-y"
-              placeholder="Describe the dish"
+              placeholder="Describe the dish if needed"
             />
           </label>
 
@@ -641,77 +570,6 @@ export default function MenuManagement() {
             placeholder="Spicy, Bestseller, Vegan"
           />
 
-          <div className="space-y-3 rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card-muted)] p-4">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <p className="text-sm font-semibold text-[var(--text-primary)]">Recipe Ingredients</p>
-                <p className="mt-1 text-xs text-[var(--text-secondary)]">
-                  Link stock items so the system can auto-deduct when this dish is fired to kitchen.
-                </p>
-              </div>
-              <Button type="button" variant="secondary" onClick={handleAddIngredientRow}>
-                <Plus className="h-4 w-4" />
-                Add Ingredient
-              </Button>
-            </div>
-
-            {formData.ingredients.length === 0 ? (
-              <p className="text-sm text-[var(--text-secondary)]">
-                No ingredients linked yet. You can save the item without a recipe, then add it later.
-              </p>
-            ) : (
-              <div className="space-y-3">
-                {formData.ingredients.map((ingredient, index) => (
-                  <div key={`ingredient-row-${index}`} className="grid grid-cols-1 gap-3 rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card)] p-3 sm:grid-cols-[minmax(0,1.6fr)_0.8fr_0.8fr_auto]">
-                    <label className="block space-y-2">
-                      <span className="text-xs font-medium text-[var(--text-secondary)]">Inventory Item</span>
-                      <select
-                        value={ingredient.itemId}
-                        onChange={(event) => handleIngredientChange(index, 'itemId', event.target.value)}
-                        className="input"
-                      >
-                        <option value="">Select item</option>
-                        {inventoryItems.map((stockItem) => (
-                          <option key={stockItem.id} value={stockItem.id}>
-                            {stockItem.name} ({stockItem.quantity} {stockItem.unit})
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-
-                    <Input
-                      label="Qty"
-                      type="number"
-                      step="0.0001"
-                      min="0"
-                      value={ingredient.quantity}
-                      onChange={(event) => handleIngredientChange(index, 'quantity', event.target.value)}
-                    />
-
-                    <label className="block space-y-2">
-                      <span className="text-xs font-medium text-[var(--text-secondary)]">Unit</span>
-                      <select
-                        value={ingredient.unit}
-                        onChange={(event) => handleIngredientChange(index, 'unit', event.target.value)}
-                        className="input"
-                      >
-                        {['kg', 'g', 'litre', 'ml', 'pieces'].map((unit) => (
-                          <option key={unit} value={unit}>{unit}</option>
-                        ))}
-                      </select>
-                    </label>
-
-                    <div className="flex items-end">
-                      <Button type="button" variant="danger" className="w-full sm:w-auto" onClick={() => handleRemoveIngredient(index)}>
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
           <div className="space-y-3">
             <label
               htmlFor="menu-item-image"
@@ -719,7 +577,7 @@ export default function MenuManagement() {
             >
               <Upload className="mb-3 h-8 w-8 text-[var(--color-primary)]" />
               <p className="text-sm font-medium text-[var(--text-primary)]">Click to upload image</p>
-              <p className="mt-1 text-xs text-[var(--text-secondary)]">PNG, JPG, WebP supported</p>
+              <p className="mt-1 text-xs text-[var(--text-secondary)]">Optional. PNG, JPG, WebP supported</p>
               <input
                 id="menu-item-image"
                 type="file"
@@ -729,11 +587,11 @@ export default function MenuManagement() {
               />
             </label>
 
-            {(formData.imagePreview || formData.imageName) ? (
+            {formData.imagePreview ? (
               <div className="flex flex-col gap-3 rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card-muted)] p-3 sm:flex-row sm:items-center sm:gap-4">
                 <div className="flex h-24 w-full items-center justify-center rounded-xl border border-[var(--border-color)] bg-[var(--bg-card)] p-3 sm:h-20 sm:w-20">
                   <img
-                    src={formData.imagePreview || getMenuItemImageUrl(editingItem || { name: formData.name })}
+                    src={formData.imagePreview}
                     alt={formData.name || 'Menu item preview'}
                     className="h-full w-full rounded-lg object-contain"
                   />

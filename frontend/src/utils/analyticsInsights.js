@@ -1,5 +1,48 @@
 import { parseServerDate } from './formatters';
 
+function formatLocalDateInputValue(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function roundMetric(value) {
+  return Math.round(Number(value || 0) * 100) / 100;
+}
+
+function getOrderTotal(order) {
+  return Number(order?.totalAmount ?? order?.total ?? order?.billing?.grandTotal ?? 0);
+}
+
+function getOrderItemsCount(order) {
+  return (order?.items || []).reduce((sum, item) => sum + Number(item?.quantity || 0), 0);
+}
+
+function getNormalizedOrderType(order) {
+  return String(order?.orderType || order?.order_type || (order?.tableId ? 'dine-in' : 'takeaway'))
+    .replace(/_/g, '-')
+    .toLowerCase();
+}
+
+function getKitchenReadyAt(order) {
+  if (Array.isArray(order?.kitchenTickets) && order.kitchenTickets.length > 0) {
+    const sortedTickets = [...order.kitchenTickets].sort(
+      (left, right) => new Date(left?.createdAt || 0).getTime() - new Date(right?.createdAt || 0).getTime()
+    );
+    const readyTicket = sortedTickets.find((ticket) => ticket?.readyAt || ticket?.servedAt || ticket?.updatedAt);
+    return readyTicket?.readyAt || readyTicket?.servedAt || readyTicket?.updatedAt || null;
+  }
+
+  return order?.online?.readyAt || null;
+}
+
+function getHourLabel(hour) {
+  const suffix = hour >= 12 ? 'PM' : 'AM';
+  const twelveHour = hour % 12 || 12;
+  return `${twelveHour}:00 ${suffix}`;
+}
+
 export function isSettledAnalyticsOrder(order) {
   return order?.status === 'completed' || String(order?.paymentStatus || '').toLowerCase() === 'paid';
 }
@@ -25,14 +68,14 @@ export function getAnalyticsPresetRange(preset) {
   }
 
   return {
-    start: start.toISOString().split('T')[0],
-    end: end.toISOString().split('T')[0],
+    start: formatLocalDateInputValue(start),
+    end: formatLocalDateInputValue(end),
   };
 }
 
 export function filterOrdersByDateRange(orders = [], dateRange = {}) {
   return orders.filter((order) => {
-    const createdAt = parseServerDate(order.createdAt);
+    const createdAt = parseServerDate(order?.createdAt);
     if (!createdAt) {
       return false;
     }
@@ -43,69 +86,129 @@ export function filterOrdersByDateRange(orders = [], dateRange = {}) {
   });
 }
 
-function getHourLabel(hour) {
-  const suffix = hour >= 12 ? 'PM' : 'AM';
-  const twelveHour = hour % 12 || 12;
-  return `${twelveHour}:00 ${suffix}`;
+function filterOrdersByType(orders = [], orderType = 'all') {
+  if (!orderType || orderType === 'all') {
+    return orders;
+  }
+
+  return orders.filter((order) => getNormalizedOrderType(order) === orderType);
 }
 
-export function buildAnalyticsSnapshot(orders = [], dateRange = {}) {
-  const filteredOrders = filterOrdersByDateRange(orders, dateRange);
+export function buildAnalyticsSnapshot(orders = [], dateRange = {}, filters = {}) {
+  const orderType = filters?.orderType || 'all';
+  const dateFilteredOrders = filterOrdersByDateRange(orders, dateRange);
+  const filteredOrders = filterOrdersByType(dateFilteredOrders, orderType);
   const settledOrders = filteredOrders.filter((order) => isSettledAnalyticsOrder(order));
+  const activeOrders = filteredOrders.filter((order) =>
+    ['awaiting_waiter_approval', 'pending', 'preparing', 'ready', 'served'].includes(String(order?.status || '').toLowerCase())
+  );
+  const cancelledOrdersCount = filteredOrders.filter((order) => String(order?.status || '').toLowerCase() === 'cancelled').length;
+  const openOrdersCount = filteredOrders.length - settledOrders.length - cancelledOrdersCount;
   const totalOrders = filteredOrders.length;
-  const totalRevenue = settledOrders.reduce((sum, order) => sum + Number(order.totalAmount || order.total || 0), 0);
-  const totalDiscounts = settledOrders.reduce((sum, order) => sum + parseDiscountAmountFromNotes(order.notes), 0);
-  const averageOrderValue = settledOrders.length > 0 ? totalRevenue / settledOrders.length : 0;
-  const discountedOrders = settledOrders.filter((order) => parseDiscountAmountFromNotes(order.notes) > 0);
+  const totalRevenue = roundMetric(settledOrders.reduce((sum, order) => sum + getOrderTotal(order), 0));
+  const totalDiscounts = roundMetric(settledOrders.reduce((sum, order) => sum + parseDiscountAmountFromNotes(order?.notes), 0));
+  const netSales = roundMetric(totalRevenue - totalDiscounts);
+  const averageOrderValue = settledOrders.length > 0 ? roundMetric(totalRevenue / settledOrders.length) : 0;
 
-  const dailyMap = new Map();
-  const peakHourMap = new Map();
+  const dailyRevenueMap = new Map();
+  const orderHourMap = new Map();
   const itemMap = new Map();
+  const paymentMethodMap = new Map();
+  const orderTypeCounts = { dineIn: 0, takeaway: 0 };
+  const prepDurations = [];
+  const completionDurations = [];
+  const dineInSettledTableIds = new Set();
 
   filteredOrders.forEach((order) => {
-    const createdAt = parseServerDate(order.createdAt);
+    const createdAt = parseServerDate(order?.createdAt);
     if (!createdAt) {
       return;
+    }
+
+    const orderTotal = getOrderTotal(order);
+    const orderDiscount = parseDiscountAmountFromNotes(order?.notes);
+    const orderTypeLabel = getNormalizedOrderType(order);
+
+    if (orderTypeLabel === 'dine-in') {
+      orderTypeCounts.dineIn += 1;
+      if (isSettledAnalyticsOrder(order) && order?.tableId) {
+        dineInSettledTableIds.add(order.tableId);
+      }
+    } else {
+      orderTypeCounts.takeaway += 1;
     }
 
     const dayLabel = new Intl.DateTimeFormat('en-IN', {
       month: 'short',
       day: 'numeric',
     }).format(createdAt);
-    const currentDay = dailyMap.get(dayLabel) || {
+    const dailyEntry = dailyRevenueMap.get(dayLabel) || {
       date: dayLabel,
-      orders: 0,
+      sortKey: new Date(createdAt.getFullYear(), createdAt.getMonth(), createdAt.getDate()).getTime(),
       revenue: 0,
-      discounts: 0,
+      orders: 0,
     };
-    currentDay.orders += 1;
-    currentDay.revenue += Number(order.totalAmount || order.total || 0);
-    currentDay.discounts += parseDiscountAmountFromNotes(order.notes);
-    dailyMap.set(dayLabel, currentDay);
+    dailyEntry.orders += 1;
+    if (isSettledAnalyticsOrder(order)) {
+      dailyEntry.revenue += orderTotal;
+    }
+    dailyRevenueMap.set(dayLabel, dailyEntry);
 
     const orderHour = createdAt.getHours();
-    const currentHour = peakHourMap.get(orderHour) || {
+    const hourEntry = orderHourMap.get(orderHour) || {
       hour: orderHour,
       label: getHourLabel(orderHour),
       orders: 0,
       revenue: 0,
     };
-    currentHour.orders += 1;
-    currentHour.revenue += Number(order.totalAmount || order.total || 0);
-    peakHourMap.set(orderHour, currentHour);
+    hourEntry.orders += 1;
+    if (isSettledAnalyticsOrder(order)) {
+      hourEntry.revenue += orderTotal;
+    }
+    orderHourMap.set(orderHour, hourEntry);
 
-    (order.items || []).forEach((item) => {
-      const itemName = item.name || 'Unknown item';
+    const paymentLabel = String(order?.paymentMethod || order?.payment_mode || order?.billing?.paymentMode || (isSettledAnalyticsOrder(order) ? 'unknown' : 'unpaid'))
+      .replace(/_/g, ' ')
+      .trim()
+      .toUpperCase();
+    const paymentEntry = paymentMethodMap.get(paymentLabel) || {
+      name: paymentLabel,
+      value: 0,
+    };
+    paymentEntry.value += 1;
+    paymentMethodMap.set(paymentLabel, paymentEntry);
+
+    (order?.items || []).forEach((item) => {
+      const itemName = item?.name || 'Unknown item';
       const currentItem = itemMap.get(itemName) || {
         name: itemName,
         quantity: 0,
         revenue: 0,
       };
-      const quantity = Number(item.quantity || 0);
+      const quantity = Number(item?.quantity || 0);
+      const unitPrice = Number(item?.price ?? item?.unitPrice ?? 0);
       currentItem.quantity += quantity;
-      currentItem.revenue += Number(item.price || item.unitPrice || 0) * quantity;
+      currentItem.revenue += unitPrice * quantity;
       itemMap.set(itemName, currentItem);
     });
+
+    const readyAt = parseServerDate(getKitchenReadyAt(order));
+    if (readyAt) {
+      const prepMinutes = (readyAt.getTime() - createdAt.getTime()) / 60000;
+      if (prepMinutes >= 0) {
+        prepDurations.push(prepMinutes);
+      }
+    }
+
+    if (isSettledAnalyticsOrder(order)) {
+      const completionAt = parseServerDate(order?.updatedAt || order?.billing?.invoiceDate || null);
+      if (completionAt) {
+        const completionMinutes = (completionAt.getTime() - createdAt.getTime()) / 60000;
+        if (completionMinutes >= 0) {
+          completionDurations.push(completionMinutes);
+        }
+      }
+    }
   });
 
   const rankedItems = Array.from(itemMap.values()).sort(
@@ -116,9 +219,28 @@ export function buildAnalyticsSnapshot(orders = [], dateRange = {}) {
     .filter((item) => item.quantity > 0)
     .sort((left, right) => left.quantity - right.quantity || left.revenue - right.revenue)
     .slice(0, 5);
-  const peakHours = Array.from(peakHourMap.values()).sort(
-    (left, right) => right.orders - left.orders || right.revenue - left.revenue
-  );
+  const topRevenueItems = [...rankedItems]
+    .sort((left, right) => right.revenue - left.revenue || right.quantity - left.quantity)
+    .slice(0, 5);
+  const peakHours = Array.from(orderHourMap.values()).sort((left, right) => right.orders - left.orders || left.hour - right.hour);
+  const busiestHour = peakHours[0] || null;
+  const hourlyTrend = Array.from(orderHourMap.values())
+    .sort((left, right) => left.hour - right.hour)
+    .map((entry) => ({
+      ...entry,
+      revenue: roundMetric(entry.revenue),
+    }));
+  const dailyTrend = Array.from(dailyRevenueMap.values())
+    .sort((left, right) => left.sortKey - right.sortKey)
+    .map(({ sortKey, revenue, ...entry }) => ({
+      ...entry,
+      revenue: roundMetric(revenue),
+    }));
+  const orderTypeMix = [
+    { name: 'Dine-In', value: orderTypeCounts.dineIn },
+    { name: 'Takeaway', value: orderTypeCounts.takeaway },
+  ].filter((entry) => entry.value > 0);
+  const paymentMix = Array.from(paymentMethodMap.values()).sort((left, right) => right.value - left.value);
 
   const comparisonRange = (() => {
     if (!dateRange.start || !dateRange.end) {
@@ -132,40 +254,58 @@ export function buildAnalyticsSnapshot(orders = [], dateRange = {}) {
     const previousEnd = new Date(end.getTime() - durationMs);
 
     return {
-      start: previousStart.toISOString().split('T')[0],
-      end: previousEnd.toISOString().split('T')[0],
+      start: formatLocalDateInputValue(previousStart),
+      end: formatLocalDateInputValue(previousEnd),
     };
   })();
 
-  const previousOrders = comparisonRange ? filterOrdersByDateRange(orders, comparisonRange) : [];
+  const previousOrders = comparisonRange
+    ? filterOrdersByType(filterOrdersByDateRange(orders, comparisonRange), orderType)
+    : [];
   const previousSettledOrders = previousOrders.filter((order) => isSettledAnalyticsOrder(order));
-  const previousRevenue = previousSettledOrders.reduce((sum, order) => sum + Number(order.totalAmount || order.total || 0), 0);
+  const previousRevenue = roundMetric(previousSettledOrders.reduce((sum, order) => sum + getOrderTotal(order), 0));
   const previousTotalOrders = previousOrders.length;
-
-  const statusData = [
-    { name: 'Settled', value: settledOrders.length, color: '#10B981' },
-    { name: 'Pending', value: filteredOrders.filter((order) => order.status === 'pending').length, color: '#F59E0B' },
-    { name: 'Preparing', value: filteredOrders.filter((order) => order.status === 'preparing').length, color: '#3B82F6' },
-    { name: 'Ready', value: filteredOrders.filter((order) => order.status === 'ready').length, color: '#8B5CF6' },
-    { name: 'Served', value: filteredOrders.filter((order) => order.status === 'served').length, color: '#64748B' },
-    { name: 'Cancelled', value: filteredOrders.filter((order) => order.status === 'cancelled').length, color: '#EF4444' },
-  ].filter((entry) => entry.value > 0);
 
   return {
     filteredOrders,
     settledOrders,
+    activeOrders,
     totalOrders,
     totalRevenue,
     totalDiscounts,
+    netSales,
     averageOrderValue,
-    discountedOrdersCount: discountedOrders.length,
-    dailyTrend: Array.from(dailyMap.values()),
-    peakHours,
+    cancelledOrdersCount,
+    openOrdersCount,
+    activeOrdersCount: activeOrders.length,
+    dailyTrend,
+    hourlyTrend,
     topItems,
     lowPerformingItems,
-    statusData,
+    topRevenueItems,
+    busiestHour,
+    bestSellingItem: topItems[0] || null,
+    orderTypeCounts,
+    orderTypeMix,
+    paymentMix,
+    orderSummary: {
+      settled: settledOrders.length,
+      open: openOrdersCount,
+      cancelled: cancelledOrdersCount,
+      itemsServed: filteredOrders.reduce((sum, order) => sum + getOrderItemsCount(order), 0),
+    },
+    operationalMetrics: {
+      averagePreparationMinutes:
+        prepDurations.length > 0 ? roundMetric(prepDurations.reduce((sum, value) => sum + value, 0) / prepDurations.length) : 0,
+      averageCompletionMinutes:
+        completionDurations.length > 0
+          ? roundMetric(completionDurations.reduce((sum, value) => sum + value, 0) / completionDurations.length)
+          : 0,
+      tableTurnover:
+        dineInSettledTableIds.size > 0 ? roundMetric(settledOrders.filter((order) => getNormalizedOrderType(order) === 'dine-in').length / dineInSettledTableIds.size) : 0,
+    },
     comparison: {
-      revenueDelta: totalRevenue - previousRevenue,
+      revenueDelta: roundMetric(totalRevenue - previousRevenue),
       orderDelta: totalOrders - previousTotalOrders,
       previousRevenue,
       previousTotalOrders,
@@ -178,19 +318,23 @@ export function buildAnalyticsCsv(snapshot) {
     ['Metric', 'Value'],
     ['Total Orders', snapshot.totalOrders],
     ['Total Revenue', snapshot.totalRevenue.toFixed(2)],
+    ['Net Sales', snapshot.netSales.toFixed(2)],
     ['Average Order Value', snapshot.averageOrderValue.toFixed(2)],
-    ['Total Discounts', snapshot.totalDiscounts.toFixed(2)],
-    ['Discounted Orders', snapshot.discountedOrdersCount],
-    ['Revenue Delta', snapshot.comparison.revenueDelta.toFixed(2)],
-    ['Order Delta', snapshot.comparison.orderDelta],
+    ['Active Orders', snapshot.activeOrdersCount],
+    ['Open Orders', snapshot.openOrdersCount],
+    ['Cancelled Orders', snapshot.cancelledOrdersCount],
     [],
-    ['Top Items'],
+    ['Top Selling Items'],
     ['Item', 'Quantity', 'Revenue'],
     ...snapshot.topItems.map((item) => [item.name, item.quantity, item.revenue.toFixed(2)]),
     [],
     ['Low Performing Items'],
     ['Item', 'Quantity', 'Revenue'],
     ...snapshot.lowPerformingItems.map((item) => [item.name, item.quantity, item.revenue.toFixed(2)]),
+    [],
+    ['Top Revenue Items'],
+    ['Item', 'Quantity', 'Revenue'],
+    ...snapshot.topRevenueItems.map((item) => [item.name, item.quantity, item.revenue.toFixed(2)]),
   ];
 
   return rows

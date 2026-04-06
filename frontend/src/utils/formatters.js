@@ -77,6 +77,10 @@ export const formatCompactTableLabel = (value, walkInLabel = '#Walk-in') => {
 };
 
 const getShortOrderNumber = (order) => {
+  if (Number.isFinite(Number(order?.serialNumber)) && Number(order.serialNumber) > 0) {
+    return `#${String(Number(order.serialNumber)).padStart(3, '0')}`;
+  }
+
   const displayValue = order?.displayOrderNumber || '';
   const normalizedDisplayValue = String(displayValue).trim();
 

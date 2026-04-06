@@ -18,13 +18,30 @@ export function printHtmlDocument(html, { title = 'Print Preview' } = {}) {
     }, 250);
   };
 
+  let hasPrinted = false;
+
   frame.onload = () => {
+    if (hasPrinted) {
+      return;
+    }
+
     const frameWindow = frame.contentWindow;
+    const frameDocument = frame.contentDocument;
     if (!frameWindow) {
       cleanup();
       return;
     }
 
+    const hasPrintableContent = Boolean(
+      frameDocument?.body &&
+      (frameDocument.body.childElementCount > 0 || String(frameDocument.body.textContent || '').trim())
+    );
+
+    if (!hasPrintableContent) {
+      return;
+    }
+
+    hasPrinted = true;
     frameWindow.focus();
     frameWindow.print();
     cleanup();

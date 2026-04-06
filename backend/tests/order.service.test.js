@@ -3,6 +3,7 @@ import OrderService from '../src/services/orderService.js';
 import supabase from '../src/config/supabase.js';
 import { composeNotesWithKotMeta } from '../src/utils/kotMetadata.js';
 import TableService from '../src/services/tableService.js';
+import InvoiceService from '../src/services/invoiceService.js';
 
 describe('OrderService stability', () => {
   afterEach(() => {
@@ -206,6 +207,11 @@ describe('OrderService stability', () => {
       recentOrders: [],
     });
     jest.spyOn(OrderService, 'getOrderById').mockResolvedValue(OrderService.transformOrder(updatedOrderRow));
+    jest.spyOn(InvoiceService, 'generateNextInvoiceNumber').mockResolvedValue({
+      prefix: 'INV',
+      sequenceNumber: 1001,
+      invoiceNumber: 'INV-1001',
+    });
     jest.spyOn(TableService, 'syncTableLifecycle').mockResolvedValue();
 
     const updateEqRestaurant = jest.fn().mockResolvedValue({ error: null });

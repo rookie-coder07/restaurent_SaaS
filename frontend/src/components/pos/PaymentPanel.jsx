@@ -121,37 +121,6 @@ function PaymentPanel({
         </div>
       )}
 
-      <div className="mt-5 grid gap-3 sm:grid-cols-2">
-        {(orderType === 'takeaway' || orderType === 'delivery') ? (
-          <label className="block space-y-2">
-            <span className="text-sm font-medium text-[var(--text-primary)]">Packing</span>
-            <input
-              type="number"
-              min="0"
-              step="0.01"
-              value={packingCharge}
-              onChange={(event) => onPackingChargeChange(event.target.value)}
-              disabled={disabled}
-              className="min-h-[3.5rem] w-full rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card-muted)] px-4 text-sm font-medium text-[var(--text-primary)] outline-none transition focus:border-[var(--color-primary)] disabled:cursor-not-allowed disabled:opacity-60"
-            />
-          </label>
-        ) : null}
-        {orderType === 'delivery' ? (
-          <label className="block space-y-2">
-            <span className="text-sm font-medium text-[var(--text-primary)]">Delivery</span>
-            <input
-              type="number"
-              min="0"
-              step="0.01"
-              value={deliveryCharge}
-              onChange={(event) => onDeliveryChargeChange(event.target.value)}
-              disabled={disabled}
-              className="min-h-[3.5rem] w-full rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card-muted)] px-4 text-sm font-medium text-[var(--text-primary)] outline-none transition focus:border-[var(--color-primary)] disabled:cursor-not-allowed disabled:opacity-60"
-            />
-          </label>
-        ) : null}
-      </div>
-
       {invoicePreview ? (
         <div className="mt-5 rounded-[1.4rem] border border-[var(--border-color)] bg-[var(--bg-card-muted)] p-4">
           <p className="text-sm font-semibold text-[var(--text-primary)]">Invoice Summary</p>

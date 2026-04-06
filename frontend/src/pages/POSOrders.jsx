@@ -1,8 +1,12 @@
-import { useEffect, useMemo, useState } from 'react';
-import { ArrowRight, Loader, RefreshCw, Store, PhoneCall, ShoppingBag, Truck, Package2 } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowRight, Loader, RefreshCw, Store, ShoppingBag } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { orderAPI } from '../services/apiEndpoints';
+import { useAuthStore } from '../context/authStore';
+import { authAPI, orderAPI } from '../services/apiEndpoints';
 import { formatCurrency, formatDisplayOrderNumber } from '../utils/formatters';
+import { playLoudBuzzer } from '../utils/alerts';
+import { subscribeToOrderEvents } from '../utils/liveOrderEvents';
+import { syncPortalSessionUser } from '../utils/sessionUserSync';
 import Toast from '../components/common/Toast';
 
 const WORKFLOW_FILTERS = [
@@ -13,20 +17,14 @@ const WORKFLOW_FILTERS = [
   { id: 'completed', label: 'Completed' },
 ];
 
-const WORKFLOW_ACTIONS = [
-  { id: 'accepted', label: 'Accept' },
-  { id: 'rejected', label: 'Reject' },
-  { id: 'preparing', label: 'Preparing' },
-  { id: 'ready', label: 'Ready' },
-  { id: 'dispatched', label: 'Dispatched' },
+const SOURCE_FILTERS = [
+  { id: 'all', label: 'All Orders' },
+  { id: 'qr', label: 'QR Orders' },
+  { id: 'manual', label: 'Manual POS' },
 ];
 
 const SOURCE_META = {
   direct: { label: 'Direct', icon: Store },
-  phone: { label: 'Phone', icon: PhoneCall },
-  website: { label: 'Website', icon: ShoppingBag },
-  swiggy: { label: 'Swiggy', icon: Truck },
-  zomato: { label: 'Zomato', icon: Package2 },
   pos: { label: 'POS Order', icon: Store },
   qr: { label: 'QR Order', icon: ShoppingBag },
 };
@@ -47,41 +45,20 @@ const STATUS_META = {
   upi: 'border-teal-300 bg-teal-50 text-teal-900',
 };
 
-function formatPromise(value) {
-  if (!value) {
-    return 'No promised time';
-  }
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return 'No promised time';
-  }
-
-  return new Intl.DateTimeFormat('en-IN', {
-    day: '2-digit',
-    month: 'short',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(date);
-}
-
 function getOrderWorkflow(order) {
-  return String(order?.online?.workflowStatus || order?.status || 'new');
+  return String(order?.status || order?.online?.workflowStatus || 'new');
 }
 
 function isLiveWorkflow(status) {
   return ['new', 'accepted', 'preparing', 'pending', 'awaiting_waiter_approval', 'served', 'dispatched'].includes(status);
 }
 
-function isInboxWorkflowOrder(order) {
-  const source = String(order?.online?.source || '').trim().toLowerCase();
-  const isOnlineChannel = ['direct', 'phone', 'website', 'swiggy', 'zomato'].includes(source);
-  const isOffPremise = order?.orderType === 'takeaway' || order?.orderType === 'delivery';
-  return Boolean(order?.online) && isOnlineChannel && isOffPremise;
-}
-
 function isWaiterApprovalOrder(order) {
   return order?.origin === 'qr' && order?.orderType === 'dine-in' && String(order?.status || '') === 'awaiting_waiter_approval';
+}
+
+function getOrderSourceKey(order) {
+  return order?.origin === 'qr' ? 'qr' : 'manual';
 }
 
 function getStatusChipClass(value, fallback = 'border-slate-300 bg-slate-50 text-slate-900') {
@@ -90,13 +67,21 @@ function getStatusChipClass(value, fallback = 'border-slate-300 bg-slate-50 text
 
 export default function POSOrders() {
   const navigate = useNavigate();
+  const user = useAuthStore((state) => state.user);
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [workflowFilter, setWorkflowFilter] = useState('all');
-  const [updatingOrderId, setUpdatingOrderId] = useState('');
-
+  const [sourceFilter, setSourceFilter] = useState('all');
+  const [waiterAlertMessage, setWaiterAlertMessage] = useState('');
+  const isWaiterAccount = user?.role === 'staff';
+  const qrAlertedOrderIdsRef = useRef(new Set());
+  const hasPrimedQrAlertsRef = useRef(false);
+  const assignedTableIds = useMemo(
+    () => (Array.isArray(user?.assignedTables) ? user.assignedTables.filter(Boolean) : []),
+    [user?.assignedTables]
+  );
   const loadOrders = async () => {
     setLoading(true);
     setError('');
@@ -104,7 +89,7 @@ export default function POSOrders() {
     try {
       const response = await orderAPI.getOrders({ limit: 150 });
       const nextOrders = response.data?.data?.items || response.data?.data || [];
-      setOrders(Array.isArray(nextOrders) ? nextOrders : []);
+      setOrders(Array.isArray(nextOrders) ? nextOrders.filter((order) => order.orderType === 'dine-in') : []);
     } catch (requestError) {
       setOrders([]);
       setError(requestError.response?.data?.message || 'Failed to load POS orders.');
@@ -117,10 +102,95 @@ export default function POSOrders() {
     loadOrders();
   }, []);
 
+  useEffect(() => {
+    const cleanup = subscribeToOrderEvents(() => {
+      loadOrders();
+    });
+
+    return cleanup;
+  }, []);
+
+  useEffect(() => {
+    const syncCurrentWaiter = async () => {
+      if (!isWaiterAccount) {
+        return;
+      }
+
+      try {
+        const response = await authAPI.getCurrentUser();
+        const latestUser = response.data?.data?.user;
+
+        if (latestUser?.id === user?.id) {
+          syncPortalSessionUser('pos', latestUser);
+        }
+      } catch {
+        // Auth/api layers already handle session errors.
+      }
+    };
+
+    syncCurrentWaiter();
+    const intervalId = window.setInterval(() => {
+      syncCurrentWaiter();
+      loadOrders();
+    }, 12000);
+
+    return () => window.clearInterval(intervalId);
+  }, [isWaiterAccount, user?.id]);
+
+  const pendingAssignedQrOrders = useMemo(
+    () =>
+      orders.filter(
+        (order) =>
+          order?.origin === 'qr' &&
+          order?.orderType === 'dine-in' &&
+          String(order?.status || '') === 'awaiting_waiter_approval' &&
+          (!isWaiterAccount || assignedTableIds.includes(order.tableId))
+      ),
+    [assignedTableIds, isWaiterAccount, orders]
+  );
+
+  useEffect(() => {
+    const nextIds = new Set(pendingAssignedQrOrders.map((order) => order.id).filter(Boolean));
+
+    if (!hasPrimedQrAlertsRef.current) {
+      qrAlertedOrderIdsRef.current = nextIds;
+      hasPrimedQrAlertsRef.current = true;
+      return;
+    }
+
+    const hasNewQrAlert = Array.from(nextIds).some((id) => !qrAlertedOrderIdsRef.current.has(id));
+    const newQrOrders = pendingAssignedQrOrders.filter(
+      (order) => order.id && !qrAlertedOrderIdsRef.current.has(order.id)
+    );
+    qrAlertedOrderIdsRef.current = nextIds;
+
+    if (isWaiterAccount && hasNewQrAlert) {
+      playLoudBuzzer('waiter');
+      const affectedTables = Array.from(
+        new Set(newQrOrders.map((order) => order.tableNumber || 'your assigned table').filter(Boolean))
+      );
+      setWaiterAlertMessage(
+        affectedTables.length > 1
+          ? `New QR orders waiting for ${affectedTables.join(', ')}`
+          : `New QR order waiting for ${affectedTables[0] || 'your assigned table'}`
+      );
+    }
+  }, [isWaiterAccount, pendingAssignedQrOrders]);
+
   const filteredOrders = useMemo(
     () =>
       orders.filter((order) => {
+        if (isWaiterAccount && !assignedTableIds.includes(order.tableId)) {
+          return false;
+        }
+
         const currentWorkflow = getOrderWorkflow(order);
+        const currentSource = getOrderSourceKey(order);
+
+        if (sourceFilter !== 'all' && currentSource !== sourceFilter) {
+          return false;
+        }
+
         if (workflowFilter === 'all') {
           return true;
         }
@@ -131,49 +201,34 @@ export default function POSOrders() {
 
         return currentWorkflow === workflowFilter;
       }),
-    [orders, workflowFilter]
+    [assignedTableIds, isWaiterAccount, orders, sourceFilter, workflowFilter]
   );
 
   const queueCounts = useMemo(
     () => ({
-      all: orders.length,
-      live: orders.filter((order) => isLiveWorkflow(getOrderWorkflow(order))).length,
-      preparing: orders.filter((order) => getOrderWorkflow(order) === 'preparing').length,
-      ready: orders.filter((order) => getOrderWorkflow(order) === 'ready').length,
-      completed: orders.filter((order) => getOrderWorkflow(order) === 'completed').length,
+      all: filteredOrders.length,
+      live: filteredOrders.filter((order) => isLiveWorkflow(getOrderWorkflow(order))).length,
+      preparing: filteredOrders.filter((order) => getOrderWorkflow(order) === 'preparing').length,
+      ready: filteredOrders.filter((order) => getOrderWorkflow(order) === 'ready').length,
+      completed: filteredOrders.filter((order) => getOrderWorkflow(order) === 'completed').length,
     }),
-    [orders]
+    [filteredOrders]
   );
 
-  const handleWorkflowUpdate = async (order, workflowStatus) => {
-    if (!isInboxWorkflowOrder(order)) {
-      setError('Only takeaway or delivery inbox orders can be updated from this queue.');
-      return;
-    }
-
-    const orderId = order.id;
-    setUpdatingOrderId(orderId);
-    setError('');
-    setSuccess('');
-
-    try {
-      const response = await orderAPI.updateOnlineOrder(orderId, { workflowStatus });
-      const updated = response.data?.data;
-
-      setOrders((current) => current.map((order) => (order.id === orderId ? updated : order)));
-      setSuccess(`${formatDisplayOrderNumber(updated)} marked ${workflowStatus}.`);
-    } catch (requestError) {
-      setError(requestError.response?.data?.message || 'Failed to update order workflow.');
-    } finally {
-      setUpdatingOrderId('');
-    }
-  };
+  const sourceCounts = useMemo(
+    () => ({
+      all: filteredOrders.length,
+      qr: filteredOrders.filter((order) => getOrderSourceKey(order) === 'qr').length,
+      manual: filteredOrders.filter((order) => getOrderSourceKey(order) === 'manual').length,
+    }),
+    [filteredOrders]
+  );
 
   return (
     <div className="space-y-4">
       <div className="flex flex-col gap-3 rounded-[1.6rem] border border-[var(--border-color)] bg-[var(--bg-card)] p-4 shadow-[var(--shadow-card)] sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--text-secondary)]">Order Queue</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--text-secondary)]">Dine-In Queue</p>
           <p className="mt-1 text-lg font-bold text-[var(--text-primary)]">
             {filteredOrders.length} visible
           </p>
@@ -189,11 +244,32 @@ export default function POSOrders() {
         </button>
       </div>
 
+      {waiterAlertMessage ? <Toast type="warning" message={waiterAlertMessage} onClose={() => setWaiterAlertMessage('')} autoDismissMs={6200} /> : null}
       {success ? <Toast type="success" message={success} /> : null}
       {error ? <Toast type="error" message={error} /> : null}
 
       <section className="rounded-[1.6rem] border border-[var(--border-color)] bg-[var(--bg-card)] p-4 shadow-[var(--shadow-card)]">
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-2 border-b border-[var(--border-color)] pb-4">
+          {SOURCE_FILTERS.map((filter) => {
+            const isActive = sourceFilter === filter.id;
+            return (
+              <button
+                key={filter.id}
+                type="button"
+                onClick={() => setSourceFilter(filter.id)}
+                className={`min-h-[3rem] rounded-2xl border px-4 text-sm font-semibold transition ${
+                  isActive
+                    ? 'border-[var(--color-primary)] bg-[var(--color-primary)] text-white'
+                    : 'border-[var(--border-color)] bg-[var(--bg-card-muted)] text-[var(--text-primary)] hover:bg-[var(--color-primary-soft)]'
+                }`}
+              >
+                {filter.label} ({sourceCounts[filter.id] || 0})
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="mt-4 flex flex-wrap gap-2">
           {WORKFLOW_FILTERS.map((filter) => {
             const isActive = workflowFilter === filter.id;
             return (
@@ -222,7 +298,7 @@ export default function POSOrders() {
         <section className="rounded-[2rem] border border-dashed border-[var(--border-color)] bg-[var(--bg-card)] p-8 text-center shadow-[var(--shadow-card)]">
           <p className="text-lg font-bold text-[var(--text-primary)]">No orders match this view</p>
           <p className="mt-2 text-sm text-[var(--text-secondary)]">
-            Try another workflow filter or create a fresh order from the POS billing screen.
+            Try another source or workflow filter, or create a fresh dine-in order from the POS billing screen.
           </p>
         </section>
       ) : (
@@ -253,18 +329,14 @@ export default function POSOrders() {
                     </div>
                     <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1">
                       <h2 className="text-base font-black text-[var(--text-primary)]">{formatDisplayOrderNumber(order)}</h2>
-                      <span className="text-sm text-[var(--text-secondary)]">
-                        {order.orderType === 'delivery' ? 'Delivery' : order.orderType === 'takeaway' ? 'Takeaway' : `Table ${order.tableNumber || 'Walk-in'}`}
-                      </span>
+                      <span className="text-sm text-[var(--text-secondary)]">{`Table ${order.tableNumber || 'Walk-in'}`}</span>
                       <span className="text-sm text-[var(--text-secondary)]">{order.items?.length || 0} items</span>
                       <span className="text-sm font-semibold text-[var(--text-primary)]">{formatCurrency(order.totalAmount || 0)}</span>
                     </div>
                     <p className="mt-2 text-sm text-[var(--text-secondary)]">
-                      {order.orderType === 'dine-in'
-                        ? order.origin === 'qr'
-                          ? 'Customer placed from QR and is waiting in the service queue.'
-                          : 'Created from POS billing.'
-                        : order.online?.customerName || 'Walk-in / not added'}
+                      {order.origin === 'qr'
+                        ? 'Customer placed from QR and is waiting in the service queue.'
+                        : 'Created from POS billing.'}
                     </p>
                   </div>
 
@@ -281,23 +353,15 @@ export default function POSOrders() {
                 <div className="mt-3 grid gap-2 sm:grid-cols-3">
                   <div className="rounded-[1.2rem] bg-[var(--bg-card-muted)] px-3 py-2 text-sm">
                     <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--text-secondary)]">Guest</p>
-                    <p className="mt-1 font-semibold text-[var(--text-primary)]">
-                      {order.orderType === 'dine-in' ? `Table ${order.tableNumber || 'Walk-in'}` : order.online?.customerName || 'Walk-in / not added'}
-                    </p>
+                    <p className="mt-1 font-semibold text-[var(--text-primary)]">{`Table ${order.tableNumber || 'Walk-in'}`}</p>
                   </div>
                   <div className="rounded-[1.2rem] bg-[var(--bg-card-muted)] px-3 py-2 text-sm">
-                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--text-secondary)]">
-                      {order.orderType === 'dine-in' ? 'Status' : 'Promise'}
-                    </p>
-                    {order.orderType === 'dine-in' ? (
-                      <div className="mt-2">
-                        <span className={`inline-flex rounded-full border px-3 py-1 text-xs font-bold uppercase tracking-[0.14em] ${getStatusChipClass(workflowKey)}`}>
-                          {currentWorkflow}
-                        </span>
-                      </div>
-                    ) : (
-                      <p className="mt-1 font-semibold text-[var(--text-primary)]">{formatPromise(order.online?.promisedAt)}</p>
-                    )}
+                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--text-secondary)]">Status</p>
+                    <div className="mt-2">
+                      <span className={`inline-flex rounded-full border px-3 py-1 text-xs font-bold uppercase tracking-[0.14em] ${getStatusChipClass(workflowKey)}`}>
+                        {currentWorkflow}
+                      </span>
+                    </div>
                   </div>
                   <div className="rounded-[1.2rem] bg-[var(--bg-card-muted)] px-3 py-2 text-sm">
                     <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--text-secondary)]">Payment</p>
@@ -328,22 +392,6 @@ export default function POSOrders() {
                       Approve Order
                       <ArrowRight className="h-4 w-4" />
                     </button>
-                  </div>
-                ) : null}
-
-                {isInboxWorkflowOrder(order) ? (
-                  <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-                    {WORKFLOW_ACTIONS.map((action) => (
-                      <button
-                        key={action.id}
-                        type="button"
-                        onClick={() => handleWorkflowUpdate(order, action.id)}
-                        disabled={updatingOrderId === order.id || order.online?.workflowStatus === action.id}
-                        className="min-h-[3rem] rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card-muted)] px-3 text-sm font-semibold text-[var(--text-primary)] transition hover:bg-[var(--color-primary-soft)] disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        {updatingOrderId === order.id ? 'Updating...' : action.label}
-                      </button>
-                    ))}
                   </div>
                 ) : null}
               </article>

@@ -34,8 +34,8 @@ export const createOrderSchema = Joi.object({
     .required(),
   total: Joi.number().min(0).precision(2).optional(),
   totalAmount: Joi.number().min(0).precision(2).optional(),
-  orderType: Joi.string().valid('dine-in', 'takeaway', 'delivery').optional(),
-  order_type: Joi.string().valid('dine-in', 'takeaway', 'delivery').optional(),
+  orderType: Joi.string().valid('dine-in', 'takeaway').optional(),
+  order_type: Joi.string().valid('dine-in', 'takeaway').optional(),
   paymentMethod: paymentMethodSchema.optional(),
   payment_method: paymentMethodSchema.optional(),
   notes: Joi.string().trim().max(500).optional().allow(''),
@@ -58,7 +58,7 @@ export const updateOrderSchema = createOrderSchema;
 
 export const updateOrderStatusSchema = Joi.object({
   status: Joi.string()
-    .valid('awaiting_waiter_approval', 'pending', 'preparing', 'ready', 'served', 'cancelled')
+    .valid('awaiting_waiter_approval', 'pending', 'preparing', 'ready', 'served', 'completed', 'cancelled')
     .required(),
   cancelReason: Joi.string().trim().max(200).when('status', {
     is: 'cancelled',
@@ -141,6 +141,8 @@ export const cancelPendingBillsSchema = Joi.object({
 
 export const softDeleteOrderSchema = Joi.object({
   reason: Joi.string().trim().max(200).optional().allow(''),
+  currentPassword: Joi.string().trim().max(120).optional().allow(''),
+  current_password: Joi.string().trim().max(120).optional().allow(''),
 });
 
 export const createTableSchema = Joi.object({

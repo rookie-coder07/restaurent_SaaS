@@ -1,11 +1,12 @@
 import { Activity, Pencil, PlusCircle, ShieldCheck, Trash2, UserRound, Users } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useApi } from '../hooks/useApi';
 import useAutoRefresh from '../hooks/useAutoRefresh';
 import { orderAPI, restaurantAPI, tableAPI } from '../services/apiEndpoints';
 import { useManagerStore } from '../context/managerStore';
 import { formatDisplayOrderNumber } from '../utils/formatters';
 import { getTableActivity } from '../utils/managerPortal';
+import { subscribeToOrderEvents } from '../utils/liveOrderEvents';
 import Card from '../components/common/Card';
 import Button from '../components/common/Button';
 import Modal from '../components/common/Modal';
@@ -17,7 +18,6 @@ export default function ManagerWaiters() {
   const { data: staffData = {}, refetch: refetchStaff } = useApi(() => restaurantAPI.getStaff({ limit: 100, skip: 0, isActive: true }));
   const { data: tablesData = {}, refetch: refetchTables } = useApi(() => tableAPI.getTables({ limit: 200 }));
   const { data: ordersData = {}, refetch: refetchOrders } = useApi(orderAPI.getOpenBills);
-  const tableAssignments = useManagerStore((state) => state.tableAssignments);
   const overrideAccess = useManagerStore((state) => state.overrideAccess);
   const waiterActivity = useManagerStore((state) => state.waiterActivity);
   const tableClosures = useManagerStore((state) => state.tableClosures);
@@ -28,19 +28,33 @@ export default function ManagerWaiters() {
   const toggleOverrideAccess = useManagerStore((state) => state.toggleOverrideAccess);
   const logWaiterActivity = useManagerStore((state) => state.logWaiterActivity);
   const [success, setSuccess] = useState('');
+  const [error, setError] = useState('');
   const [editingAllocation, setEditingAllocation] = useState(null);
   const [nextWaiterId, setNextWaiterId] = useState('');
   const [assignmentDrafts, setAssignmentDrafts] = useState({});
 
   const waiters = useMemo(() => (staffData?.staff || []).filter((member) => member.role === 'staff'), [staffData]);
+  const persistedTableAssignments = useMemo(
+    () =>
+      waiters.reduce((accumulator, waiter) => {
+        (waiter.assignedTables || []).forEach((tableId) => {
+          if (tableId) {
+            accumulator[tableId] = waiter.id;
+          }
+        });
+
+        return accumulator;
+      }, {}),
+    [waiters]
+  );
   const tables = tablesData?.tables || [];
   const orders = Array.isArray(ordersData) ? ordersData : [];
   const enrichedTables = useMemo(
     () =>
       tables.map((table) =>
-        getTableActivity(table, orders, tableAssignments, tableClosures, tableTransfers, tableMerges, tables)
+        getTableActivity(table, orders, persistedTableAssignments, tableClosures, tableTransfers, tableMerges, tables)
       ),
-    [orders, tableAssignments, tableClosures, tableMerges, tableTransfers, tables]
+    [orders, persistedTableAssignments, tableClosures, tableMerges, tableTransfers, tables]
   );
   const visibleTables = useMemo(
     () => enrichedTables.filter((table) => !table.isMergedSecondary),
@@ -59,19 +73,73 @@ export default function ManagerWaiters() {
 
   useAutoRefresh(() => Promise.allSettled([refetchStaff(), refetchTables(), refetchOrders()]), 12000);
 
-  const handleAssignment = (tableId, waiterId) => {
+  useEffect(() => {
+    const cleanup = subscribeToOrderEvents(() => {
+      Promise.allSettled([refetchTables(), refetchOrders()]);
+    });
+
+    return cleanup;
+  }, [refetchOrders, refetchTables]);
+
+  const persistTableAssignment = async (tableId, waiterId) => {
+    const targetWaiter = waiters.find((waiter) => waiter.id === waiterId);
+    if (!targetWaiter) {
+      throw new Error('Selected waiter was not found.');
+    }
+
+    const currentlyAssignedWaiter = waiters.find((waiter) => (waiter.assignedTables || []).includes(tableId));
+    const nextTargetAssignments = Array.from(
+      new Set([...(targetWaiter.assignedTables || []).filter(Boolean), tableId])
+    );
+
+    const updateRequests = [restaurantAPI.updateStaff(waiterId, { assignedTables: nextTargetAssignments })];
+
+    if (currentlyAssignedWaiter && currentlyAssignedWaiter.id !== waiterId) {
+      updateRequests.push(
+        restaurantAPI.updateStaff(currentlyAssignedWaiter.id, {
+          assignedTables: (currentlyAssignedWaiter.assignedTables || []).filter((assignedTableId) => assignedTableId !== tableId),
+        })
+      );
+    }
+
+    await Promise.all(updateRequests);
     assignTable(tableId, waiterId);
     logWaiterActivity({ waiterId, action: 'assigned_table', tableId });
-    setSuccess('Table assignment updated.');
+    await Promise.allSettled([refetchStaff(), refetchTables(), refetchOrders()]);
   };
 
-  const assignSelectedTable = (waiterId) => {
+  const clearTableAssignment = async (tableId, waiterId) => {
+    const currentWaiter = waiters.find((waiter) => waiter.id === waiterId);
+    if (!currentWaiter) {
+      return;
+    }
+
+    await restaurantAPI.updateStaff(waiterId, {
+      assignedTables: (currentWaiter.assignedTables || []).filter((assignedTableId) => assignedTableId !== tableId),
+    });
+    unassignTable(tableId);
+    logWaiterActivity({ waiterId, action: 'unassigned_table', tableId });
+    await Promise.allSettled([refetchStaff(), refetchTables(), refetchOrders()]);
+  };
+
+  const handleAssignment = async (tableId, waiterId) => {
+    setError('');
+
+    try {
+      await persistTableAssignment(tableId, waiterId);
+      setSuccess('Table assignment updated.');
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || requestError.message || 'Failed to assign the table.');
+    }
+  };
+
+  const assignSelectedTable = async (waiterId) => {
     const tableId = assignmentDrafts[waiterId];
     if (!tableId) {
       return;
     }
 
-    handleAssignment(tableId, waiterId);
+    await handleAssignment(tableId, waiterId);
     setAssignmentDrafts((current) => ({
       ...current,
       [waiterId]: '',
@@ -87,43 +155,55 @@ export default function ManagerWaiters() {
     setNextWaiterId(waiterId);
   };
 
-  const saveAllocationChange = () => {
+  const saveAllocationChange = async () => {
     if (!editingAllocation?.tableId || !nextWaiterId || nextWaiterId === editingAllocation.currentWaiterId) {
       setEditingAllocation(null);
       return;
     }
 
-    assignTable(editingAllocation.tableId, nextWaiterId);
-    logWaiterActivity({
-      waiterId: nextWaiterId,
-      action: 'reassigned_table',
-      tableId: editingAllocation.tableId,
-    });
-    setSuccess(`Table ${editingAllocation.tableNumber} reassigned.`);
-    setEditingAllocation(null);
-    setNextWaiterId('');
+    setError('');
+
+    try {
+      await persistTableAssignment(editingAllocation.tableId, nextWaiterId);
+      logWaiterActivity({
+        waiterId: nextWaiterId,
+        action: 'reassigned_table',
+        tableId: editingAllocation.tableId,
+      });
+      setSuccess(`Table ${editingAllocation.tableNumber} reassigned.`);
+      setEditingAllocation(null);
+      setNextWaiterId('');
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || requestError.message || 'Failed to reassign the table.');
+    }
   };
 
-  const removeAllocation = (tableId, waiterId, tableNumber) => {
-    unassignTable(tableId);
-    logWaiterActivity({ waiterId, action: 'unassigned_table', tableId });
-    setSuccess(`Table ${tableNumber} allocation removed.`);
+  const removeAllocation = async (tableId, waiterId, tableNumber) => {
+    setError('');
+
+    try {
+      await clearTableAssignment(tableId, waiterId);
+      setSuccess(`Table ${tableNumber} allocation removed.`);
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || requestError.message || 'Failed to remove the table allocation.');
+    }
   };
 
   return (
     <div className="space-y-6">
       {success ? <Toast type="success" message={success} /> : null}
+      {error ? <Toast type="error" message={error} /> : null}
 
       <div className="grid gap-4 xl:grid-cols-2">
         {paginatedWaiters.map((waiter) => {
-          const assignedTables = visibleTables.filter((table) => tableAssignments[table.id] === waiter.id);
+          const assignedTables = visibleTables.filter((table) => persistedTableAssignments[table.id] === waiter.id);
           const waiterOrders = assignedTables.flatMap((table) => table.activeOrders || []);
           const latestActivity = waiterActivity[waiter.id];
           const availableTables = visibleTables.filter(
             (table) =>
               table.effectiveStatus !== 'closed' &&
               !table.isMergedPrimary &&
-              (!tableAssignments[table.id] || tableAssignments[table.id] === waiter.id)
+              (!persistedTableAssignments[table.id] || persistedTableAssignments[table.id] === waiter.id)
           );
 
           return (

@@ -57,7 +57,7 @@ function MenuPanel({
           const isActive = category.id === activeCategoryId;
           return (
             <button
-              key={category.id}
+              key={category.renderKey || category.id}
               type="button"
               onClick={() => onCategoryChange(category.id)}
               className={`min-h-[3.25rem] rounded-2xl px-4 text-sm font-semibold transition ${

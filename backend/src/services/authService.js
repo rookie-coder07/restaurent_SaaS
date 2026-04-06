@@ -8,6 +8,21 @@ const JWT_SECRET = process.env.JWT_SECRET || 'your-super-secret-jwt-key-min-32-c
 const REFRESH_TOKEN_SECRET = process.env.REFRESH_TOKEN_SECRET || 'your-super-secret-refresh-token-key-min-32-characters';
 
 export class AuthService {
+  static buildStaffSessionUser(user) {
+    const normalizedRole = normalizeRole(user?.role);
+
+    return {
+      id: user.id,
+      restaurantId: user.restaurant_id,
+      name: user.name,
+      email: user.email,
+      phone: user.phone || user.phone_number || '',
+      role: normalizedRole,
+      assignedTables: Array.isArray(user.assigned_tables) ? user.assigned_tables.filter(Boolean) : [],
+      status: user.status || 'active',
+    };
+  }
+
   // Generate JWT access token
   static generateAccessToken(userId, restaurantId, email, role) {
     const normalizedRole = normalizeRole(role);
@@ -233,13 +248,7 @@ export class AuthService {
       logger.info(`✅ Staff login successful: ${user.id}`);
 
       return {
-        user: {
-          id: user.id,
-          name: user.name,
-          email: user.email,
-          role: normalizedRole,
-          assignedTables: Array.isArray(user.assigned_tables) ? user.assigned_tables.filter(Boolean) : [],
-        },
+        user: this.buildStaffSessionUser(user),
         restaurant: {
           id: user.restaurant_id,
         },
@@ -311,6 +320,73 @@ export class AuthService {
       logger.error('Change password error:', error);
       throw error;
     }
+  }
+
+  static async verifyCurrentPassword(userId, currentPassword, isRestaurant = false) {
+    try {
+      const table = isRestaurant ? 'restaurants' : 'users';
+
+      const { data: account } = await supabase
+        .from(table)
+        .select('*')
+        .eq('id', userId)
+        .single();
+
+      if (!account) {
+        throw new Error('User not found');
+      }
+
+      const isValid = await this.comparePassword(currentPassword, account.password_hash);
+      if (!isValid) {
+        throw new Error('Current password is incorrect');
+      }
+
+      return true;
+    } catch (error) {
+      logger.error('Verify current password error:', error);
+      throw error;
+    }
+  }
+
+  static async getCurrentUserProfile(sessionUser) {
+    const normalizedRole = normalizeRole(sessionUser?.role);
+
+    if (normalizedRole === ROLES.OWNER) {
+      const { data: restaurant, error } = await supabase
+        .from('restaurants')
+        .select('id, name, email, phone, city, address, gst_number, timezone')
+        .eq('id', sessionUser.userId)
+        .single();
+
+      if (error || !restaurant) {
+        throw error || new Error('Restaurant account not found');
+      }
+
+      return {
+        id: restaurant.id,
+        restaurantId: restaurant.id,
+        name: restaurant.name,
+        email: restaurant.email,
+        phone: restaurant.phone || '',
+        city: restaurant.city || '',
+        address: restaurant.address || '',
+        gstNumber: restaurant.gst_number || '',
+        timezone: restaurant.timezone || 'Asia/Kolkata',
+        role: ROLES.OWNER,
+      };
+    }
+
+    const { data: user, error } = await supabase
+      .from('users')
+      .select('*')
+      .eq('id', sessionUser.userId)
+      .single();
+
+    if (error || !user) {
+      throw error || new Error('User account not found');
+    }
+
+    return this.buildStaffSessionUser(user);
   }
 }
 

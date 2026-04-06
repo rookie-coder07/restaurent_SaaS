@@ -279,6 +279,7 @@ export const getOrderById = asyncHandler(async (req, res) => {
 export const getOrders = asyncHandler(async (req, res) => {
   const filters = {
     status: req.query.status,
+    orderType: req.query.orderType || req.query.order_type,
     tableNumber: req.query.tableNumber ? String(req.query.tableNumber).trim() : undefined,
     startDate: req.query.startDate,
     endDate: req.query.endDate,
@@ -310,7 +311,9 @@ export const softDeleteOrder = asyncHandler(async (req, res) => {
   const { orderId } = req.params;
   const deletedOrder = await OrderService.softDeleteOrder(req.user.restaurantId, orderId, req.body.reason, {
     actorRole: req.user?.role,
+    actorUserId: req.user?.userId,
     actorName: req.user?.name || req.user?.email || 'Unknown user',
+    currentPassword: req.body.currentPassword || req.body.current_password || '',
   });
 
   return sendSuccess(res, 200, deletedOrder, 'Order deleted safely');
@@ -322,6 +325,7 @@ export const approveDiscount = asyncHandler(async (req, res) => {
     percent: Number(req.body.percent),
     note: req.body.note || '',
     actorRole: req.user?.role,
+    actorUserId: req.user?.userId,
     actorName: req.user?.name || req.user?.email || 'Unknown user',
   });
 
@@ -387,6 +391,8 @@ export const updateOrder = asyncHandler(async (req, res) => {
 
   const order = await OrderService.updateOrder(req.restaurantId, orderId, normalizedOrder, {
     actorRole: req.user?.role,
+    actorUserId: req.user?.userId,
+    actorName: req.user?.name || req.user?.email || 'Unknown user',
   });
   return sendSuccess(res, 200, order, 'Order updated successfully');
 });
@@ -425,6 +431,7 @@ export const settleOrder = asyncHandler(async (req, res) => {
     serviceCharge: getOptionalChargeValue(req.body, 'serviceCharge', 'service_charge'),
     deliveryCharge: getOptionalChargeValue(req.body, 'deliveryCharge', 'delivery_charge'),
     actorRole: req.user?.role,
+    actorUserId: req.user?.userId,
     actorName: req.user?.name || req.user?.email || 'Unknown user',
   });
 

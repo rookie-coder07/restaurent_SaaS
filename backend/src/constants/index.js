@@ -25,7 +25,7 @@ export function normalizeRole(role) {
 
 export const ROLE_PERMISSIONS = {
   owner: ['create_menu', 'manage_menu', 'manage_orders', 'manage_staff', 'view_staff', 'view_analytics', 'manage_restaurant', 'view_orders', 'update_order_status'],
-  manager: ['manage_orders', 'manage_tables', 'view_staff', 'view_analytics', 'view_orders', 'update_order_status'],
+  manager: ['manage_orders', 'manage_tables', 'manage_staff', 'view_staff', 'view_analytics', 'view_orders', 'update_order_status'],
   staff: ['view_orders', 'manage_orders'],
   kitchen_staff: ['view_orders', 'update_order_status'],
 };

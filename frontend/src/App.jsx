@@ -9,6 +9,7 @@ import KOTLayout from './components/layout/KOTLayout';
 // Pages
 const HomeAccess = lazy(() => import('./pages/HomeAccess'));
 const Login = lazy(() => import('./pages/Login'));
+const ResetPassword = lazy(() => import('./pages/ResetPassword'));
 const Register = lazy(() => import('./pages/Register'));
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const Notifications = lazy(() => import('./pages/Notifications'));
@@ -119,6 +120,7 @@ function App() {
           <Route path="/login" element={<Navigate to="/" replace />} />
           <Route path="/staff/login" element={withSuspense(<StaffAccess />)} />
           <Route path="/admin/login" element={withSuspense(<Login portal="admin" />)} />
+          <Route path="/admin/reset-password" element={withSuspense(<ResetPassword />)} />
           <Route path="/manager/login" element={withSuspense(<Login portal="admin" initialModeKey="manager" />)} />
           <Route path="/pos/login" element={withSuspense(<Login portal="pos" />)} />
           <Route path="/kitchen/login" element={<Navigate to="/staff/login" replace />} />
@@ -143,7 +145,8 @@ function App() {
 
           <Route element={<ProtectedRoute layout={AdminLayout} allowedRoles={['manager']} portal="admin" />}>
             <Route path="/manager" element={withSuspense(<ManagerDashboard />)} />
-            <Route path="/manager/orders" element={withSuspense(<ManagerOrders />)} />
+            <Route path="/manager/orders" element={withSuspense(<Orders />)} />
+            <Route path="/manager/takeaway-orders" element={withSuspense(<ManagerOrders />)} />
             <Route path="/manager/tables" element={withSuspense(<ManagerTables />)} />
             <Route path="/manager/kitchen" element={withSuspense(<ManagerKitchen />)} />
             <Route path="/manager/waiters" element={withSuspense(<ManagerWaiters />)} />

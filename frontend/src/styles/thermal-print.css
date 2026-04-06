@@ -21,12 +21,23 @@
   box-shadow: none;
   background: #fff;
   color: #000;
-  font-family: "Courier New", Courier, monospace;
+  font-family: Arial, "Helvetica Neue", Helvetica, sans-serif;
   font-size: var(--thermal-font-size);
+  font-weight: 700;
   line-height: var(--thermal-line-height);
-  letter-spacing: 0;
+  letter-spacing: 0.01em;
   overflow: visible;
   word-break: break-word;
+  text-rendering: geometricPrecision;
+  -webkit-font-smoothing: none;
+  print-color-adjust: exact;
+  -webkit-print-color-adjust: exact;
+}
+
+.thermal-receipt *,
+.thermal-receipt span,
+.thermal-receipt div {
+  font-weight: inherit;
 }
 
 .thermal-center {
@@ -38,14 +49,14 @@
 }
 
 .thermal-title {
-  font-size: 14px;
-  font-weight: 700;
+  font-size: 15px;
+  font-weight: 800;
   text-transform: uppercase;
 }
 
 .thermal-subtitle {
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 800;
   text-transform: uppercase;
 }
 
@@ -89,7 +100,7 @@
 
 .thermal-kot-head,
 .thermal-bill-head {
-  font-weight: 700;
+  font-weight: 800;
   text-transform: uppercase;
 }
 
@@ -109,11 +120,11 @@
 }
 
 .thermal-muted {
-  opacity: 0.88;
+  opacity: 1;
 }
 
 .thermal-strong {
-  font-weight: 700;
+  font-weight: 800;
 }
 
 .thermal-separator {
@@ -148,7 +159,7 @@
     position: absolute;
     left: 0;
     top: 0;
-    width: var(--thermal-width);
+    width: 100% !important;
     margin: 0 !important;
     padding: 0 !important;
     overflow: visible !important;
@@ -164,8 +175,10 @@
   .thermal-print-root {
     margin: 0 !important;
     padding: 0 !important;
-    width: var(--thermal-width) !important;
-    max-width: var(--thermal-width) !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    display: flex !important;
+    justify-content: center !important;
   }
 
   .thermal-receipt,

@@ -2,8 +2,6 @@ import { memo } from 'react';
 
 const ORDER_TYPES = [
   { id: 'dine-in', label: 'Dine-In' },
-  { id: 'takeaway', label: 'Takeaway' },
-  { id: 'delivery', label: 'Delivery' },
 ];
 
 const DISCOUNT_TYPES = [
@@ -27,7 +25,7 @@ function OrderControls({
     <section className="rounded-[2rem] border border-[var(--border-color)] bg-[var(--bg-card)] p-4 shadow-[var(--shadow-card)] sm:p-5">
       <div>
         <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--text-secondary)]">Order Type</p>
-        <div className="mt-3 grid grid-cols-3 gap-2">
+        <div className="mt-3 grid grid-cols-1 gap-2">
           {ORDER_TYPES.map((option) => {
             const isActive = option.id === orderType;
             return (
@@ -48,27 +46,25 @@ function OrderControls({
         </div>
       </div>
 
-      {orderType === 'dine-in' ? (
-        <div className="mt-5">
-          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--text-secondary)]">Selected Table</p>
-          <div className="mt-3 flex items-center justify-between gap-3 rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card-muted)] px-4 py-4">
-            <div>
-              <p className="text-sm text-[var(--text-secondary)]">Serving</p>
-              <p className="mt-1 text-lg font-bold text-[var(--text-primary)]">
-                {selectedTableId ? `Table ${selectedTable?.tableNumber || ''}` : 'No table selected'}
-              </p>
-            </div>
-
-            <button
-              type="button"
-              onClick={onChangeTable}
-              className="rounded-2xl bg-[var(--bg-card)] px-4 py-3 text-sm font-semibold text-[var(--text-primary)] transition hover:bg-[var(--color-primary-soft)]"
-            >
-              Change
-            </button>
+      <div className="mt-5">
+        <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--text-secondary)]">Selected Table</p>
+        <div className="mt-3 flex items-center justify-between gap-3 rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card-muted)] px-4 py-4">
+          <div>
+            <p className="text-sm text-[var(--text-secondary)]">Serving</p>
+            <p className="mt-1 text-lg font-bold text-[var(--text-primary)]">
+              {selectedTableId ? `Table ${selectedTable?.tableNumber || ''}` : 'No table selected'}
+            </p>
           </div>
+
+          <button
+            type="button"
+            onClick={onChangeTable}
+            className="rounded-2xl bg-[var(--bg-card)] px-4 py-3 text-sm font-semibold text-[var(--text-primary)] transition hover:bg-[var(--color-primary-soft)]"
+          >
+            Change
+          </button>
         </div>
-      ) : null}
+      </div>
 
       {canManageBilling ? (
         <div className="mt-5">

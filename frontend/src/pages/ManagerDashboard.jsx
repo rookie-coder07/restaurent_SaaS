@@ -31,7 +31,7 @@ import EmptyState from '../components/common/EmptyState';
 
 const QUICK_ACTIONS = [
   { label: 'Quick Open Table', href: '/manager/tables', helper: 'Open or reassign a table fast' },
-  { label: 'Quick Add Order', href: '/manager/orders', helper: 'Create or modify a live order' },
+  { label: 'Quick Add Order', href: '/manager/takeaway-orders', helper: 'Create and settle a takeaway order fast' },
   { label: 'Quick Bill Close', href: '/manager/bills', helper: 'Mark a table bill paid quickly' },
 ];
 

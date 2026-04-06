@@ -121,7 +121,9 @@ export const changePassword = asyncHandler(async (req, res) => {
 });
 
 export const getCurrentUser = asyncHandler(async (req, res) => {
+  const currentUser = await AuthService.getCurrentUserProfile(req.user);
+
   return sendSuccess(res, 200, {
-    user: req.user,
+    user: currentUser,
   }, 'User details fetched');
 });

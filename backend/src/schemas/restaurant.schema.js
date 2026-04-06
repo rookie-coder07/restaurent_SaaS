@@ -39,3 +39,8 @@ export const analyticsQuerySchema = Joi.object({
   limit: Joi.number().integer().min(1).max(100).default(10),
   offset: Joi.number().integer().min(0).default(0),
 });
+
+export const updateInvoiceSettingsSchema = Joi.object({
+  prefix: Joi.string().trim().uppercase().pattern(/^[A-Z0-9][A-Z0-9-]{0,19}$/).optional(),
+  startingNumber: Joi.number().integer().min(1).optional(),
+});

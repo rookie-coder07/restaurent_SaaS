@@ -13,6 +13,7 @@ export const restaurantAPI = {
   getProfile: () => api.get('/v1/restaurants/profile'),
   updateProfile: (data) => api.put('/v1/restaurants/profile', data),
   updateSettings: (data) => api.put('/v1/restaurants/settings', data),
+  updateInvoiceSettings: (data) => api.put('/v1/restaurants/settings/invoice', data),
   createStaff: (data) => api.post('/v1/restaurants/staff', data),
   updateStaff: (staffId, data) => api.put(`/v1/restaurants/staff/${staffId}`, data),
   getStaff: (filtersOrLimit = {}, skip) => {

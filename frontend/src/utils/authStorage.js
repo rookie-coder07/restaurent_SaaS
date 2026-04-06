@@ -72,7 +72,14 @@ export function getValidPortalSession(portal = 'admin') {
   const session = readPortalSession(portal);
   const tokenPayload = getTokenPayload(session?.accessToken);
 
-  if (!session?.accessToken || !session?.user || !tokenPayload || isExpiredTokenPayload(tokenPayload)) {
+  if (!session?.user) {
+    return null;
+  }
+
+  const hasRefreshToken = Boolean(session?.refreshToken);
+  const hasUsableAccessToken = Boolean(session?.accessToken && tokenPayload && !isExpiredTokenPayload(tokenPayload));
+
+  if (!hasUsableAccessToken && !hasRefreshToken) {
     return null;
   }
 

@@ -1,9 +1,10 @@
 import logger from '../utils/logger.js';
 import supabase from '../config/supabase.js';
 import AuthService from './authService.js';
+import InvoiceService from './invoiceService.js';
 
 export class RestaurantService {
-  static transformRestaurant(restaurant) {
+  static transformRestaurant(restaurant, extras = {}) {
     if (!restaurant) return null;
 
     const normalizePrinter = (printer = {}, fallbackEnabled = false) => ({
@@ -69,6 +70,10 @@ export class RestaurantService {
       createdAt: restaurant.created_at,
       updatedAt: restaurant.updated_at,
       role: 'owner',
+      invoiceSettings: {
+        prefix: extras.invoiceSettings?.prefix || InvoiceService.DEFAULT_PREFIX,
+        nextNumber: Number(extras.invoiceSettings?.nextNumber || InvoiceService.DEFAULT_STARTING_NUMBER),
+      },
     };
   }
 
@@ -156,7 +161,8 @@ export class RestaurantService {
 
       if (error || !restaurant) throw error || new Error('Restaurant not found');
 
-      return this.transformRestaurant(restaurant);
+      const invoiceSettings = await InvoiceService.getInvoiceCounter(restaurantId);
+      return this.transformRestaurant(restaurant, { invoiceSettings });
     } catch (error) {
       logger.error('❌ Get restaurant error:', error);
       throw error;
@@ -185,7 +191,8 @@ export class RestaurantService {
       if (error || !restaurant) throw error || new Error('Restaurant not found');
 
       logger.info(`✅ Restaurant updated: ${restaurantId}`);
-      return this.transformRestaurant(restaurant);
+      const invoiceSettings = await InvoiceService.getInvoiceCounter(restaurantId);
+      return this.transformRestaurant(restaurant, { invoiceSettings });
     } catch (error) {
       logger.error('❌ Update restaurant error:', error);
       throw error;
@@ -255,7 +262,8 @@ export class RestaurantService {
       if (error || !restaurant) throw error || new Error('Restaurant not found');
 
       logger.info(`✅ Subscription status updated: ${restaurantId} → ${status}`);
-      return this.transformRestaurant(restaurant);
+      const invoiceSettings = await InvoiceService.getInvoiceCounter(restaurantId);
+      return this.transformRestaurant(restaurant, { invoiceSettings });
     } catch (error) {
       logger.error('❌ Update subscription error:', error);
       throw error;
@@ -276,7 +284,8 @@ export class RestaurantService {
 
       if (error) throw error;
 
-      return this.transformRestaurant(restaurant);
+      const invoiceSettings = await InvoiceService.getInvoiceCounter(restaurant.id);
+      return this.transformRestaurant(restaurant, { invoiceSettings });
     } catch (error) {
       logger.error('❌ Get restaurant by email error:', error);
       throw error;
@@ -326,7 +335,8 @@ export class RestaurantService {
 
       if (error || !restaurant) throw error || new Error('Restaurant not found');
 
-      return this.transformRestaurant(restaurant);
+      const invoiceSettings = await InvoiceService.getInvoiceCounter(restaurantId);
+      return this.transformRestaurant(restaurant, { invoiceSettings });
     } catch (error) {
       logger.error('❌ Get restaurant profile error:', error);
       throw error;
@@ -355,7 +365,8 @@ export class RestaurantService {
 
       if (error || !restaurant) throw error || new Error('Restaurant not found');
 
-      return this.transformRestaurant(restaurant);
+      const invoiceSettings = await InvoiceService.getInvoiceCounter(restaurantId);
+      return this.transformRestaurant(restaurant, { invoiceSettings });
     } catch (error) {
       logger.error('❌ Update restaurant profile error:', error);
       throw error;
@@ -440,7 +451,8 @@ export class RestaurantService {
 
       if (!restaurant) throw new Error('Restaurant not found');
 
-      return this.transformRestaurant(restaurant);
+      const invoiceSettings = await InvoiceService.getInvoiceCounter(restaurantId);
+      return this.transformRestaurant(restaurant, { invoiceSettings });
     } catch (error) {
       logger.error('❌ Update restaurant settings error:', error);
       throw error;
@@ -537,6 +549,26 @@ export class RestaurantService {
       };
     } catch (error) {
       logger.error('❌ Get staff users error:', error);
+      throw error;
+    }
+  }
+
+  static async getStaffUserById(restaurantId, staffId) {
+    try {
+      const { data: user, error } = await supabase
+        .from('users')
+        .select('*')
+        .eq('restaurant_id', restaurantId)
+        .eq('id', staffId)
+        .single();
+
+      if (error || !user) {
+        throw error || new Error('Staff user not found');
+      }
+
+      return this.transformStaffUser(user);
+    } catch (error) {
+      logger.error('Get staff user by id error:', error);
       throw error;
     }
   }
@@ -658,9 +690,22 @@ export class RestaurantService {
 
       if (error || !restaurant) throw error || new Error('Restaurant not found');
 
-      return this.transformRestaurant(restaurant);
+      const invoiceSettings = await InvoiceService.getInvoiceCounter(restaurantId);
+      return this.transformRestaurant(restaurant, { invoiceSettings });
     } catch (error) {
       logger.error('❌ Update subscription error:', error);
+      throw error;
+    }
+  }
+  static async updateInvoiceSettings(restaurantId, settings) {
+    try {
+      const invoiceSettings = await InvoiceService.updateInvoiceSettings(restaurantId, settings);
+      return {
+        prefix: invoiceSettings.prefix,
+        nextNumber: invoiceSettings.nextNumber,
+      };
+    } catch (error) {
+      logger.error('Invoice settings update error:', error);
       throw error;
     }
   }

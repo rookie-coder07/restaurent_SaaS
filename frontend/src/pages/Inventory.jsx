@@ -237,89 +237,46 @@ export default function Inventory() {
           }
         />
       ) : (
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,1.5fr)_minmax(20rem,0.9fr)]">
-          <div className="space-y-4">
-            {paginatedItems.map((item) => (
-              <Card key={item.id} className="p-4 sm:p-5">
-                <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <h3 className="text-lg font-semibold text-[var(--text-primary)]">{item.name}</h3>
-                      {item.isLowStock ? (
-                        <span className="rounded-full bg-red-500/10 px-3 py-1 text-xs font-bold uppercase tracking-[0.14em] text-red-300">
-                          Low stock
-                        </span>
-                      ) : (
-                        <span className="rounded-full bg-emerald-500/10 px-3 py-1 text-xs font-bold uppercase tracking-[0.14em] text-emerald-300">
-                          Healthy
-                        </span>
-                      )}
-                    </div>
-                    <p className="mt-2 text-sm text-[var(--text-secondary)]">
-                      Current stock: <span className="font-semibold text-[var(--text-primary)]">{item.quantity} {item.unit}</span> • Alert below {item.threshold} {item.unit}
-                    </p>
-                    <p className="mt-1 text-xs text-[var(--text-secondary)]">Last updated: {new Date(item.lastUpdated).toLocaleString()}</p>
+        <div className="space-y-4">
+          {paginatedItems.map((item) => (
+            <Card key={item.id} className="p-4 sm:p-5">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="text-lg font-semibold text-[var(--text-primary)]">{item.name}</h3>
+                    {item.isLowStock ? (
+                      <span className="rounded-full bg-red-500/10 px-3 py-1 text-xs font-bold uppercase tracking-[0.14em] text-red-300">
+                        Low stock
+                      </span>
+                    ) : (
+                      <span className="rounded-full bg-emerald-500/10 px-3 py-1 text-xs font-bold uppercase tracking-[0.14em] text-emerald-300">
+                        Healthy
+                      </span>
+                    )}
                   </div>
-
-                  <div className="grid gap-2 sm:grid-cols-3">
-                    <Button variant="secondary" onClick={() => openEditModal(item)}>
-                      <PencilRuler className="h-4 w-4" />
-                      Edit
-                    </Button>
-                    <Button variant="secondary" onClick={() => openAddStockModal(item)}>
-                      <PackagePlus className="h-4 w-4" />
-                      Add Stock
-                    </Button>
-                    <Button variant="secondary" onClick={() => openAdjustModal(item)}>
-                      <AlertTriangle className="h-4 w-4" />
-                      Adjust
-                    </Button>
-                  </div>
+                  <p className="mt-2 text-sm text-[var(--text-secondary)]">
+                    Current stock: <span className="font-semibold text-[var(--text-primary)]">{item.quantity} {item.unit}</span> • Alert below {item.threshold} {item.unit}
+                  </p>
+                  <p className="mt-1 text-xs text-[var(--text-secondary)]">Last updated: {new Date(item.lastUpdated).toLocaleString()}</p>
                 </div>
-              </Card>
-            ))}
-          </div>
 
-          <div className="space-y-4">
-            <Card>
-              <p className="text-sm text-[var(--text-secondary)]">Today&apos;s Usage</p>
-              <h3 className="mt-1 text-xl font-semibold text-[var(--text-primary)]">Top Consumed Items</h3>
-              <div className="mt-4 space-y-3">
-                {topConsumedItems.length === 0 ? (
-                  <p className="text-sm text-[var(--text-secondary)]">No automatic deductions have been recorded yet today.</p>
-                ) : (
-                  topConsumedItems.map((item) => (
-                    <div key={item.inventoryItemId} className="rounded-2xl bg-[var(--bg-card-muted)] p-4">
-                      <p className="font-semibold text-[var(--text-primary)]">{item.name}</p>
-                      <p className="mt-1 text-sm text-[var(--text-secondary)]">Used {item.totalUsed} {item.unit} today</p>
-                    </div>
-                  ))
-                )}
+                <div className="grid gap-2 sm:grid-cols-3">
+                  <Button variant="secondary" onClick={() => openEditModal(item)}>
+                    <PencilRuler className="h-4 w-4" />
+                    Edit
+                  </Button>
+                  <Button variant="secondary" onClick={() => openAddStockModal(item)}>
+                    <PackagePlus className="h-4 w-4" />
+                    Add Stock
+                  </Button>
+                  <Button variant="secondary" onClick={() => openAdjustModal(item)}>
+                    <AlertTriangle className="h-4 w-4" />
+                    Adjust
+                  </Button>
+                </div>
               </div>
             </Card>
-
-            <Card>
-              <p className="text-sm text-[var(--text-secondary)]">Recent Activity</p>
-              <h3 className="mt-1 text-xl font-semibold text-[var(--text-primary)]">Stock History</h3>
-              <div className="mt-4 space-y-3">
-                {recentHistory.length === 0 ? (
-                  <p className="text-sm text-[var(--text-secondary)]">Inventory changes will appear here once stock starts moving.</p>
-                ) : (
-                  recentHistory.slice(0, 10).map((entry) => (
-                    <div key={entry.id} className="rounded-2xl bg-[var(--bg-card-muted)] p-4">
-                      <p className="font-semibold text-[var(--text-primary)]">{entry.inventoryItemName}</p>
-                      <p className="mt-1 text-sm text-[var(--text-secondary)]">
-                        {entry.type} • {entry.quantityChange > 0 ? '+' : ''}{entry.quantityChange} {entry.unit}
-                      </p>
-                      <p className="mt-1 text-xs text-[var(--text-secondary)]">
-                        {entry.reason || entry.source} • {new Date(entry.createdAt).toLocaleString()}
-                      </p>
-                    </div>
-                  ))
-                )}
-              </div>
-            </Card>
-          </div>
+          ))}
 
           {hasPagination ? (
             <PaginationControls

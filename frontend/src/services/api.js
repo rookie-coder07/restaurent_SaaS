@@ -51,6 +51,57 @@ function rejectMismatchedPortalSession(portal) {
   }));
 }
 
+const refreshRequests = new Map();
+
+async function refreshPortalAccessToken(portal, existingSession) {
+  if (!portal || !existingSession?.refreshToken) {
+    throw new Error('No refresh token available.');
+  }
+
+  const refreshKey = `${portal}:${existingSession.refreshToken}`;
+  if (refreshRequests.has(refreshKey)) {
+    return refreshRequests.get(refreshKey);
+  }
+
+  const refreshPromise = axios
+    .post(
+      `${API_BASE_URL}/v1/auth/refresh-token`,
+      { refreshToken: existingSession.refreshToken },
+      {
+        withCredentials: false,
+      }
+    )
+    .then((response) => {
+      const { accessToken } = response.data.data;
+      const refreshedPayload = decodeTokenPayload(accessToken);
+      const refreshedRole = normalizePortalRole(refreshedPayload?.role);
+
+      if (!refreshedPayload?.restaurantId || (refreshedRole && !canAccessPortal(refreshedRole, portal))) {
+        rejectMismatchedPortalSession(portal);
+        throw new Error('Portal session does not match the refreshed account role.');
+      }
+
+      const nextSession = {
+        ...existingSession,
+        user: {
+          ...existingSession.user,
+          role: refreshedRole || existingSession.user?.role,
+          restaurantId: existingSession.user?.restaurantId || refreshedPayload.restaurantId || null,
+        },
+        accessToken,
+      };
+
+      savePortalSession(portal, nextSession);
+      return nextSession;
+    })
+    .finally(() => {
+      refreshRequests.delete(refreshKey);
+    });
+
+  refreshRequests.set(refreshKey, refreshPromise);
+  return refreshPromise;
+}
+
 if (shouldDebugApi) {
   console.log('='.repeat(60));
   console.log('Frontend API Configuration');
@@ -87,40 +138,48 @@ export function getCurrentPortalAccessToken() {
 
 api.interceptors.request.use(
   (config) => {
-    const portal = getPortalKeyFromPathname(window.location.pathname);
-    const session = readPortalSession(portal);
-    const token = session?.accessToken;
+    return (async () => {
+      const portal = getPortalKeyFromPathname(window.location.pathname);
+      let session = readPortalSession(portal);
+      let token = session?.accessToken;
+      let tokenPayload = decodeTokenPayload(token);
 
-    if (token) {
-      const tokenPayload = decodeTokenPayload(token);
-      const tokenRole = normalizePortalRole(tokenPayload?.role);
-
-      if (!tokenPayload?.restaurantId || !tokenRole || isExpiredTokenPayload(tokenPayload)) {
-        rejectMismatchedPortalSession(portal);
-        return Promise.reject(new Error('Your session has expired. Please sign in again.'));
+      if (token && tokenPayload && isExpiredTokenPayload(tokenPayload) && session?.refreshToken) {
+        session = await refreshPortalAccessToken(portal, session);
+        token = session?.accessToken;
+        tokenPayload = decodeTokenPayload(token);
       }
 
-      if (tokenRole && !canAccessPortal(tokenRole, portal)) {
-        rejectMismatchedPortalSession(portal);
-        return Promise.reject(new Error('Portal session does not match the current account role.'));
+      if (token) {
+        const tokenRole = normalizePortalRole(tokenPayload?.role);
+
+        if (!tokenPayload?.restaurantId || !tokenRole) {
+          rejectMismatchedPortalSession(portal);
+          throw new Error('Your session has expired. Please sign in again.');
+        }
+
+        if (tokenRole && !canAccessPortal(tokenRole, portal)) {
+          rejectMismatchedPortalSession(portal);
+          throw new Error('Portal session does not match the current account role.');
+        }
+
+        config.headers.Authorization = `Bearer ${token}`;
+        config.headers['X-Restaurant-Id'] = String(tokenPayload.restaurantId);
+
+        if (config.params && typeof config.params === 'object' && !Array.isArray(config.params)) {
+          config.params = {
+            ...config.params,
+            restaurantId: config.params.restaurantId || String(tokenPayload.restaurantId),
+          };
+        }
       }
 
-      config.headers.Authorization = `Bearer ${token}`;
-      config.headers['X-Restaurant-Id'] = String(tokenPayload.restaurantId);
-
-      if (config.params && typeof config.params === 'object' && !Array.isArray(config.params)) {
-        config.params = {
-          ...config.params,
-          restaurantId: config.params.restaurantId || String(tokenPayload.restaurantId),
-        };
+      if (shouldDebugApi) {
+        console.log(`API Request: ${config.method?.toUpperCase()} ${API_BASE_URL}${config.url}`);
       }
-    }
 
-    if (shouldDebugApi) {
-      console.log(`API Request: ${config.method?.toUpperCase()} ${API_BASE_URL}${config.url}`);
-    }
-
-    return config;
+      return config;
+    })();
   },
   (error) => {
     if (shouldDebugApi) {
@@ -165,39 +224,9 @@ api.interceptors.response.use(
       try {
         const portal = getPortalKeyFromPathname(window.location.pathname);
         const existingSession = readPortalSession(portal);
-        const refreshToken = existingSession?.refreshToken;
-        if (refreshToken) {
-          const response = await axios.post(
-            `${API_BASE_URL}/v1/auth/refresh-token`,
-            { refreshToken },
-            {
-              // Refresh is driven by the token stored for the current portal.
-              // Leaving cookies off prevents another portal's stale cookie from
-              // replacing the active POS/KOT/Admin session.
-              withCredentials: false,
-            }
-          );
-
-          const { accessToken } = response.data.data;
-          const refreshedRole = decodeTokenPayload(accessToken)?.role;
-
-          if (refreshedRole && !canAccessPortal(refreshedRole, portal)) {
-            rejectMismatchedPortalSession(portal);
-            return Promise.reject(new Error('Portal session does not match the refreshed account role.'));
-          }
-
-          savePortalSession(portal, {
-            ...existingSession,
-            user: refreshedRole
-              ? {
-                  ...existingSession.user,
-                  role: normalizePortalRole(refreshedRole),
-                }
-              : existingSession.user,
-            accessToken,
-          });
-
-          originalRequest.headers.Authorization = `Bearer ${accessToken}`;
+        if (existingSession?.refreshToken) {
+          const refreshedSession = await refreshPortalAccessToken(portal, existingSession);
+          originalRequest.headers.Authorization = `Bearer ${refreshedSession.accessToken}`;
           return api(originalRequest);
         }
       } catch (refreshError) {
