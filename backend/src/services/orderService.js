@@ -26,6 +26,13 @@ export class OrderService {
   static ONLINE_WORKFLOW_STATUSES = ['new', 'accepted', 'rejected', 'preparing', 'ready', 'dispatched'];
 
   static ONLINE_PAYMENT_STATES = ['pending', 'paid', 'cash_on_delivery', 'failed', 'refunded'];
+  static inFlightCreateRequests = new Map();
+  static restaurantTimezoneCache = new Map();
+  static RESTAURANT_TIMEZONE_CACHE_TTL_MS = 5 * 60 * 1000;
+  static menuCatalogCache = new Map();
+  static MENU_CATALOG_CACHE_TTL_MS = 60 * 1000;
+  static displayOrderSequenceCache = new Map();
+  static DISPLAY_ORDER_SEQUENCE_CACHE_TTL_MS = 60 * 1000;
 
   static emitOrderEvent(restaurantId, type, order, extra = {}) {
     if (!restaurantId || !order?.id) {
@@ -186,7 +193,19 @@ export class OrderService {
     return combined.includes('23505') || combined.includes('duplicate key') || combined.includes('unique');
   }
 
+  static isMissingColumnError(error, columnName = '') {
+    const normalizedColumnName = String(columnName || '').trim().toLowerCase();
+    const combined = `${error?.code || ''} ${error?.message || ''} ${error?.details || ''} ${error?.hint || ''}`.toLowerCase();
+    return combined.includes('could not find') && normalizedColumnName ? combined.includes(normalizedColumnName) : false;
+  }
+
   static async getRestaurantTimezone(restaurantId) {
+    const cacheKey = String(restaurantId || '').trim();
+    const cachedEntry = this.restaurantTimezoneCache.get(cacheKey);
+    if (cachedEntry && cachedEntry.expiresAt > Date.now()) {
+      return cachedEntry.timezone;
+    }
+
     const { data: restaurant, error } = await supabase
       .from('restaurants')
       .select('timezone')
@@ -197,11 +216,103 @@ export class OrderService {
       throw error || new Error('Restaurant not found');
     }
 
-    return restaurant.timezone || 'Asia/Kolkata';
+    const timezone = restaurant.timezone || 'Asia/Kolkata';
+    this.restaurantTimezoneCache.set(cacheKey, {
+      timezone,
+      expiresAt: Date.now() + this.RESTAURANT_TIMEZONE_CACHE_TTL_MS,
+    });
+
+    return timezone;
+  }
+
+  static getMenuCatalogCacheKey(restaurantId, menuItemIds = []) {
+    const normalizedRestaurantId = String(restaurantId || '').trim();
+    const normalizedMenuItemIds = Array.from(new Set(menuItemIds.map((id) => String(id || '').trim()).filter(Boolean)))
+      .sort()
+      .join(',');
+
+    return `${normalizedRestaurantId}:${normalizedMenuItemIds}`;
+  }
+
+  static async getMenuCatalogSnapshot(restaurantId, menuItemIds = []) {
+    const normalizedMenuItemIds = Array.from(
+      new Set(menuItemIds.map((id) => String(id || '').trim()).filter(Boolean))
+    );
+
+    if (normalizedMenuItemIds.length === 0) {
+      return {
+        menuItems: [],
+        categoryMap: new Map(),
+      };
+    }
+
+    const cacheKey = this.getMenuCatalogCacheKey(restaurantId, normalizedMenuItemIds);
+    const cachedEntry = this.menuCatalogCache.get(cacheKey);
+    const now = Date.now();
+
+    if (cachedEntry && cachedEntry.expiresAt > now) {
+      return cachedEntry.value;
+    }
+
+    const { data: menuItems, error: menuItemsError } = await supabase
+      .from('menu_items')
+      .select('id, name, price, category_id, tags')
+      .eq('restaurant_id', restaurantId)
+      .in('id', normalizedMenuItemIds)
+      .eq('status', 'active');
+
+    if (menuItemsError) {
+      throw menuItemsError;
+    }
+
+    const categoryIds = Array.from(
+      new Set((menuItems || []).map((item) => item.category_id).filter(Boolean))
+    );
+
+    let categoryMap = new Map();
+
+    if (categoryIds.length > 0) {
+      const { data: categories, error: categoryError } = await supabase
+        .from('menu_categories')
+        .select('id, name')
+        .eq('restaurant_id', restaurantId)
+        .in('id', categoryIds);
+
+      if (categoryError) {
+        throw categoryError;
+      }
+
+      categoryMap = new Map((categories || []).map((category) => [category.id, category.name]));
+    }
+
+    const snapshot = {
+      menuItems: menuItems || [],
+      categoryMap,
+    };
+
+    this.menuCatalogCache.set(cacheKey, {
+      value: snapshot,
+      expiresAt: now + this.MENU_CATALOG_CACHE_TTL_MS,
+    });
+
+    return snapshot;
+  }
+
+  static getDisplayOrderSequenceCacheKey(restaurantId, dateKey) {
+    return `${String(restaurantId || '').trim()}:${String(dateKey || '').trim()}`;
   }
 
   static async reserveDisplayOrderNumber(restaurantId, timezone = 'Asia/Kolkata', createdAt = new Date().toISOString()) {
     const dateKey = this.getDisplayOrderDateKey(createdAt, timezone);
+    const cacheKey = this.getDisplayOrderSequenceCacheKey(restaurantId, dateKey);
+    const cachedEntry = this.displayOrderSequenceCache.get(cacheKey);
+    const now = Date.now();
+
+    if (cachedEntry && cachedEntry.expiresAt > now) {
+      cachedEntry.nextSequence += 1;
+      return this.formatDisplayOrderNumber(dateKey, cachedEntry.nextSequence);
+    }
+
     const prefix = `ORD-${dateKey.replace(/-/g, '')}-`;
     const { data, error } = await supabase
       .from('orders')
@@ -216,7 +327,14 @@ export class OrderService {
     }
 
     const latestSequence = this.extractDisplayOrderSequence(data?.[0]?.display_order_number, dateKey);
-    return this.formatDisplayOrderNumber(dateKey, latestSequence + 1);
+    const nextSequence = latestSequence + 1;
+
+    this.displayOrderSequenceCache.set(cacheKey, {
+      nextSequence,
+      expiresAt: now + this.DISPLAY_ORDER_SEQUENCE_CACHE_TTL_MS,
+    });
+
+    return this.formatDisplayOrderNumber(dateKey, nextSequence);
   }
 
   static async assignDisplayOrderNumber(restaurantId, orderId, createdAt, timezone = 'Asia/Kolkata') {
@@ -728,45 +846,19 @@ export class OrderService {
 
     const normalizedItems = this.normalizeOrderItems(items);
     const menuItemIds = normalizedItems.map((item) => item.menuItemId).filter(Boolean);
+    const uniqueMenuItemIds = Array.from(new Set(menuItemIds));
 
     if (menuItemIds.length !== normalizedItems.length) {
       throw new Error('Each order item must include a menu item ID');
     }
 
-    const { data: menuItems, error: menuItemsError } = await supabase
-      .from('menu_items')
-      .select('id, name, price, category_id, tags')
-      .eq('restaurant_id', restaurantId)
-      .in('id', menuItemIds)
-      .eq('status', 'active');
+    const { menuItems, categoryMap } = await this.getMenuCatalogSnapshot(restaurantId, uniqueMenuItemIds);
 
-    if (menuItemsError) {
-      throw menuItemsError;
-    }
-
-    if ((menuItems || []).length !== menuItemIds.length) {
+    if ((menuItems || []).length !== uniqueMenuItemIds.length) {
       throw new Error('One or more menu items are invalid or unavailable');
     }
 
     const menuItemMap = new Map((menuItems || []).map((item) => [item.id, item]));
-    const categoryIds = Array.from(
-      new Set((menuItems || []).map((item) => item.category_id).filter(Boolean))
-    );
-    let categoryMap = new Map();
-
-    if (categoryIds.length > 0) {
-      const { data: categories, error: categoryError } = await supabase
-        .from('menu_categories')
-        .select('id, name')
-        .eq('restaurant_id', restaurantId)
-        .in('id', categoryIds);
-
-      if (categoryError) {
-        throw categoryError;
-      }
-
-      categoryMap = new Map((categories || []).map((category) => [category.id, category.name]));
-    }
 
     return normalizedItems.map((item) => {
       const menuItem = menuItemMap.get(item.menuItemId);
@@ -1272,6 +1364,41 @@ export class OrderService {
 
   // ============ ORDERS ============
 
+  static buildCreateRequestKey(restaurantId, requestId) {
+    const normalizedRestaurantId = String(restaurantId || '').trim();
+    const normalizedRequestId = this.normalizeRequestId(requestId);
+
+    if (!normalizedRestaurantId || !normalizedRequestId) {
+      return '';
+    }
+
+    return `${normalizedRestaurantId}:${normalizedRequestId}`;
+  }
+
+  static async runCreateOrderWithRequestLock(restaurantId, requestId, factory) {
+    const lockKey = this.buildCreateRequestKey(restaurantId, requestId);
+
+    if (!lockKey) {
+      return await factory();
+    }
+
+    const existingPromise = this.inFlightCreateRequests.get(lockKey);
+    if (existingPromise) {
+      return await existingPromise;
+    }
+
+    const createPromise = (async () => {
+      try {
+        return await factory();
+      } finally {
+        this.inFlightCreateRequests.delete(lockKey);
+      }
+    })();
+
+    this.inFlightCreateRequests.set(lockKey, createPromise);
+    return await createPromise;
+  }
+
   static async createOrder(restaurantId, orderData, options = {}) {
     try {
       // If restaurantId is not provided, look it up from the table
@@ -1294,10 +1421,27 @@ export class OrderService {
         throw new Error('Restaurant ID is required or table ID must be provided');
       }
 
+      const normalizedRequestId = this.normalizeRequestId(orderData.requestId || orderData.request_id);
+      if (normalizedRequestId && !options._requestLockApplied) {
+        return await this.runCreateOrderWithRequestLock(finalRestaurantId, normalizedRequestId, async () =>
+          this.createOrder(
+            finalRestaurantId,
+            {
+              ...orderData,
+              requestId: normalizedRequestId,
+              request_id: normalizedRequestId,
+            },
+            {
+              ...options,
+              _requestLockApplied: true,
+            }
+          )
+        );
+      }
+
       const normalizedOrderType = this.normalizeOrderType(orderData.orderType, orderData.tableId ? 'dine-in' : 'takeaway');
       const resolvedTableId = normalizedOrderType === 'dine-in' ? orderData.tableId : null;
       const normalizedOrderSource = this.normalizeOrderSource(orderData.orderSource || orderData.origin, orderData.origin === 'qr' ? 'qr' : 'manual');
-      const normalizedRequestId = this.normalizeRequestId(orderData.requestId || orderData.request_id);
 
       if (normalizedRequestId) {
         const { data: existingRequestedOrder, error: existingRequestedOrderError } = await supabase
@@ -1358,9 +1502,7 @@ export class OrderService {
           createdAt
         );
 
-        const insertResult = await supabase
-          .from('orders')
-          .insert([{
+          const insertPayload = {
             restaurant_id: finalRestaurantId,
             table_id: resolvedTableId,
             order_type: normalizedOrderType,
@@ -1375,9 +1517,26 @@ export class OrderService {
             notes: composeNotesWithKotMeta(orderData.notes || '', initialKotMeta),
             created_at: createdAt,
             updated_at: createdAt,
-          }])
-          .select()
-          .single();
+          };
+
+          let insertResult = await supabase
+            .from('orders')
+            .insert([insertPayload])
+            .select(
+              'id, restaurant_id, table_id, order_type, status, total_amount, final_amount, display_order_number, request_id, payment_method, payment_status, order_source, notes, created_at, updated_at'
+            )
+            .single();
+
+          if (insertResult.error && this.isMissingColumnError(insertResult.error, 'final_amount')) {
+            const { final_amount, ...legacyInsertPayload } = insertPayload;
+            insertResult = await supabase
+              .from('orders')
+              .insert([legacyInsertPayload])
+              .select(
+                'id, restaurant_id, table_id, order_type, status, total_amount, display_order_number, request_id, payment_method, payment_status, order_source, notes, created_at, updated_at'
+              )
+              .single();
+          }
 
         order = insertResult.data;
         error = insertResult.error;
@@ -1427,8 +1586,9 @@ export class OrderService {
         }
       }
 
-      // Fetch and return the complete order with items
-      const completeOrder = await this.getOrderById(finalRestaurantId, order.id);
+      const completeOrder = this.buildCreatedOrderResponse(order, normalizedItems, {
+        tableNumber: normalizedOrderType === 'dine-in' ? (orderData.tableNumber || null) : null,
+      });
 
       if (resolvedTableId) {
         await TableService.syncTableLifecycle(finalRestaurantId, resolvedTableId);
@@ -1445,7 +1605,7 @@ export class OrderService {
     }
   }
 
-  static async addOrderItems(orderId, items) {
+  static async addOrderItems(orderId, items, options = {}) {
     try {
       const itemsToInsert = items.map(item => ({
         order_id: orderId,
@@ -1456,10 +1616,15 @@ export class OrderService {
         kot_id: item.kotId || null,
       }));
 
-      const { data: orderItems, error } = await supabase
+      let query = supabase
         .from('order_items')
-        .insert(itemsToInsert)
-        .select();
+        .insert(itemsToInsert);
+
+      if (options.selectResult) {
+        query = query.select();
+      }
+
+      const { data: orderItems, error } = await query;
 
       if (error) throw error;
 
@@ -1469,6 +1634,39 @@ export class OrderService {
       logger.error('❌ Add order items error:', error);
       throw error;
     }
+  }
+
+  static buildCreatedOrderResponse(order, items = [], context = {}) {
+    const normalizedItems = Array.isArray(items) ? items : [];
+    const rawOrder = {
+      ...order,
+      order_items: normalizedItems.map((item) => ({
+        id: item.menuItemId,
+        menu_item_id: item.menuItemId,
+        quantity: item.quantity,
+        unit_price: item.unitPrice ?? item.price ?? 0,
+        sent_to_kitchen: Boolean(item.sentToKitchen),
+        kot_id: item.kotId || null,
+        menu_items: {
+          name: item.name || '',
+          preparation_time: item.preparationTime || 15,
+        },
+      })),
+      tables: context.tableNumber ? { table_number: context.tableNumber } : null,
+    };
+
+    const transformedOrder = {
+      ...this.transformOrder(rawOrder),
+      tableNumber: context.tableNumber || null,
+      table: rawOrder.tables || null,
+      serialNumber: null,
+      displayOrderNumber:
+        order.display_order_number ||
+        order.displayOrderNumber ||
+        this.buildFallbackDisplayOrderNumber(order.id),
+    };
+
+    return transformedOrder;
   }
 
   static async fetchOrderRecord(restaurantId, orderId) {
