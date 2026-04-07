@@ -7,7 +7,8 @@ import {
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useApi } from '../hooks/useApi';
-import { API_BASE_URL, getCurrentPortalAccessToken } from '../services/api';
+import { getCurrentPortalAccessToken } from '../services/api';
+import { subscribeToOrderEvents } from '../utils/liveOrderEvents';
 import { inventoryAPI, orderAPI, restaurantAPI, tableAPI } from '../services/apiEndpoints';
 import { useManagerStore } from '../context/managerStore';
 import { formatDate } from '../utils/formatters';
@@ -337,33 +338,18 @@ export default function Notifications() {
 
   useEffect(() => {
     const accessToken = getCurrentPortalAccessToken();
-    if (!accessToken || typeof window.EventSource !== 'function') {
+    if (!accessToken) {
       return undefined;
     }
 
-    const streamUrl = new URL(`${API_BASE_URL}/v1/orders/events/stream`);
-    streamUrl.searchParams.set('accessToken', accessToken);
-
-    const eventSource = new window.EventSource(streamUrl.toString());
-
-    const handleNotification = (event) => {
-      try {
-        const payload = JSON.parse(event.data || '{}');
+    return subscribeToOrderEvents(
+      (payload) => {
         if (payload?.type === 'order.discount_approved') {
           refetchOrders();
         }
-      } catch {
-        refetchOrders();
-      }
-    };
-
-    eventSource.addEventListener('notification', handleNotification);
-    eventSource.addEventListener('error', () => {});
-
-    return () => {
-      eventSource.removeEventListener('notification', handleNotification);
-      eventSource.close();
-    };
+      },
+      { eventName: 'notification' }
+    );
   }, [refetchOrders]);
 
   return (

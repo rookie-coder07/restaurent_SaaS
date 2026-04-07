@@ -5,6 +5,10 @@ export function normalizePortalRole(role) {
     return 'owner';
   }
 
+  if (normalizedRole === 'super_admin') {
+    return 'developer';
+  }
+
   if (normalizedRole === 'waiter' || normalizedRole === 'cashier') {
     return 'staff';
   }
@@ -17,7 +21,7 @@ export function normalizePortalRole(role) {
 }
 
 export const PORTAL_ACCESS = {
-  admin: ['owner', 'manager'],
+  admin: ['owner', 'manager', 'developer'],
   pos: ['staff'],
   kot: ['kitchen_staff'],
 };
@@ -61,6 +65,10 @@ export function getDefaultPortalPath(role) {
     return '/manager';
   }
 
+  if (normalizedRole === 'developer') {
+    return '/developer';
+  }
+
   if (normalizedRole === 'owner') {
     return PORTAL_HOME.admin;
   }
@@ -75,6 +83,10 @@ export function getLoginPathForPathname(pathname = '') {
 
   if (pathname.startsWith('/manager')) {
     return PORTAL_LOGIN.admin;
+  }
+
+  if (pathname.startsWith('/developer')) {
+    return '/developer/login';
   }
 
   if (pathname.startsWith('/pos')) {
@@ -99,6 +111,10 @@ export function resolvePortalHome(portal, role) {
 
   if (portal === 'admin' && normalizedRole === 'manager') {
     return '/manager';
+  }
+
+  if (portal === 'admin' && normalizedRole === 'developer') {
+    return '/developer';
   }
 
   if (portal === 'admin' && normalizedRole === 'owner') {

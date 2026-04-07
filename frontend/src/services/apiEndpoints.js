@@ -122,3 +122,18 @@ export const customerAPI = {
   }),
   getOrderByTable: (tableNumber) => api.get(`/v1/customer/orders/table/${tableNumber}`),
 };
+
+export const developerAPI = {
+  getDashboard: () => api.get('/v1/developer/dashboard'),
+  getRestaurants: () => api.get('/v1/developer/restaurants'),
+  updateRestaurantAccess: (restaurantId, data) => api.patch(`/v1/developer/restaurants/${restaurantId}/access`, data),
+  getUsers: (params) => api.get('/v1/developer/users', { params }),
+  updateUserStatus: (userId, data) => api.patch(`/v1/developer/users/${userId}/status`, data),
+  resetUserPassword: (userId, data) => api.post(`/v1/developer/users/${userId}/reset-password`, data),
+  getSystemSettings: () => api.get('/v1/developer/settings'),
+  updateMaintenance: (data) => api.put('/v1/developer/settings/maintenance', data),
+  updateFeatureFlag: (data) => api.put('/v1/developer/feature-flags', data),
+  getAuditLogs: (params) => api.get('/v1/developer/audit-logs', { params }),
+  getHealth: () => api.get('/v1/developer/health'),
+  createBroadcast: (data) => api.post('/v1/developer/broadcasts', data),
+};

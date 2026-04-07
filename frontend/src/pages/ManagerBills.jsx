@@ -707,6 +707,14 @@ export default function ManagerBills() {
       {success ? <Toast type="success" message={success} onClose={() => setSuccess('')} /> : null}
       {error ? <Toast type="error" message={error} onClose={() => setError('')} /> : null}
 
+      <section className="rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card)] px-4 py-4 shadow-[var(--shadow-card)]">
+        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--text-secondary)]">Billing Control</p>
+        <h1 className="mt-2 text-2xl font-black text-[var(--text-primary)]">Track live bills, unpaid tables, and manager-approved discounts</h1>
+        <p className="mt-2 text-sm text-[var(--text-secondary)]">
+          Confirm payments manually, keep payment status consistent, and print bills only after the order data is safely settled.
+        </p>
+      </section>
+
       <div className="grid gap-4 md:grid-cols-3">
         <Card className="p-5">
           <p className="text-sm text-[var(--text-secondary)]">All bills</p>

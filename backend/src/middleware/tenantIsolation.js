@@ -8,6 +8,16 @@ export const tenantIsolation = (req, res, next) => {
       return sendError(res, 401, 'Unauthorized');
     }
 
+    if (normalizeRole(req.user.role) === 'developer') {
+      req.restaurantId =
+        req.headers['x-restaurant-id'] ||
+        req.body?.restaurantId ||
+        req.params?.restaurantId ||
+        req.query?.restaurantId ||
+        null;
+      return next();
+    }
+
     req.restaurantId = req.user.restaurantId;
 
     if (!req.restaurantId) {
@@ -91,6 +101,7 @@ export const requireRole = (allowedRoles = []) => {
 };
 
 export const requireAdminAccess = () => requireRole(['owner']);
+export const requireDeveloperAccess = () => requireRole(['developer']);
 
 export const requireBillingRole = () => {
   return (req, res, next) => {

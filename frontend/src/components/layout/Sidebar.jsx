@@ -45,6 +45,14 @@ const managerMenuItems = [
   { icon: Palette, label: 'Settings', href: '/manager/settings', roles: ['manager'] },
 ];
 
+const developerMenuItems = [
+  { icon: BarChart3, label: 'Overview', href: '/developer', roles: ['developer'] },
+  { icon: TableProperties, label: 'Restaurants', href: '/developer/restaurants', roles: ['developer'] },
+  { icon: Users, label: 'Users', href: '/developer/users', roles: ['developer'] },
+  { icon: Palette, label: 'System', href: '/developer/system', roles: ['developer'] },
+  { icon: ClipboardList, label: 'Audit Logs', href: '/developer/audit', roles: ['developer'] },
+];
+
 const posMenuItems = [
   { icon: Receipt, label: 'Billing', href: '/pos', roles: ['staff'] },
   { icon: ListOrdered, label: 'Orders', href: '/pos/orders', roles: ['staff'] },
@@ -69,13 +77,14 @@ export default function Sidebar({ isOpen, onClose }) {
   const isPosPortal = location.pathname.startsWith('/pos');
   const isKotPortal = location.pathname.startsWith('/kot') || location.pathname.startsWith('/kitchen');
   const isManagerPortal = location.pathname.startsWith('/manager');
-  const workspaceItems = isKotPortal ? kotMenuItems : isPosPortal ? posMenuItems : isManagerPortal ? managerMenuItems : ownerMenuItems;
+  const isDeveloperPortal = location.pathname.startsWith('/developer');
+  const workspaceItems = isKotPortal ? kotMenuItems : isPosPortal ? posMenuItems : isDeveloperPortal ? developerMenuItems : isManagerPortal ? managerMenuItems : ownerMenuItems;
   const filteredMenuItems = workspaceItems.filter((item) => item.roles.includes(activeRole));
   const isActivePath = (href) => location.pathname === href || location.pathname.startsWith(`${href}/`);
-  const homePath = isKotPortal ? '/kot' : isPosPortal ? '/pos' : isManagerPortal ? '/manager' : '/admin';
-  const portal = isKotPortal ? 'kot' : isPosPortal ? 'pos' : isManagerPortal ? 'manager' : 'admin';
-  const workspaceLabel = isKotPortal ? 'KOT Portal' : isPosPortal ? 'POS Portal' : isManagerPortal ? 'Manager Portal' : 'Admin Portal';
-  const navLabel = isKotPortal ? 'Kitchen' : isPosPortal ? 'POS Navigation' : isManagerPortal ? 'Operations' : 'Admin';
+  const homePath = isKotPortal ? '/kot' : isPosPortal ? '/pos' : isDeveloperPortal ? '/developer' : isManagerPortal ? '/manager' : '/admin';
+  const portal = isKotPortal ? 'kot' : isPosPortal ? 'pos' : 'admin';
+  const workspaceLabel = isKotPortal ? 'KOT Portal' : isPosPortal ? 'POS Portal' : isDeveloperPortal ? 'Developer Console' : isManagerPortal ? 'Manager Portal' : 'Admin Portal';
+  const navLabel = isKotPortal ? 'Kitchen' : isPosPortal ? 'POS Navigation' : isDeveloperPortal ? 'Platform' : isManagerPortal ? 'Operations' : 'Admin';
 
   return (
     <>

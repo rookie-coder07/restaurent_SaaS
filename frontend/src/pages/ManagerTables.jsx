@@ -258,6 +258,14 @@ export default function ManagerTables() {
       {success ? <Toast type="success" message={success} /> : null}
       {error ? <Toast type="error" message={error} /> : null}
 
+      <section className="rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card)] px-4 py-4 shadow-[var(--shadow-card)]">
+        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--text-secondary)]">Table Control</p>
+        <h1 className="mt-2 text-2xl font-black text-[var(--text-primary)]">Open, close, assign, transfer, and merge tables</h1>
+        <p className="mt-2 text-sm text-[var(--text-secondary)]">
+          Manage live floor activity, waiter ownership, and QR-protected tables without breaking the running order flow.
+        </p>
+      </section>
+
       <div className="grid gap-4 sm:grid-cols-3">
         <Card className="p-5"><p className="text-sm text-[var(--text-secondary)]">Free tables</p><p className="mt-2 text-3xl font-bold text-emerald-400">{freeTables}</p></Card>
         <Card className="p-5"><p className="text-sm text-[var(--text-secondary)]">Occupied tables</p><p className="mt-2 text-3xl font-bold text-amber-400">{occupiedTables}</p></Card>

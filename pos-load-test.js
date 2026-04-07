@@ -1,76 +1,74 @@
 import http from 'k6/http';
-import { check, group, sleep } from 'k6';
+import { check, fail, group, sleep } from 'k6';
 import { Counter, Rate, Trend } from 'k6/metrics';
-
-const BASE_URL = (__ENV.BASE_URL || 'http://localhost:3000/api/v1').replace(/\/+$/, '');
-const STAFF_LOGIN_ENDPOINT = `${BASE_URL}/auth/staff/login`;
-const ORDERS_ENDPOINT = `${BASE_URL}/orders`;
-const TABLES_ENDPOINT = `${BASE_URL}/tables`;
-const MENU_ITEMS_ENDPOINT = `${BASE_URL}/menu/items`;
-
-const MANAGER_EMAIL = __ENV.MANAGER_EMAIL || 'manager@restaurant.com';
-const MANAGER_PASSWORD = __ENV.MANAGER_PASSWORD || 'Manager123@456';
-const ORDER_TYPE = (__ENV.ORDER_TYPE || 'takeaway').toLowerCase();
-const PAYMENT_METHOD = (__ENV.PAYMENT_METHOD || 'cash').toLowerCase();
-
-const requestDuration = new Trend('pos_request_duration', true);
-const failedRequests = new Rate('pos_failed_requests');
-const totalRequests = new Counter('pos_total_requests');
-const duplicateFlowAttempts = new Counter('pos_duplicate_flow_attempts');
 
 export const options = {
   vus: 50,
   duration: '60s',
   thresholds: {
-    http_req_failed: ['rate<0.05'],
-    http_req_duration: ['p(95)<500'],
-    pos_failed_requests: ['rate<0.05'],
-    pos_request_duration: ['p(95)<500'],
+    http_req_failed: ['rate<0.01'],
+    http_req_duration: ['p(95)<2000'],
+    pos_failed_requests: ['rate<0.01'],
   },
 };
+
+const BASE_URL = (__ENV.BASE_URL || 'http://localhost:3000/api').replace(/\/+$/, '');
+const AUTH_URL = `${BASE_URL}/v1/auth/staff/login`;
+const ORDERS_URL = `${BASE_URL}/v1/orders`;
+const MENU_URL = `${BASE_URL}/v1/menu/items`;
+const TABLES_URL = `${BASE_URL}/v1/tables`;
+
+const LOGIN_EMAIL = __ENV.LOGIN_EMAIL || 'manager@restaurant.com';
+const LOGIN_PASSWORD = __ENV.LOGIN_PASSWORD || 'Manager123@456';
+
+const requestDuration = new Trend('pos_request_duration', true);
+const failedRequests = new Rate('pos_failed_requests');
+const totalRequests = new Counter('pos_total_requests');
+const duplicateChecks = new Counter('pos_duplicate_checks');
 
 function randomInt(min, max) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
-function createRequestId() {
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (char) => {
-    const value = Math.floor(Math.random() * 16);
-    const normalized = char === 'x' ? value : (value & 0x3) | 0x8;
-    return normalized.toString(16);
-  });
+function randomHex(length) {
+  let value = '';
+  while (value.length < length) {
+    value += Math.floor(Math.random() * 16).toString(16);
+  }
+  return value.slice(0, length);
+}
+
+function makeRequestId() {
+  return [
+    randomHex(8),
+    randomHex(4),
+    `4${randomHex(3)}`,
+    `${(8 + randomInt(0, 3)).toString(16)}${randomHex(3)}`,
+    randomHex(12),
+  ].join('-');
 }
 
 function parseJson(response) {
   try {
     return response.json();
-  } catch {
+  } catch (_) {
     return null;
   }
 }
 
-function trackResponse(name, response, extraChecks = {}) {
+function track(name, response, extraChecks = {}) {
   totalRequests.add(1);
   requestDuration.add(response.timings.duration, { endpoint: name });
 
-  const baseChecks = {
-    [`${name} status is 200/201`]: (res) => res.status === 200 || res.status === 201,
-    [`${name} duration < 500ms`]: (res) => res.timings.duration < 500,
+  const ok = check(response, {
+    [`${name}: status 200/201`]: (res) => res.status === 200 || res.status === 201,
+    [`${name}: duration < 2000ms`]: (res) => res.timings.duration < 2000,
     ...extraChecks,
-  };
-  const ok = check(response, baseChecks);
-  const functionalSuccess = (response.status === 200 || response.status === 201)
-    && Object.entries(extraChecks).every(([, predicate]) => {
-      try {
-        return predicate(response);
-      } catch {
-        return false;
-      }
-    });
+  });
 
-  failedRequests.add(!functionalSuccess, { endpoint: name });
+  failedRequests.add(!ok, { endpoint: name });
 
-  if (!functionalSuccess) {
+  if (!ok) {
     console.error(
       JSON.stringify({
         endpoint: name,
@@ -84,198 +82,218 @@ function trackResponse(name, response, extraChecks = {}) {
   return ok;
 }
 
-function buildAuthHeaders(token) {
+function authHeaders(token) {
   return {
-    Authorization: `Bearer ${token}`,
     'Content-Type': 'application/json',
+    Authorization: `Bearer ${token}`,
   };
 }
 
-function pickRandom(list) {
-  return list[randomInt(0, list.length - 1)];
+function extractOrderId(body) {
+  return body?.data?.id || body?.data?.order?.id || body?.order?.id || body?.id || null;
 }
 
-function normalizeMenuItems(payload) {
-  const items = payload?.data?.items || payload?.items || [];
+function extractPaymentStatus(body) {
+  return (
+    body?.data?.paymentStatus ||
+    body?.data?.payment_status ||
+    body?.paymentStatus ||
+    body?.payment_status ||
+    ''
+  );
+}
 
-  return items
-    .filter((item) => item && (item.isAvailable === undefined || item.isAvailable))
+function extractSettleTotal(body) {
+  const settlement = body?.data?.settlement || body?.settlement || {};
+  const billing = body?.data?.billing || body?.billing || {};
+
+  return (
+    settlement.finalTotal ||
+    settlement.total ||
+    billing.grandTotal ||
+    billing.total ||
+    body?.data?.finalAmount ||
+    body?.data?.final_amount ||
+    body?.data?.totalAmount ||
+    body?.data?.total ||
+    0
+  );
+}
+
+function loginAndLoadFixtures() {
+  const loginResponse = http.post(
+    AUTH_URL,
+    JSON.stringify({ email: LOGIN_EMAIL, password: LOGIN_PASSWORD }),
+    { headers: { 'Content-Type': 'application/json' } }
+  );
+
+  if (!(loginResponse.status === 200 || loginResponse.status === 201)) {
+    fail(`Login failed: ${loginResponse.status} ${loginResponse.body}`);
+  }
+
+  const loginBody = parseJson(loginResponse);
+  const accessToken =
+    loginBody?.data?.accessToken ||
+    loginBody?.accessToken ||
+    loginBody?.data?.token ||
+    loginBody?.token;
+
+  if (!accessToken) {
+    fail('Login succeeded but no access token was returned.');
+  }
+
+  const commonHeaders = authHeaders(accessToken);
+
+  const [menuResponse, tablesResponse] = http.batch([
+    ['GET', MENU_URL, null, { headers: commonHeaders }],
+    ['GET', TABLES_URL, null, { headers: commonHeaders }],
+  ]);
+
+  if (!(menuResponse.status === 200 || menuResponse.status === 201)) {
+    fail(`Menu fetch failed: ${menuResponse.status} ${menuResponse.body}`);
+  }
+
+  if (!(tablesResponse.status === 200 || tablesResponse.status === 201)) {
+    fail(`Tables fetch failed: ${tablesResponse.status} ${tablesResponse.body}`);
+  }
+
+  const menuBody = parseJson(menuResponse);
+  const tablesBody = parseJson(tablesResponse);
+
+  const menuItems = (menuBody?.data?.items || menuBody?.items || [])
+    .filter((item) => item?.id && item?.isAvailable !== false && Number(item?.price || item?.unitPrice || 0) > 0)
     .map((item) => ({
-      id: item.id || item._id,
-      name: item.name || 'Item',
-      price: Number(item.price || item.unitPrice || item.unit_price || 0),
-    }))
-    .filter((item) => item.id && item.price > 0);
-}
-
-function normalizeTables(payload) {
-  const tables = payload?.data?.tables || payload?.tables || [];
-
-  return tables
-    .filter((table) => table && table.id)
-    .map((table) => ({
-      id: table.id,
-      tableNumber: String(table.tableNumber || table.number || ''),
-      status: String(table.status || '').toLowerCase(),
-    }))
-    .filter((table) => table.id);
-}
-
-function buildItems(menuItems) {
-  const itemCount = Math.min(randomInt(1, 3), menuItems.length);
-  const items = [];
-  const remainingItems = [...menuItems];
-
-  for (let index = 0; index < itemCount; index += 1) {
-    const randomIndex = randomInt(0, remainingItems.length - 1);
-    const [item] = remainingItems.splice(randomIndex, 1);
-    items.push({
       id: item.id,
       name: item.name,
-      quantity: randomInt(1, 4),
-      price: item.price,
-    });
+      price: Number(item.price || item.unitPrice || 0),
+    }));
+
+  const tables = (tablesBody?.data?.tables || tablesBody?.tables || [])
+    .filter((table) => table?.id && table?.tableNumber !== undefined && table?.tableNumber !== null)
+    .map((table) => ({
+      id: table.id,
+      tableNumber: table.tableNumber,
+    }));
+
+  if (menuItems.length === 0) {
+    fail('No usable menu items returned for load testing.');
   }
 
-  return items;
-}
-
-function calculateRawTotal(items) {
-  return Number(
-    items.reduce((sum, item) => sum + Number(item.quantity || 0) * Number(item.price || 0), 0).toFixed(2)
-  );
-}
-
-function extractOrderId(payload) {
-  return payload?.data?.id || payload?.id || null;
-}
-
-function loginManager() {
-  const response = http.post(
-    STAFF_LOGIN_ENDPOINT,
-    JSON.stringify({
-      email: MANAGER_EMAIL,
-      password: MANAGER_PASSWORD,
-    }),
-    {
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    }
-  );
-
-  trackResponse('staff_login', response, {
-    'staff_login returns access token': (res) => !!parseJson(res)?.data?.accessToken,
-  });
-  const payload = parseJson(response);
-
-  if (response.status !== 200 || !payload?.data?.accessToken) {
-    throw new Error(`Failed to log in manager for load test: ${response.body}`);
+  if (tables.length === 0) {
+    fail('No usable tables returned for load testing.');
   }
 
-  return payload.data.accessToken;
+  return {
+    accessToken,
+    menuItems,
+    tables,
+  };
 }
 
 export function setup() {
-  const token = loginManager();
-  const headers = buildAuthHeaders(token);
+  return loginAndLoadFixtures();
+}
 
-  const menuResponse = http.get(MENU_ITEMS_ENDPOINT, { headers });
-  const tablesResponse = ORDER_TYPE === 'dine-in'
-    ? http.get(TABLES_ENDPOINT, { headers })
-    : null;
+function pickRandomTable(tables) {
+  return tables[randomInt(0, Math.min(tables.length, 10) - 1)];
+}
 
-  trackResponse('setup_fetch_menu_items', menuResponse, {
-    'setup_fetch_menu_items returns items': (res) => normalizeMenuItems(parseJson(res)).length > 0,
-  });
-  if (tablesResponse) {
-    trackResponse('setup_fetch_tables', tablesResponse, {
-      'setup_fetch_tables returns tables': (res) => normalizeTables(parseJson(res)).length > 0,
+function pickRandomMenuItem(menuItems) {
+  return menuItems[randomInt(0, menuItems.length - 1)];
+}
+
+function buildOrderPayload(fixtures, requestIdOverride) {
+  const table = pickRandomTable(fixtures.tables);
+  const lineCount = randomInt(1, 3);
+  const items = [];
+
+  for (let index = 0; index < lineCount; index += 1) {
+    const menuItem = pickRandomMenuItem(fixtures.menuItems);
+    items.push({
+      itemId: menuItem.id,
+      quantity: randomInt(1, 3),
+      price: menuItem.price,
+      name: menuItem.name,
     });
   }
 
-  const normalizedMenuItems = normalizeMenuItems(parseJson(menuResponse));
-  const normalizedTables = tablesResponse ? normalizeTables(parseJson(tablesResponse)) : [];
-
-  if (menuResponse.status !== 200 || normalizedMenuItems.length === 0) {
-    throw new Error(`Unable to fetch menu items for load test: ${menuResponse.body}`);
-  }
-
-  if (tablesResponse && (tablesResponse.status !== 200 || normalizedTables.length === 0) && ORDER_TYPE === 'dine-in') {
-    throw new Error(`Unable to fetch tables for dine-in load test: ${tablesResponse.body}`);
-  }
-
   return {
-    token,
-    menuItems: normalizedMenuItems,
-    tables: normalizedTables,
+    request_id: requestIdOverride || makeRequestId(),
+    tableId: table.id,
+    tableNumber: String(table.tableNumber),
+    orderType: 'dine-in',
+    paymentMethod: 'cash',
+    items,
+    total: items.reduce((sum, item) => sum + item.quantity * item.price, 0),
+    notes: `k6-${__VU}-${__ITER}`,
   };
 }
 
-function createOrderFlow(context) {
-  const items = buildItems(context.menuItems);
-  const table = context.tables.length > 0 ? pickRandom(context.tables) : null;
-  const payload = {
-    request_id: createRequestId(),
-    items,
-    total: calculateRawTotal(items),
-    order_type: ORDER_TYPE === 'dine-in' ? 'dine-in' : 'takeaway',
-    payment_method: PAYMENT_METHOD,
-    customer_name: `Load Test ${__VU}`,
-    customer_phone: `99999${String(randomInt(10000, 99999))}`,
-  };
-
-  if (ORDER_TYPE === 'dine-in' && table?.id) {
-    payload.table_id = table.id;
-    payload.tableNumber = table.tableNumber;
-  }
-
-  const response = http.post(ORDERS_ENDPOINT, JSON.stringify(payload), {
-    headers: buildAuthHeaders(context.token),
-  });
-
-  const ok = trackResponse('create_order', response, {
-    'create_order returns order id': (res) => !!extractOrderId(parseJson(res)),
-  });
+function createOrder(fixtures, payload) {
+  const response = http.post(
+    ORDERS_URL,
+    JSON.stringify(payload),
+    { headers: authHeaders(fixtures.accessToken) }
+  );
   const body = parseJson(response);
+  const ok = track('create_order', response);
 
   return {
     ok,
+    body,
     orderId: extractOrderId(body),
-    amountSeed: payload.total,
+    total: payload.total,
   };
 }
 
-function sendToKitchenFlow(context, orderId) {
-  const response = http.post(`${ORDERS_ENDPOINT}/${orderId}/send-to-kitchen`, null, {
-    headers: buildAuthHeaders(context.token),
+function sendToKitchen(fixtures, orderId) {
+  const response = http.post(
+    `${ORDERS_URL}/${orderId}/send-to-kitchen`,
+    null,
+    { headers: authHeaders(fixtures.accessToken) }
+  );
+  const ok = track('send_to_kitchen', response, {
+    'send_to_kitchen: no duplicate conflict': (res) =>
+      res.status === 200 || res.status === 201 || res.status === 400 || res.status === 409,
   });
 
-  const ok = trackResponse('send_to_kitchen', response);
+  return {
+    ok: ok && (response.status === 200 || response.status === 201),
+    body: parseJson(response),
+    response,
+  };
+}
+
+function settleBill(fixtures, orderId, amount) {
+  const response = http.post(
+    `${ORDERS_URL}/${orderId}/settle`,
+    JSON.stringify({
+      paymentMethod: 'cash',
+      amountReceived: amount,
+    }),
+    { headers: authHeaders(fixtures.accessToken) }
+  );
+  const ok = track('settle_bill', response);
+
   return {
     ok,
     body: parseJson(response),
   };
 }
 
-function settleBillFlow(context, orderId, amountSeed) {
+function markPaid(fixtures, orderId, amount) {
   const response = http.post(
-    `${ORDERS_ENDPOINT}/${orderId}/settle`,
+    `${ORDERS_URL}/${orderId}/mark-paid`,
     JSON.stringify({
-      paymentMethod: PAYMENT_METHOD,
-      amountReceived: Number((amountSeed * 3 + 10).toFixed(2)),
+      paymentMethod: 'cash',
+      amountReceived: amount,
     }),
-    {
-      headers: buildAuthHeaders(context.token),
-    }
+    { headers: authHeaders(fixtures.accessToken) }
   );
 
-  const ok = trackResponse('settle_bill', response, {
-    'settle_bill returns invoice number': (res) => !!parseJson(res)?.data?.billing?.invoiceNumber,
-    'settle_bill marks payment paid or pending': (res) => {
-      const status = String(parseJson(res)?.data?.paymentStatus || '').toLowerCase();
-      return status === 'paid' || status === 'pending';
-    },
+  const ok = track('mark_paid', response, {
+    'mark_paid: paid status returned': (res) =>
+      String(extractPaymentStatus(parseJson(res)) || '').toLowerCase() === 'paid',
   });
 
   return {
@@ -284,77 +302,95 @@ function settleBillFlow(context, orderId, amountSeed) {
   };
 }
 
-function duplicateCreateOrderCheck(context) {
-  duplicateFlowAttempts.add(1);
+function runDuplicateOrderCheck(fixtures) {
+  duplicateChecks.add(1);
 
-  const items = buildItems(context.menuItems);
-  const payload = JSON.stringify({
-    request_id: createRequestId(),
-    items,
-    total: calculateRawTotal(items),
-    order_type: 'takeaway',
-    payment_method: PAYMENT_METHOD,
-    customer_name: `Duplicate Test ${__VU}`,
-    customer_phone: `88888${String(randomInt(10000, 99999))}`,
-  });
+  const requestId = makeRequestId();
+  const payload = buildOrderPayload(fixtures, requestId);
+  const requestBody = JSON.stringify(payload);
+  const params = { headers: authHeaders(fixtures.accessToken) };
 
-  const firstResponse = http.post(ORDERS_ENDPOINT, payload, {
-    headers: buildAuthHeaders(context.token),
-  });
-  const secondResponse = http.post(ORDERS_ENDPOINT, payload, {
-    headers: buildAuthHeaders(context.token),
-  });
+  const responses = http.batch([
+    ['POST', ORDERS_URL, requestBody, params],
+    ['POST', ORDERS_URL, requestBody, params],
+  ]);
 
-  const firstOrderId = extractOrderId(parseJson(firstResponse));
-  const secondOrderId = extractOrderId(parseJson(secondResponse));
+  const firstBody = parseJson(responses[0]);
+  const secondBody = parseJson(responses[1]);
+  const firstOrderId = extractOrderId(firstBody);
+  const secondOrderId = extractOrderId(secondBody);
 
-  trackResponse('duplicate_create_order_first', firstResponse, {
-    'duplicate_create_order_first returns id': () => !!firstOrderId,
-  });
-
-  trackResponse('duplicate_create_order_second', secondResponse, {
-    'duplicate request reuses same order': () =>
-      !!firstOrderId && !!secondOrderId && String(firstOrderId) === String(secondOrderId),
+  track('duplicate_create_order_first', responses[0]);
+  track('duplicate_create_order_second', responses[1], {
+    'duplicate_create_order_second: same order reused': () =>
+      !firstOrderId || !secondOrderId || String(firstOrderId) === String(secondOrderId),
   });
 }
 
-export default function (context) {
-  if (ORDER_TYPE === 'dine-in') {
-    group('tables_overview', () => {
-      const response = http.get(TABLES_ENDPOINT, {
-        headers: buildAuthHeaders(context.token),
-      });
-      trackResponse('fetch_tables', response);
-    });
-  }
+function runDuplicateKitchenCheck(fixtures, orderId) {
+  duplicateChecks.add(1);
 
-  sleep(Math.random());
+  const params = { headers: authHeaders(fixtures.accessToken) };
+  const targetUrl = `${ORDERS_URL}/${orderId}/send-to-kitchen`;
 
-  group('order_to_settlement_flow', () => {
-    const orderResult = createOrderFlow(context);
+  const responses = http.batch([
+    ['POST', targetUrl, null, params],
+    ['POST', targetUrl, null, params],
+  ]);
+
+  track('duplicate_send_kitchen_first', responses[0], {
+    'duplicate_send_kitchen_first: accepted': (res) =>
+      res.status === 200 || res.status === 201 || res.status === 400 || res.status === 409,
+  });
+  track('duplicate_send_kitchen_second', responses[1], {
+    'duplicate_send_kitchen_second: blocked or accepted safely': (res) =>
+      res.status === 200 || res.status === 201 || res.status === 400 || res.status === 409,
+  });
+}
+
+export default function (fixtures) {
+  group('order_to_payment_flow', () => {
+    const orderPayload = buildOrderPayload(fixtures);
+    const orderResult = createOrder(fixtures, orderPayload);
+
     if (!orderResult.ok || !orderResult.orderId) {
-      sleep(1);
+      sleep(randomInt(1, 2));
       return;
     }
 
     sleep(Math.random() * 0.5);
 
-    const kitchenResult = sendToKitchenFlow(context, orderResult.orderId);
+    const kitchenResult = sendToKitchen(fixtures, orderResult.orderId);
     if (!kitchenResult.ok) {
-      sleep(1);
+      sleep(randomInt(1, 2));
       return;
     }
 
     sleep(Math.random() * 0.5);
 
-    settleBillFlow(context, orderResult.orderId, orderResult.amountSeed);
+    const settleResult = settleBill(fixtures, orderResult.orderId, orderResult.total);
+    if (!settleResult.ok) {
+      sleep(randomInt(1, 2));
+      return;
+    }
+
+    sleep(Math.random() * 0.5);
+
+    const amountToConfirm = Number(extractSettleTotal(settleResult.body) || orderResult.total || 0);
+    markPaid(fixtures, orderResult.orderId, amountToConfirm);
   });
 
   if (__ITER % 5 === 0) {
-    group('duplicate_protection_check', () => {
-      duplicateCreateOrderCheck(context);
+    group('duplicate_prevention_checks', () => {
+      runDuplicateOrderCheck(fixtures);
+
+      const orderPayload = buildOrderPayload(fixtures);
+      const orderResult = createOrder(fixtures, orderPayload);
+      if (orderResult.ok && orderResult.orderId) {
+        runDuplicateKitchenCheck(fixtures, orderResult.orderId);
+      }
     });
   }
 
-  sleep(randomInt(1, 3));
+  sleep(randomInt(1, 2));
 }

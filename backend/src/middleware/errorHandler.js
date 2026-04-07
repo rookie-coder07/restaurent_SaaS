@@ -117,6 +117,19 @@ export const errorHandler = (err, req, res, next) => {
   }
 
   if (
+    String(err?.message || '').includes('system_settings') ||
+    String(err?.message || '').includes('feature_flags') ||
+    String(err?.message || '').includes('audit_logs') ||
+    String(err?.message || '').includes('broadcast_notifications')
+  ) {
+    return sendError(
+      res,
+      500,
+      'Your database is missing the developer console tables. Apply backend/src/config/migrations/2026-04-07-add-developer-console.sql and restart the backend.'
+    );
+  }
+
+  if (
     String(err?.message || '').includes('orders.request_id') ||
     String(err?.message || '').includes("Could not find the 'request_id' column of 'orders' in the schema cache")
   ) {

@@ -1,3 +1,5 @@
+import { printHtmlDocument } from './printDocument';
+
 function escapeHtml(value) {
   return String(value ?? '')
     .replaceAll('&', '&amp;')
@@ -29,11 +31,6 @@ export function printKitchenTicket(ticket, options = {}) {
   }
 
   const groupedStations = groupItemsByStation(ticket.items || []);
-  const printWindow = window.open('', '_blank', 'noopener,noreferrer,width=900,height=800');
-  if (!printWindow) {
-    return false;
-  }
-
   const title = escapeHtml(options.title || `KOT ${ticket.sequence || ''}`.trim());
   const displayOrderNumber = escapeHtml(ticket.displayOrderNumber || '');
   const tableLabel = ticket.tableNumber ? `Table ${escapeHtml(ticket.tableNumber)}` : 'Walk-in';
@@ -65,7 +62,7 @@ export function printKitchenTicket(ticket, options = {}) {
     )
     .join('');
 
-  printWindow.document.write(`
+  return printHtmlDocument(`
     <!doctype html>
     <html>
       <head>
@@ -188,9 +185,5 @@ export function printKitchenTicket(ticket, options = {}) {
         </div>
       </body>
     </html>
-  `);
-  printWindow.document.close();
-  printWindow.focus();
-  printWindow.print();
-  return true;
+  `, { title });
 }

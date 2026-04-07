@@ -80,6 +80,26 @@ const PAGE_META = {
     section: 'Settings',
     title: 'Workspace Settings',
   },
+  '/developer': {
+    section: 'Developer',
+    title: 'Platform Overview',
+  },
+  '/developer/restaurants': {
+    section: 'Restaurants',
+    title: 'Restaurant Control',
+  },
+  '/developer/users': {
+    section: 'Users',
+    title: 'User Control',
+  },
+  '/developer/system': {
+    section: 'System',
+    title: 'System Controls',
+  },
+  '/developer/audit': {
+    section: 'Audit',
+    title: 'Audit Trail',
+  },
 };
 
 export default function AdminLayout({ children }) {
@@ -100,6 +120,8 @@ export function AdminLayoutInner({ children, portal = 'admin' }) {
         title:
           portal === 'kot'
             ? 'Kitchen Operations'
+            : userRole === 'developer'
+              ? 'Developer Console'
             : userRole === 'manager'
               ? 'Restaurant Operations Center'
               : 'Restaurant Control Center',

@@ -37,6 +37,7 @@ const ManagerKitchen = lazy(() => import('./pages/ManagerKitchen'));
 const ManagerWaiters = lazy(() => import('./pages/ManagerWaiters'));
 const ManagerInventory = lazy(() => import('./pages/ManagerInventory'));
 const ManagerBills = lazy(() => import('./pages/ManagerBills'));
+const DeveloperConsole = lazy(() => import('./pages/DeveloperConsole'));
 import { useAuthStore } from './context/authStore';
 import { useManagerStore } from './context/managerStore';
 import { readPortalSession } from './utils/authStorage';
@@ -122,6 +123,7 @@ function App() {
           <Route path="/admin/login" element={withSuspense(<Login portal="admin" />)} />
           <Route path="/admin/reset-password" element={withSuspense(<ResetPassword />)} />
           <Route path="/manager/login" element={withSuspense(<Login portal="admin" initialModeKey="manager" />)} />
+          <Route path="/developer/login" element={withSuspense(<Login portal="admin" initialModeKey="developer" />)} />
           <Route path="/pos/login" element={withSuspense(<Login portal="pos" />)} />
           <Route path="/kitchen/login" element={<Navigate to="/staff/login" replace />} />
           <Route path="/kot/login" element={<Navigate to="/staff/login" replace />} />
@@ -154,6 +156,14 @@ function App() {
             <Route path="/manager/bills" element={withSuspense(<ManagerBills />)} />
             <Route path="/manager/bills/:orderId" element={withSuspense(<BillView />)} />
             <Route path="/manager/settings" element={withSuspense(<Settings />)} />
+          </Route>
+
+          <Route element={<ProtectedRoute layout={AdminLayout} allowedRoles={['developer']} portal="admin" />}>
+            <Route path="/developer" element={withSuspense(<DeveloperConsole view="overview" />)} />
+            <Route path="/developer/restaurants" element={withSuspense(<DeveloperConsole view="restaurants" />)} />
+            <Route path="/developer/users" element={withSuspense(<DeveloperConsole view="users" />)} />
+            <Route path="/developer/system" element={withSuspense(<DeveloperConsole view="system" />)} />
+            <Route path="/developer/audit" element={withSuspense(<DeveloperConsole view="audit" />)} />
           </Route>
 
           <Route element={<ProtectedRoute layout={PosLayout} allowedRoles={['staff']} portal="pos" />}>

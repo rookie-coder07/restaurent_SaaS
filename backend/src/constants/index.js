@@ -1,5 +1,6 @@
 export const ROLES = {
   OWNER: 'owner',
+  DEVELOPER: 'developer',
   MANAGER: 'manager',
   STAFF: 'staff',
   KITCHEN_STAFF: 'kitchen_staff',
@@ -8,6 +9,8 @@ export const ROLES = {
 const ROLE_ALIASES = {
   admin: ROLES.OWNER,
   owner: ROLES.OWNER,
+  developer: ROLES.DEVELOPER,
+  super_admin: ROLES.DEVELOPER,
   manager: ROLES.MANAGER,
   waiter: ROLES.STAFF,
   cashier: ROLES.STAFF,
@@ -24,6 +27,16 @@ export function normalizeRole(role) {
 }
 
 export const ROLE_PERMISSIONS = {
+  developer: [
+    'developer_console',
+    'manage_restaurants',
+    'manage_users',
+    'manage_system',
+    'manage_feature_flags',
+    'manage_broadcasts',
+    'view_audit_logs',
+    'view_system_health',
+  ],
   owner: ['create_menu', 'manage_menu', 'manage_orders', 'manage_staff', 'view_staff', 'view_analytics', 'manage_restaurant', 'view_orders', 'update_order_status'],
   manager: ['manage_orders', 'manage_tables', 'manage_staff', 'view_staff', 'view_analytics', 'view_orders', 'update_order_status'],
   staff: ['view_orders', 'manage_orders'],

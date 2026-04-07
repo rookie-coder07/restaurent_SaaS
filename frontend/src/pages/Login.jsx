@@ -19,6 +19,7 @@ const PORTAL_CONFIG = {
     modes: [
       { key: 'owner', label: 'Owner', helper: 'Restaurant account login', isStaff: false },
       { key: 'manager', label: 'Manager', helper: 'Operations account login', isStaff: true },
+      { key: 'developer', label: 'Developer', helper: 'Platform control login', isStaff: true },
     ],
   },
   pos: {
@@ -36,7 +37,7 @@ export default function Login({ portal = 'admin', initialModeKey = '' }) {
   const baseConfig = PORTAL_CONFIG[portal] || PORTAL_CONFIG.admin;
   const filteredModes = initialModeKey
     ? baseConfig.modes.filter((mode) => mode.key === initialModeKey)
-    : baseConfig.modes.filter((mode) => mode.key !== 'manager');
+    : baseConfig.modes.filter((mode) => mode.key === 'owner');
   const config = {
     ...baseConfig,
     modes: filteredModes.length > 0 ? filteredModes : baseConfig.modes,
@@ -45,7 +46,7 @@ export default function Login({ portal = 'admin', initialModeKey = '' }) {
     portal === 'admin' && initialModeKey === 'manager'
       ? {
           ...config,
-          badge: 'Manager Portal',
+          badge: initialModeKey === 'developer' ? 'Developer Console' : 'Manager Portal',
         }
       : config;
 
@@ -66,7 +67,7 @@ export default function Login({ portal = 'admin', initialModeKey = '' }) {
     [config.modes, selectedModeKey]
   );
   const canResetAdminPassword = portal === 'admin' && !selectedMode?.isStaff && selectedModeKey === 'owner';
-  const canRequestManualReset = Boolean(selectedMode?.isStaff);
+  const canRequestManualReset = Boolean(selectedMode?.isStaff && selectedModeKey !== 'developer');
 
   useEffect(() => {
     setSelectedModeKey(initialModeKey || config.modes[0]?.key || 'owner');
@@ -240,6 +241,8 @@ export default function Login({ portal = 'admin', initialModeKey = '' }) {
                   placeholder={
                     selectedModeKey === 'manager'
                       ? 'manager@restaurant.com'
+                      : selectedModeKey === 'developer'
+                        ? 'developer@platform.com'
                       : selectedMode?.isStaff
                         ? 'staff@restaurant.com'
                         : 'owner@restaurant.com'
@@ -295,7 +298,7 @@ export default function Login({ portal = 'admin', initialModeKey = '' }) {
 
               <Button type="submit" fullWidth size="lg" disabled={isLoading}>
                 {isLoading ? <Loader className="h-4 w-4 animate-spin" /> : null}
-                {isLoading ? 'Logging in...' : `Open ${selectedModeKey === 'manager' ? 'Manager Portal' : config.badge}`}
+                {isLoading ? 'Logging in...' : `Open ${selectedModeKey === 'manager' ? 'Manager Portal' : selectedModeKey === 'developer' ? 'Developer Console' : config.badge}`}
               </Button>
             </form>
 

@@ -9,8 +9,11 @@ import analyticsRoutes from './analytics.js';
 import customerRoutes from './customer.js';
 import inventoryRoutes from './inventory.js';
 import takeawayRoutes from './takeaway.js';
+import developerRoutes from './developer.js';
 import { authMiddleware } from '../middleware/auth.js';
+import { optionalAuth } from '../middleware/auth.js';
 import { tenantIsolation } from '../middleware/tenantIsolation.js';
+import { systemAccessGuard } from '../middleware/systemAccess.js';
 import { validateRequest } from '../middleware/validation.js';
 import { resetUserPasswordSchema } from '../schemas/auth.schema.js';
 import * as authController from '../controllers/authController.js';
@@ -29,6 +32,8 @@ router.post(
   validateRequest(resetUserPasswordSchema),
   authController.resetUserPassword
 );
+router.use(`/${apiVersion}/developer`, developerRoutes);
+router.use(`/${apiVersion}`, optionalAuth, systemAccessGuard);
 
 // Customer routes (public)
 router.use(`/${apiVersion}/customer`, customerRoutes);

@@ -1461,6 +1461,13 @@ export default function POS() {
         onClose={() => setWaiterAlertMessage('')}
         autoDismissMs={5600}
       />
+      <section className="rounded-[var(--radius-card)] border border-[var(--border-color)] bg-[var(--bg-card)] px-4 py-4 shadow-[var(--shadow-card)]">
+        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--text-secondary)]">POS Workspace</p>
+        <h1 className="mt-2 text-2xl font-black text-[var(--text-primary)]">Choose service type</h1>
+        <p className="mt-2 text-sm text-[var(--text-secondary)]">
+          Dine-in billing is active here. Select a table, add items, send the kitchen delta, then generate the bill.
+        </p>
+      </section>
       <section className="rounded-[var(--radius-card)] border border-[var(--border-color)] bg-[linear-gradient(135deg,var(--color-primary-soft),rgba(255,255,255,0.02))] p-4 sm:p-5 shadow-[var(--shadow-card)]">
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <div className="rounded-[1.5rem] bg-[var(--bg-card)] px-4 py-3">

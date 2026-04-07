@@ -369,6 +369,16 @@ export default function Orders() {
 
   return (
     <div className="space-y-6">
+      {isManagerUser ? (
+        <section className="rounded-[var(--radius-card)] border border-[var(--border-color)] bg-[var(--bg-card)] p-5 shadow-[var(--shadow-card)] sm:p-6">
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--text-secondary)]">Order Control</p>
+          <h1 className="mt-2 text-2xl font-black text-[var(--text-primary)]">Control QR, POS, and waiter orders in one place</h1>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-[var(--text-secondary)]">
+            Review service queues, keep kitchen progress moving, and send unpaid bills to the manager billing screen.
+          </p>
+        </section>
+      ) : null}
+
       {success ? <Toast type="success" message={success} /> : null}
       {error ? <Toast type="error" message={error} /> : null}
       {canDeleteOrders && pendingDeletionQueue.length > 0 ? (

@@ -77,6 +77,14 @@ export default function ManagerDashboard() {
 
   return (
     <div className="space-y-6">
+      <section className="rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card)] px-4 py-4 shadow-[var(--shadow-card)]">
+        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--text-secondary)]">Manager Overview</p>
+        <h1 className="mt-2 text-2xl font-black text-[var(--text-primary)]">Daily restaurant operations at a glance</h1>
+        <p className="mt-2 text-sm text-[var(--text-secondary)]">
+          Track active tables, running orders, kitchen pressure, and live alerts from one place.
+        </p>
+      </section>
+
       <div className="grid gap-3 sm:grid-cols-3">
         {QUICK_ACTIONS.map((action) => (
           <Link

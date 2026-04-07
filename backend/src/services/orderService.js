@@ -30,6 +30,9 @@ export class OrderService {
   static restaurantTimezoneCache = new Map();
   static restaurantTimezoneInFlight = new Map();
   static RESTAURANT_TIMEZONE_CACHE_TTL_MS = 5 * 60 * 1000;
+  static restaurantBillingSettingsCache = new Map();
+  static restaurantBillingSettingsInFlight = new Map();
+  static RESTAURANT_BILLING_SETTINGS_CACHE_TTL_MS = 60 * 1000;
   static menuCatalogCache = new Map();
   static menuCatalogInFlight = new Map();
   static MENU_CATALOG_CACHE_TTL_MS = 60 * 1000;
@@ -249,6 +252,45 @@ export class OrderService {
       .join(',');
 
     return `${normalizedRestaurantId}:${normalizedMenuItemIds}`;
+  }
+
+  static async getRestaurantBillingSettings(restaurantId) {
+    const cacheKey = String(restaurantId || '').trim();
+    const cachedEntry = this.restaurantBillingSettingsCache.get(cacheKey);
+    if (cachedEntry && cachedEntry.expiresAt > Date.now()) {
+      return cachedEntry.settings;
+    }
+
+    const existingPromise = this.restaurantBillingSettingsInFlight.get(cacheKey);
+    if (existingPromise) {
+      return await existingPromise;
+    }
+
+    const fetchPromise = (async () => {
+      try {
+        const { data: restaurantSettings, error } = await supabase
+          .from('restaurants')
+          .select('id, enable_gst, default_gst_percent, default_cgst_percent, default_sgst_percent')
+          .eq('id', restaurantId)
+          .single();
+
+        if (error || !restaurantSettings) {
+          throw error || new Error('Restaurant settings not found');
+        }
+
+        this.restaurantBillingSettingsCache.set(cacheKey, {
+          settings: restaurantSettings,
+          expiresAt: Date.now() + this.RESTAURANT_BILLING_SETTINGS_CACHE_TTL_MS,
+        });
+
+        return restaurantSettings;
+      } finally {
+        this.restaurantBillingSettingsInFlight.delete(cacheKey);
+      }
+    })();
+
+    this.restaurantBillingSettingsInFlight.set(cacheKey, fetchPromise);
+    return await fetchPromise;
   }
 
   static async getMenuCatalogSnapshot(restaurantId, menuItemIds = []) {
@@ -1487,19 +1529,21 @@ export class OrderService {
       const resolvedTableId = normalizedOrderType === 'dine-in' ? orderData.tableId : null;
       const normalizedOrderSource = this.normalizeOrderSource(orderData.orderSource || orderData.origin, orderData.origin === 'qr' ? 'qr' : 'manual');
 
-      if (normalizedOrderType === 'dine-in' && resolvedTableId) {
-        const existingOpenBill = await this.getActiveOrderByTable(finalRestaurantId, resolvedTableId);
-        if (existingOpenBill) {
-          return this.buildExistingOpenBillResult(existingOpenBill);
-        }
+      const createdAt = new Date().toISOString();
+      const [restaurantTimezone, normalizedItems, existingOpenBill] = await Promise.all([
+        this.getRestaurantTimezone(finalRestaurantId),
+        this.validateOrderItems(finalRestaurantId, orderData.items, {
+          enforceMenuPrice: options.actorRole === 'manager',
+        }),
+        normalizedOrderType === 'dine-in' && resolvedTableId
+          ? this.getActiveOrderByTable(finalRestaurantId, resolvedTableId)
+          : Promise.resolve(null),
+      ]);
+
+      if (existingOpenBill) {
+        return this.buildExistingOpenBillResult(existingOpenBill);
       }
 
-      const restaurantTimezone = await this.getRestaurantTimezone(finalRestaurantId);
-      const createdAt = new Date().toISOString();
-
-      const normalizedItems = await this.validateOrderItems(finalRestaurantId, orderData.items, {
-        enforceMenuPrice: options.actorRole === 'manager',
-      });
       const computedTotalAmount = this.computeOrderTotal(normalizedItems);
       this.assertBillingChangesAllowed(options.actorRole, orderData.totalAmount, computedTotalAmount);
       const initialStatus = orderData.requiresWaiterApproval ? 'awaiting_waiter_approval' : 'pending';
@@ -1700,7 +1744,21 @@ export class OrderService {
     const { data: order, error } = await supabase
       .from('orders')
       .select(`
-        *,
+        id,
+        restaurant_id,
+        table_id,
+        status,
+        total_amount,
+        final_amount,
+        display_order_number,
+        request_id,
+        payment_method,
+        payment_status,
+        order_type,
+        order_source,
+        notes,
+        created_at,
+        updated_at,
         order_items (
           id,
           menu_item_id,
@@ -1931,15 +1989,7 @@ export class OrderService {
         throw new Error('Order total must be greater than zero before settlement');
       }
 
-      const { data: restaurantSettings, error: restaurantSettingsError } = await supabase
-        .from('restaurants')
-        .select('id, enable_gst, default_gst_percent, default_cgst_percent, default_sgst_percent')
-        .eq('id', restaurantId)
-        .single();
-
-      if (restaurantSettingsError || !restaurantSettings) {
-        throw restaurantSettingsError || new Error('Restaurant settings not found');
-      }
+      const restaurantSettings = await this.getRestaurantBillingSettings(restaurantId);
 
       const discountPercent = this.normalizeDiscountPercent(paymentData.discountPercent);
       const existingOrderType = this.normalizeOrderType(existingOrder.order_type, existingOrder.table_id ? 'dine-in' : 'takeaway');

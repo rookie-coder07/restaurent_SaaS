@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS restaurants (
   print_provider VARCHAR(50) DEFAULT 'browser',
   print_service_url TEXT,
   receipt_width_mm INTEGER DEFAULT 80,
+  access_enabled BOOLEAN DEFAULT true,
   auto_print_kot BOOLEAN DEFAULT false,
   auto_print_bill BOOLEAN DEFAULT false,
   bill_printer JSONB DEFAULT '{"name":"","enabled":false}'::jsonb,
@@ -186,6 +187,47 @@ CREATE TABLE IF NOT EXISTS password_reset_requests (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS system_settings (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  restaurant_id UUID REFERENCES restaurants(id) ON DELETE CASCADE,
+  setting_key TEXT NOT NULL,
+  setting_value JSONB NOT NULL DEFAULT '{}'::jsonb,
+  updated_by UUID,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS feature_flags (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  restaurant_id UUID REFERENCES restaurants(id) ON DELETE CASCADE,
+  feature_key TEXT NOT NULL,
+  enabled BOOLEAN NOT NULL DEFAULT true,
+  updated_by UUID,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS audit_logs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  actor_user_id UUID,
+  actor_email TEXT,
+  actor_role TEXT,
+  action TEXT NOT NULL,
+  target_type TEXT NOT NULL,
+  target_id TEXT,
+  restaurant_id UUID REFERENCES restaurants(id) ON DELETE SET NULL,
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS broadcast_notifications (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  restaurant_id UUID REFERENCES restaurants(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  message TEXT NOT NULL,
+  audience TEXT NOT NULL DEFAULT 'all_restaurants',
+  created_by UUID,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 -- Create Inventory Items Table
 CREATE TABLE IF NOT EXISTS inventory_items (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -236,10 +278,13 @@ CREATE INDEX idx_menu_items_category_id ON menu_items(category_id);
 CREATE INDEX idx_orders_restaurant_id ON orders(restaurant_id);
 CREATE INDEX idx_orders_status ON orders(status);
 CREATE INDEX idx_orders_display_order_number ON orders(display_order_number);
+CREATE INDEX idx_orders_restaurant_created_at ON orders(restaurant_id, created_at DESC);
+CREATE INDEX idx_orders_restaurant_table_updated_at ON orders(restaurant_id, table_id, updated_at DESC);
 CREATE UNIQUE INDEX idx_orders_request_id_unique ON orders(request_id) WHERE request_id IS NOT NULL;
 CREATE INDEX idx_password_reset_requests_restaurant_status ON password_reset_requests(restaurant_id, status, requested_at DESC);
 CREATE UNIQUE INDEX idx_password_reset_requests_pending_user ON password_reset_requests(user_id) WHERE status = 'pending';
 CREATE INDEX idx_order_items_order_id ON order_items(order_id);
+CREATE INDEX idx_order_items_order_id_created_at ON order_items(order_id, created_at ASC);
 CREATE INDEX idx_order_items_sent_to_kitchen ON order_items(order_id, sent_to_kitchen);
 CREATE INDEX idx_kitchen_tickets_order_id ON kitchen_tickets(order_id);
 CREATE INDEX idx_tables_restaurant_id ON tables(restaurant_id);
@@ -251,3 +296,10 @@ CREATE INDEX idx_inventory_items_restaurant_id ON inventory_items(restaurant_id)
 CREATE INDEX idx_menu_item_recipes_menu_item_id ON menu_item_recipes(menu_item_id);
 CREATE INDEX idx_inventory_history_restaurant_id ON inventory_history(restaurant_id);
 CREATE INDEX idx_inventory_history_item_id ON inventory_history(inventory_item_id);
+CREATE UNIQUE INDEX idx_system_settings_global_key ON system_settings(setting_key) WHERE restaurant_id IS NULL;
+CREATE UNIQUE INDEX idx_system_settings_restaurant_key ON system_settings(restaurant_id, setting_key) WHERE restaurant_id IS NOT NULL;
+CREATE UNIQUE INDEX idx_feature_flags_global_key ON feature_flags(feature_key) WHERE restaurant_id IS NULL;
+CREATE UNIQUE INDEX idx_feature_flags_restaurant_key ON feature_flags(restaurant_id, feature_key) WHERE restaurant_id IS NOT NULL;
+CREATE INDEX idx_audit_logs_created_at ON audit_logs(created_at DESC);
+CREATE INDEX idx_audit_logs_action ON audit_logs(action);
+CREATE INDEX idx_broadcast_notifications_created_at ON broadcast_notifications(created_at DESC);
