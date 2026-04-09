@@ -42,16 +42,45 @@ const formatCurrency = (amount) => {
 };
 
 /**
+ * Get user-friendly order display (like "#05" instead of UUID)
+ */
+const getOrderDisplay = (order) => {
+  if (order?.displayOrderNumber) {
+    return order.displayOrderNumber;
+  }
+  if (order?.id) {
+    return `#${String(order.id).slice(-2).toUpperCase()}`;
+  }
+  return 'Order';
+};
+
+/**
+ * Get user-friendly table number (like "Table 5" instead of UUID)
+ */
+const getTableDisplay = (table) => {
+  if (table?.tableNumber) {
+    return `Table ${table.tableNumber}`;
+  }
+  if (table?.id) {
+    return `Table #${String(table.id).slice(-1)}`;
+  }
+  return 'Table';
+};
+
+/**
  * Format order created activity
  */
 const formatOrderCreated = (details) => {
   if (!details || !details.orderId) return null;
   
+  const orderDisplay = details.displayOrderNumber ? details.displayOrderNumber : `#${String(details.orderId).slice(-2).toUpperCase()}`;
+  const tableDisplay = details.tableNumber ? `Table ${details.tableNumber}` : `Table #${String(details.tableId).slice(-1)}`;
+  
   return {
     title: 'Order Created',
     items: [
-      { label: 'Order ID', value: details.orderId },
-      { label: 'Table', value: details.tableId || 'N/A' },
+      { label: 'Order', value: orderDisplay },
+      { label: 'Table', value: tableDisplay },
       { label: 'Items', value: details.itemCount || 0 },
       { label: 'Total', value: formatCurrency(details.totalAmount) },
       { label: 'Type', value: details.orderType || 'dine-in' },
@@ -69,11 +98,12 @@ const formatItemAdded = (details) => {
   const items = Array.isArray(details.items) ? details.items : [details.items];
   const totalItems = items.reduce((sum, item) => sum + (item.quantity || 0), 0);
   const totalPrice = items.reduce((sum, item) => sum + ((item.quantity || 0) * (item.unitPrice || 0)), 0);
+  const orderDisplay = details.displayOrderNumber ? details.displayOrderNumber : `#${String(details.orderId).slice(-2).toUpperCase()}`;
   
   return {
     title: 'Items Added to Order',
     items: [
-      { label: 'Order ID', value: details.orderId },
+      { label: 'Order', value: orderDisplay },
       { label: 'Items Added', value: totalItems },
       { label: 'Total Value', value: formatCurrency(totalPrice) },
       { 
@@ -91,11 +121,14 @@ const formatItemAdded = (details) => {
 const formatOrderSettled = (details) => {
   if (!details || !details.orderId) return null;
   
+  const orderDisplay = details.displayOrderNumber ? details.displayOrderNumber : `#${String(details.orderId).slice(-2).toUpperCase()}`;
+  const tableDisplay = details.tableNumber ? `Table ${details.tableNumber}` : `Table #${String(details.tableId).slice(-1)}`;
+  
   return {
     title: 'Order Settled',
     items: [
-      { label: 'Order ID', value: details.orderId },
-      { label: 'Table', value: details.tableId || 'N/A' },
+      { label: 'Order', value: orderDisplay },
+      { label: 'Table', value: tableDisplay },
       { label: 'Amount Paid', value: formatCurrency(details.totalAmount) },
       { label: 'Payment Method', value: details.paymentMethod || 'Cash' },
       { label: 'Status', value: 'Completed' },
@@ -110,15 +143,16 @@ const formatOrderSettled = (details) => {
 const formatTableAssigned = (details) => {
   if (!details || !details.tableId) return null;
   
+  const tableDisplay = details.tableNumber ? `Table ${details.tableNumber}` : `Table #${String(details.tableId).slice(-1)}`;
+  
   return {
     title: 'Table Assigned',
     items: [
-      { label: 'Table', value: details.tableNumber || details.tableId },
-      { label: 'Table ID', value: details.tableId },
+      { label: 'Table', value: tableDisplay },
       { label: 'Capacity', value: `${details.capacity || 'N/A'} seats` },
       { label: 'Status', value: 'In Use' },
     ],
-    highlight: `Table ${details.tableNumber || details.tableId}`
+    highlight: tableDisplay
   };
 };
 
@@ -128,13 +162,16 @@ const formatTableAssigned = (details) => {
 const formatBillPaid = (details) => {
   if (!details || !details.totalAmount) return null;
   
+  const orderDisplay = details.displayOrderNumber ? details.displayOrderNumber : `#${String(details.orderId).slice(-2).toUpperCase()}`;
+  const tableDisplay = details.tableNumber ? `Table ${details.tableNumber}` : `Table #${String(details.tableId).slice(-1)}`;
+  
   return {
     title: 'Bill Settled',
     items: [
-      { label: 'Order ID', value: details.orderId },
+      { label: 'Order', value: orderDisplay },
       { label: 'Amount Collected', value: formatCurrency(details.totalAmount) },
       { label: 'Payment Method', value: details.paymentMethod || 'Cash' },
-      { label: 'Table', value: details.tableId || 'N/A' },
+      { label: 'Table', value: tableDisplay },
     ],
     highlight: formatCurrency(details.totalAmount)
   };
@@ -199,10 +236,12 @@ const formatInventoryUpdated = (details) => {
 const formatDiscountApplied = (details) => {
   if (!details || !details.discountAmount) return null;
   
+  const orderDisplay = details.displayOrderNumber ? details.displayOrderNumber : `#${String(details.orderId).slice(-2).toUpperCase()}`;
+  
   return {
     title: 'Discount Applied',
     items: [
-      { label: 'Order ID', value: details.orderId },
+      { label: 'Order', value: orderDisplay },
       { label: 'Discount Amount', value: formatCurrency(details.discountAmount) },
       { label: 'Reason', value: details.reason || 'Management decision' },
       { label: 'New Total', value: formatCurrency(details.newTotal) },

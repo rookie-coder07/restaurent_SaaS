@@ -21,13 +21,13 @@ const activities = [
       totalAmount: 240
     },
     after: [
-      'Order ID: 89443c21-415d-4054-b3e4-559aed616175',
-      'Table: ff58c634-724a-45aa-8d59-d52066366f89',
+      'Order: #75',
+      'Table: Table 5',
       'Items: 3',
       'Total: ₹240',
       'Type: dine-in',
       '',
-      '✨ ₹240 from 3 items'
+      '✨ ₹240'
     ]
   },
   {
@@ -40,10 +40,11 @@ const activities = [
         { quantity: 1, unitPrice: 50, menuItemId: '997cf41c-ada4-4d32-8057-8d6ef2938e75' }
       ],
       orderId: '89443c21-415d-4054-b3e4-559aed616175',
-      itemCount: 3
+      itemCount: 3,
+      displayOrderNumber: '#75'
     },
     after: [
-      'Order ID: 89443c21-415d-4054-b3e4-559aed616175',
+      'Order: #75',
       'Items Added: 3',
       'Total Value: ₹240',
       'Items: 1x @ ₹70, 1x @ ₹120, 1x @ ₹50',
@@ -61,13 +62,29 @@ const activities = [
       paymentMethod: 'Cash'
     },
     after: [
-      'Order ID: 89443c21-415d-4054-b3e4-559aed616175',
-      'Table: ff58c634-724a-45aa-8d59-d52066366f89',
+      'Order: #75',
+      'Table: Table 5',
       'Amount Paid: ₹240',
       'Payment Method: Cash',
       'Status: Completed',
       '',
       '✨ ₹240'
+    ]
+  },
+  {
+    title: '🪑 Table Assigned',
+    timestamp: 'Apr 9, 2026, 05:30:00 PM',
+    before: {
+      tableId: 'ff58c634-724a-45aa-8d59-d52066366f89',
+      tableNumber: 5,
+      capacity: 4
+    },
+    after: [
+      'Table: Table 5',
+      'Capacity: 4 seats',
+      'Status: In Use',
+      '',
+      '✨ Table 5'
     ]
   }
 ];
@@ -78,7 +95,7 @@ activities.forEach((activity, idx) => {
   console.log(`${'─'.repeat(70)}`);
 
   // BEFORE
-  console.log('\n❌ BEFORE (Raw JSON):');
+  console.log('\n❌ BEFORE (Raw IDs):');
   console.log(JSON.stringify(activity.before, null, 2));
 
   // AFTER
@@ -110,8 +127,9 @@ console.log('✅ All activities formatted for better readability!');
 console.log('='.repeat(70) + '\n');
 
 console.log('🎯 KEY IMPROVEMENTS:');
-console.log('   ✓ No more raw JSON in timeline');
-console.log('   ✓ Labeled fields (Order ID:, Table:, etc)');
+console.log('   ✓ No more raw UUIDs - shows "#75" instead of 89443c21...');
+console.log('   ✓ Table numbers instead of IDs - "Table 5" not ff58c634...');
+console.log('   ✓ Labeled fields (Order:, Table:, Items:, etc)');
 console.log('   ✓ Formatted currency with ₹ symbol');
 console.log('   ✓ Key metrics highlighted with ✨');
 console.log('   ✓ Item details shown as readable list');
