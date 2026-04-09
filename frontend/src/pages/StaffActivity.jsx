@@ -5,6 +5,7 @@ import Button from '../components/common/Button';
 import Toast from '../components/common/Toast';
 import { restaurantAPI } from '../services/apiEndpoints';
 import { useAuthStore } from '../context/authStore';
+import { getFormattedActivity } from '../utils/activityFormatter';
 
 export default function StaffActivity() {
   const currentUser = useAuthStore((state) => state.user);
@@ -261,36 +262,68 @@ export default function StaffActivity() {
                     </div>
                   ) : (
                     <div className="space-y-3 max-h-96 overflow-y-auto">
-                      {activityLogs.map((log, index) => (
-                        <div
-                          key={log.id || index}
-                          className="rounded-lg p-4 hover:opacity-80 transition-all"
-                          style={{
-                            border: `1px solid var(--border-color)`,
-                            backgroundColor: 'var(--bg-card)',
-                          }}
-                        >
-                          <div className="flex items-start justify-between mb-2">
-                            <span className="font-semibold" style={{ color: 'var(--text-primary)' }}>
-                              {getActionLabel(log.action)}
-                            </span>
-                            <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
-                              {formatDate(log.created_at)}
-                            </span>
-                          </div>
-
-                          {log.details && Object.keys(log.details).length > 0 && (
-                            <div className="mt-2 text-sm rounded p-2" style={{
-                              backgroundColor: 'var(--bg-card-muted)',
+                      {activityLogs.map((log, index) => {
+                        const formatted = getFormattedActivity(log);
+                        return (
+                          <div
+                            key={log.id || index}
+                            className="rounded-lg p-4 hover:shadow-md transition-all"
+                            style={{
                               border: `1px solid var(--border-color)`,
-                            }}>
-                              <pre className="text-xs overflow-x-auto" style={{ color: 'var(--text-secondary)' }}>
-                                {JSON.stringify(log.details, null, 2)}
-                              </pre>
+                              backgroundColor: 'var(--bg-card)',
+                            }}
+                          >
+                            <div className="flex items-start justify-between mb-3">
+                              <span className="font-semibold text-base" style={{ color: 'var(--text-primary)' }}>
+                                {getActionLabel(log.action)}
+                              </span>
+                              <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
+                                {formatDate(log.created_at)}
+                              </span>
                             </div>
-                          )}
-                        </div>
-                      ))}
+
+                            {formatted && formatted.items && formatted.items.length > 0 && (
+                              <div className="space-y-2">
+                                {formatted.items.map((item, idx) => (
+                                  <div
+                                    key={idx}
+                                    className="flex items-start justify-between text-sm"
+                                    style={{ paddingLeft: '0.5rem' }}
+                                  >
+                                    <span style={{ color: 'var(--text-secondary)', fontWeight: '500' }}>
+                                      {item.label}:
+                                    </span>
+                                    <span
+                                      style={{
+                                        color: 'var(--text-primary)',
+                                        fontWeight: item.label.includes('Order ID') ? '600' : '400',
+                                        maxWidth: '200px',
+                                        textAlign: 'right',
+                                        wordBreak: 'break-word'
+                                      }}
+                                    >
+                                      {item.value}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+
+                            {formatted && formatted.highlight && (
+                              <div
+                                className="mt-3 p-2 rounded text-center font-semibold text-sm"
+                                style={{
+                                  backgroundColor: 'var(--bg-card-muted)',
+                                  color: 'var(--primary-color)',
+                                  border: `1px solid var(--border-color)`,
+                                }}
+                              >
+                                ✨ {formatted.highlight}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
                 </div>
