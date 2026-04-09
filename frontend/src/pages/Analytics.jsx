@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { BarChart3, Clock3, Download, Loader, Package, Receipt, ShoppingBag, TrendingUp, Wallet } from 'lucide-react';
+import { BarChart3, Download, Loader, Package, Receipt, ShoppingBag, TrendingUp, Wallet } from 'lucide-react';
 import {
   Area,
   AreaChart,
@@ -110,44 +110,6 @@ function MetricMiniCard({ label, value, toneClassName = 'text-[var(--text-primar
   );
 }
 
-function getStaffPerformance(orders = [], staff = []) {
-  const staffLookup = new Map();
-  const aggregates = new Map();
-
-  (staff || []).forEach((member) => {
-    const normalizedName = String(member?.name || '').trim().toLowerCase();
-    const normalizedEmail = String(member?.email || '').trim().toLowerCase();
-    if (normalizedName) {
-      staffLookup.set(normalizedName, member);
-    }
-    if (normalizedEmail) {
-      staffLookup.set(normalizedEmail, member);
-    }
-  });
-
-  orders.forEach((order) => {
-    const actorKey = String(order?.billing?.cashierName || '').trim().toLowerCase();
-    if (!actorKey) {
-      return;
-    }
-
-    const member = staffLookup.get(actorKey);
-    const displayName = member?.name || member?.email || order?.billing?.cashierName || 'Staff';
-    const current = aggregates.get(displayName) || {
-      name: displayName,
-      orders: 0,
-      revenue: 0,
-    };
-    current.orders += 1;
-    current.revenue += Number(order?.totalAmount || order?.total || 0);
-    aggregates.set(displayName, current);
-  });
-
-  return Array.from(aggregates.values())
-    .sort((left, right) => right.orders - left.orders || right.revenue - left.revenue)
-    .slice(0, 5);
-}
-
 export default function Analytics() {
   const [activeFilter, setActiveFilter] = useState('monthly');
   const [dateRange, setDateRange] = useState(() => getAnalyticsPresetRange('monthly'));
@@ -169,10 +131,7 @@ export default function Analytics() {
     () => buildAnalyticsSnapshot(orders, getAnalyticsPresetRange('today'), { orderType }),
     [orderType, orders]
   );
-  const staffPerformance = useMemo(
-    () => getStaffPerformance(snapshot.filteredOrders, staff),
-    [snapshot.filteredOrders, staff]
-  );
+
 
   const summaryCards = useMemo(
     () => [
@@ -196,23 +155,6 @@ export default function Analytics() {
         icon: ShoppingBag,
         helper: `${snapshot.orderSummary.itemsServed} items sold`,
         accentClassName: 'bg-gradient-to-r from-fuchsia-500 to-rose-400',
-      },
-      {
-        label: 'Active Orders',
-        value: snapshot.activeOrdersCount,
-        icon: Clock3,
-        helper: `${snapshot.orderSummary.open} still running`,
-        accentClassName: 'bg-gradient-to-r from-amber-500 to-orange-400',
-      },
-      {
-        label: 'Net Sales',
-        value: formatCurrency(snapshot.netSales),
-        icon: TrendingUp,
-        helper:
-          snapshot.comparison.revenueDelta >= 0
-            ? `+${formatCurrency(Math.abs(snapshot.comparison.revenueDelta))} vs previous range`
-            : `-${formatCurrency(Math.abs(snapshot.comparison.revenueDelta))} vs previous range`,
-        accentClassName: 'bg-gradient-to-r from-violet-500 to-indigo-400',
       },
     ],
     [orderType, snapshot, todaySnapshot.totalRevenue]
@@ -411,8 +353,8 @@ export default function Analytics() {
             </div>
           </AnalyticsSection>
 
-          <AnalyticsSection title="Sales Breakdown" subtitle="Order mix and payment split">
-            <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+          <AnalyticsSection title="Sales Breakdown" subtitle="Order mix">
+            <div className="grid grid-cols-1 gap-4 xl:grid-cols-1">
               <div>
                 <p className="mb-3 text-sm font-semibold text-[var(--text-primary)]">Dine-In vs Takeaway</p>
                 {snapshot.orderTypeMix.length === 0 ? (
@@ -448,20 +390,7 @@ export default function Analytics() {
                 )}
               </div>
 
-              <div>
-                <p className="mb-3 text-sm font-semibold text-[var(--text-primary)]">Payment Method Split</p>
-                <div className="space-y-2">
-                  {(snapshot.paymentMix.length > 0 ? snapshot.paymentMix.slice(0, 4) : [{ name: 'No payments yet', value: 0 }]).map((entry, index) => (
-                    <div key={entry.name} className="flex items-center justify-between rounded-2xl bg-[var(--bg-card-muted)] px-4 py-3">
-                      <div className="flex items-center gap-3">
-                        <span className="h-3 w-3 rounded-full" style={{ backgroundColor: PIE_COLORS[index % PIE_COLORS.length] }} />
-                        <span className="text-sm font-medium text-[var(--text-primary)]">{entry.name}</span>
-                      </div>
-                      <span className="text-sm font-semibold text-[var(--text-primary)]">{entry.value}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
+
             </div>
           </AnalyticsSection>
 
@@ -513,40 +442,7 @@ export default function Analytics() {
               </div>
             </AnalyticsSection>
 
-            <div className="grid grid-cols-1 gap-4">
-              <AnalyticsSection title="Staff Performance" subtitle="Orders handled per staff">
-                {staffPerformance.length === 0 ? (
-                  <div className="rounded-2xl bg-[var(--bg-card-muted)] px-4 py-5 text-sm text-[var(--text-secondary)]">
-                    Staff order handling will appear once bills start getting settled with cashier names.
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    <div className="h-[220px] w-full">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={staffPerformance}>
-                          <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.12)" vertical={false} />
-                          <XAxis dataKey="name" tick={{ fontSize: 11, fill: 'var(--text-secondary)' }} axisLine={false} tickLine={false} interval={0} angle={-20} textAnchor="end" height={55} />
-                          <YAxis tick={{ fontSize: 12, fill: 'var(--text-secondary)' }} axisLine={false} tickLine={false} allowDecimals={false} />
-                          <Tooltip />
-                          <Bar dataKey="orders" fill="#8b5cf6" radius={[10, 10, 0, 0]} />
-                        </BarChart>
-                      </ResponsiveContainer>
-                    </div>
-                    {staffPerformance.map((member, index) => (
-                      <div key={`${member.name}-${index}`} className="rounded-2xl bg-[var(--bg-card-muted)] px-4 py-3">
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <p className="truncate text-sm font-semibold text-[var(--text-primary)]">{member.name}</p>
-                            <p className="mt-1 text-xs text-[var(--text-secondary)]">{member.orders} orders handled</p>
-                          </div>
-                          <span className="shrink-0 text-sm font-semibold text-[var(--color-primary)]">{formatCurrency(member.revenue)}</span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </AnalyticsSection>
-            </div>
+
           </div>
         </>
       )}
