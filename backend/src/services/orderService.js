@@ -3148,7 +3148,7 @@ export class OrderService {
       
       let query = supabase
         .from('orders')
-        .select('id,restaurant_id,table_id,status,final_amount,payment_method,payment_status,order_type,created_at,updated_at,display_order_number,notes,is_deleted', { count: 'exact' })
+        .select('id,restaurant_id,table_id,status,total_amount,final_amount,payment_method,payment_status,order_type,created_at,updated_at,display_order_number,notes,is_deleted,invoice_number', { count: 'exact' })
         .eq('restaurant_id', restaurantId)
         .eq('is_deleted', false)
         .order('created_at', { ascending: false })
@@ -3267,7 +3267,7 @@ export class OrderService {
       const [ordersResult] = await Promise.all([
         supabase
           .from('orders')
-          .select('id,restaurant_id,table_id,status,final_amount,payment_method,payment_status,order_type,created_at,display_order_number,is_deleted', { count: 'exact' })
+          .select('id,restaurant_id,table_id,status,total_amount,final_amount,payment_method,payment_status,order_type,created_at,display_order_number,is_deleted', { count: 'exact' })
           .eq('restaurant_id', restaurantId)
           .eq('is_deleted', false)
           .in('status', statuses)
@@ -3907,7 +3907,7 @@ export class OrderService {
     try {
       const { data: orders, error } = await supabase
         .from('orders')
-        .select('id,restaurant_id,table_id,status,final_amount,payment_method,payment_status,order_type,created_at,updated_at,display_order_number')
+        .select('id,restaurant_id,table_id,status,total_amount,final_amount,payment_method,payment_status,order_type,created_at,updated_at,display_order_number')
         .eq('restaurant_id', restaurantId)
         .eq('is_archived', false)
         .in('status', this.ACTIVE_ORDER_STATUSES)
@@ -3955,7 +3955,7 @@ export class OrderService {
     try {
       const { data: orders, error } = await supabase
         .from('orders')
-        .select('id,restaurant_id,table_id,status,final_amount,payment_method,payment_status,order_type,created_at')
+        .select('id,restaurant_id,table_id,status,total_amount,final_amount,payment_method,payment_status,order_type,created_at')
         .eq('restaurant_id', restaurantId)
         .neq('payment_status', 'paid')
         .in('status', this.OPEN_BILL_STATUSES)
