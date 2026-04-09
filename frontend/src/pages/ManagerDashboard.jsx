@@ -101,7 +101,7 @@ export default function ManagerDashboard() {
         <StatCard icon={Receipt} label="Running Orders" value={runningOrders.length} subtitle="QR, POS, and waiter orders" tone="neutral" />
         <StatCard icon={DollarSign} label="Today Revenue" value={formatCurrency(todayRevenue)} subtitle="Collected or settled today" tone="success" />
         <StatCard icon={ChefHat} label="Pending KOT" value={pendingKot.length} subtitle="Waiting to start in kitchen" tone="warning" />
-        <StatCard icon={AlertTriangle} label="Active Alerts" value={lowStockItems.length + delayedOrders.length + busyTables.length} subtitle="Low stock, delays, busy tables" tone="danger" />
+        <StatCard icon={AlertTriangle} label="Active Alerts" value={delayedOrders.length + busyTables.length} subtitle="Delays and busy tables" tone="danger" />
       </div>
 
       <div className="grid gap-4 xl:grid-cols-[1.2fr,0.8fr]">
@@ -118,7 +118,7 @@ export default function ManagerDashboard() {
           </div>
 
           <div className="mt-5 space-y-3">
-            {lowStockItems.length === 0 && delayedOrders.length === 0 && busyTables.length === 0 && priorityOrders.length === 0 ? (
+            {delayedOrders.length === 0 && busyTables.length === 0 && priorityOrders.length === 0 ? (
               <EmptyState icon={Users} title="No urgent alerts" description="Service is stable right now." />
             ) : null}
 
@@ -128,15 +128,6 @@ export default function ManagerDashboard() {
                 tone="danger"
                 title={`${formatDisplayOrderNumber(order)} is prioritized`}
                 detail={`${getOrderSourceLabel(order)} order at table ${order.tableNumber || 'Walk-in'} is marked for immediate handling`}
-              />
-            ))}
-
-            {lowStockItems.slice(0, 3).map((item) => (
-              <AlertRow
-                key={`stock-${item.id}`}
-                tone="danger"
-                title={`${item.name} is low on stock`}
-                detail={`${item.quantity} ${item.unit} left in tracked inventory`}
               />
             ))}
 
