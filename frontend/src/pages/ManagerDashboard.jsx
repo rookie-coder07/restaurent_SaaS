@@ -65,10 +65,16 @@ export default function ManagerDashboard() {
       getTableActivity(table, runningOrders, tableAssignments, tableClosures, tableTransfers, tableMerges, tables)
     )
     .filter((table) => !table.isMergedSecondary);
-  const activeTables = floorTables.filter((table) => table.effectiveStatus === 'busy');
+  const activeTables = floorTables.filter((table) => table.activeOrders.length > 0);
   const lowStockItems = inventorySummary?.lowStockItems || [];
   const busyTables = floorTables.filter(isBusyTable);
-  const pendingKot = Array.isArray(kitchenTickets) ? kitchenTickets.filter((ticket) => ticket.status === 'pending') : [];
+  const pendingKot = runningOrders.reduce((count, order) => {
+    const unsent = (order.items || []).filter((item) => !item.sentToKitchen).length;
+    return count + unsent;
+  }, 0);
+  const ordersWithPendingItems = runningOrders.filter((order) => 
+    (order.items || []).some((item) => !item.sentToKitchen)
+  );
   const priorityOrders = runningOrders.filter((order) => prioritizedOrders[order.id]?.priority === 'high');
 
   // Realtime subscriptions handle updates - polling disabled for performance
@@ -97,10 +103,10 @@ export default function ManagerDashboard() {
       </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
+        <StatCard icon={DollarSign} label="Revenue" value={formatCurrency(todayRevenue)} subtitle="Settled sales only" tone="success" />
         <StatCard icon={TableProperties} label="Active Tables" value={activeTables.length} subtitle="Tables with live service" tone="primary" />
         <StatCard icon={Receipt} label="Running Orders" value={runningOrders.length} subtitle="QR, POS, and waiter orders" tone="neutral" />
-        <StatCard icon={DollarSign} label="Today Revenue" value={formatCurrency(todayRevenue)} subtitle="Collected or settled today" tone="success" />
-        <StatCard icon={ChefHat} label="Pending KOT" value={pendingKot.length} subtitle="Waiting to start in kitchen" tone="warning" />
+        <StatCard icon={ChefHat} label="Pending KOT" value={pendingKot} subtitle="Waiting to start in kitchen" tone="warning" />
         <StatCard icon={AlertTriangle} label="Active Alerts" value={delayedOrders.length + busyTables.length} subtitle="Delays and busy tables" tone="danger" />
       </div>
 
@@ -171,14 +177,14 @@ export default function ManagerDashboard() {
             <p className="text-sm text-[var(--text-secondary)]">Kitchen Watch</p>
             <h2 className="mt-1 text-xl font-semibold text-[var(--text-primary)]">Incoming queue</h2>
             <div className="mt-4 space-y-3">
-              {pendingKot.length === 0 ? (
+              {ordersWithPendingItems.length === 0 ? (
                 <p className="text-sm text-[var(--text-secondary)]">No pending KOT tickets.</p>
               ) : (
-                pendingKot.slice(0, 5).map((ticket) => (
-                  <div key={ticket.id} className="rounded-2xl bg-[var(--color-surface-muted)] p-4">
-                    <p className="font-semibold text-[var(--text-primary)]">{ticket.displayOrderNumber || formatDisplayOrderNumber(ticket)}</p>
+                ordersWithPendingItems.slice(0, 5).map((order) => (
+                  <div key={order.id} className="rounded-2xl bg-[var(--color-surface-muted)] p-4">
+                    <p className="font-semibold text-[var(--text-primary)]">{order.displayOrderNumber || formatDisplayOrderNumber(order)}</p>
                     <p className="mt-1 text-sm text-[var(--text-secondary)]">
-                      Table {ticket.tableNumber || 'Walk-in'} • {(ticket.items || []).length} items
+                      Table {order.tableNumber || 'Walk-in'} • {(order.items || []).filter((item) => !item.sentToKitchen).length} items
                     </p>
                   </div>
                 ))
