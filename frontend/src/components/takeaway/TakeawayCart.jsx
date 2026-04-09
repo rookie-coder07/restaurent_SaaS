@@ -53,6 +53,12 @@ export default function TakeawayCart({ recentBills = [], onRefresh = () => {} })
   };
 
   const handleSettle = async () => {
+    // PREVENT DOUBLE SUBMISSION: Guard against concurrent settle attempts
+    if (loading) {
+      setError('Bill settlement is already in progress. Please wait...');
+      return;
+    }
+
     try {
       setLoading(true);
       setError('');

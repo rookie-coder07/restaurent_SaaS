@@ -35,6 +35,7 @@ export function subscribeToOrderEvents(onEvent, options = {}) {
 
   const accessToken = getCurrentPortalAccessToken();
   if (!accessToken) {
+    console.debug('No access token available for stream connection');
     return () => {};
   }
 
@@ -44,6 +45,8 @@ export function subscribeToOrderEvents(onEvent, options = {}) {
   const eventName = options.eventName || 'order';
   let isClosed = false;
   let eventSource = null;
+  let reconnectAttempts = 0;
+  const maxReconnectAttempts = 3;
 
   const handleOrderEvent = (event) => {
     try {
@@ -54,25 +57,41 @@ export function subscribeToOrderEvents(onEvent, options = {}) {
     }
   };
 
-  canOpenOrderEventStream(streamUrl.toString()).then((isSupported) => {
-    if (isClosed || !isSupported) {
-      return;
-    }
-
-    eventSource = new window.EventSource(streamUrl.toString());
-    eventSource.addEventListener(eventName, handleOrderEvent);
-    eventSource.addEventListener('error', () => {
-      if (eventSource) {
-        eventSource.close();
+  const openStream = () => {
+    canOpenOrderEventStream(streamUrl.toString()).then((isSupported) => {
+      if (isClosed || !isSupported) {
+        return;
       }
+
+      eventSource = new window.EventSource(streamUrl.toString());
+      eventSource.addEventListener(eventName, handleOrderEvent);
+      eventSource.addEventListener('error', (error) => {
+        if (eventSource) {
+          eventSource.close();
+          eventSource = null;
+        }
+        
+        if (!isClosed && reconnectAttempts < maxReconnectAttempts) {
+          reconnectAttempts++;
+          const delayMs = Math.min(1000 * Math.pow(2, reconnectAttempts - 1), 10000);
+          console.debug(`Stream reconnect attempt ${reconnectAttempts}/${maxReconnectAttempts} after ${delayMs}ms`);
+          setTimeout(openStream, delayMs);
+        } else if (reconnectAttempts >= maxReconnectAttempts) {
+          console.error('Stream connection failed - max reconnect attempts reached. User may need to refresh page.');
+        }
+      });
     });
-  });
+  };
+
+  openStream();
 
   return () => {
     isClosed = true;
+    reconnectAttempts = maxReconnectAttempts; // Prevent reconnection attempts
     if (eventSource) {
       eventSource.removeEventListener(eventName, handleOrderEvent);
       eventSource.close();
+      eventSource = null;
     }
   };
 }

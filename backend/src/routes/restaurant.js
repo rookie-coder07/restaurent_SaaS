@@ -1,6 +1,6 @@
 import express from 'express';
 import { authMiddleware } from '../middleware/auth.js';
-import { tenantIsolation, checkPermission, requireAdminAccess } from '../middleware/tenantIsolation.js';
+import { tenantIsolation, checkPermission } from '../middleware/tenantIsolation.js';
 import { validateRequest } from '../middleware/validation.js';
 import {
   updateInvoiceSettingsSchema,
@@ -21,7 +21,6 @@ router.put('/profile', checkPermission(['manage_restaurant']), validateRequest(u
 router.put('/settings', checkPermission(['manage_restaurant']), validateRequest(updateRestaurantSettingsSchema), restaurantController.updateSettings);
 router.put(
   '/settings/invoice',
-  requireAdminAccess(),
   checkPermission(['manage_restaurant']),
   validateRequest(updateInvoiceSettingsSchema),
   restaurantController.updateInvoiceSettings
@@ -31,6 +30,7 @@ router.put(
 router.post('/staff', checkPermission(['manage_staff']), validateRequest(createStaffSchema), restaurantController.createStaff);
 router.get('/staff', checkPermission(['manage_staff', 'view_staff']), restaurantController.getStaffUsers);
 router.put('/staff/:staffId', validateRequest(updateStaffSchema), restaurantController.updateStaff);
+router.put('/staff/:staffId/reset-password', checkPermission(['manage_staff']), restaurantController.resetStaffPassword);
 router.delete('/staff/:staffId', checkPermission(['manage_staff']), restaurantController.deactivateStaff);
 
 // Subscription

@@ -31,6 +31,8 @@ import EmptyState from '../components/common/EmptyState';
 import StatCard from '../components/common/StatCard';
 import PaginationControls from '../components/common/PaginationControls';
 import useResponsivePagination from '../hooks/useResponsivePagination';
+import { playLoudBuzzer } from '../utils/alerts';
+import { subscribeToOrderEvents } from '../utils/liveOrderEvents';
 
 const TABLE_STATUS_META = {
   open: {
@@ -113,12 +115,26 @@ export default function Tables() {
     reservedBy: '',
     reservationTime: '',
   });
+  const [tableView, setTableView] = useState('all'); // all | assigned
 
   const tables = useMemo(
-    () => [...(tablesData?.tables || [])].sort((a, b) => compareTableLabels(a.tableNumber, b.tableNumber)),
+    () => {
+      if (!tablesData || !Array.isArray(tablesData?.tables)) {
+        return [];
+      }
+      return [...tablesData.tables].sort((a, b) => compareTableLabels(a.tableNumber, b.tableNumber));
+    },
     [tablesData]
   );
-  const orders = Array.isArray(openBillsData) ? openBillsData : [];
+  const orders = useMemo(
+    () => {
+      if (!openBillsData || !Array.isArray(openBillsData)) {
+        return [];
+      }
+      return openBillsData;
+    },
+    [openBillsData]
+  );
 
   const enrichedTables = useMemo(
     () =>
@@ -151,12 +167,17 @@ export default function Tables() {
       const baseTables = enrichedTables.filter((table) => !table.isMergedSecondary);
       if (currentPortal === 'pos' && userRole === 'staff') {
         const assignedTableIds = Array.isArray(currentUser?.assignedTables) ? currentUser.assignedTables : [];
-        return baseTables.filter((table) => assignedTableIds.includes(table.id));
+
+        if (tableView === 'assigned') {
+          return baseTables.filter((table) => assignedTableIds.includes(table.id));
+        }
+
+        return baseTables;
       }
 
       return baseTables;
     },
-    [currentPortal, currentUser?.assignedTables, enrichedTables, userRole]
+    [currentPortal, currentUser?.assignedTables, enrichedTables, tableView, userRole]
   );
 
   const selectedTableData = useMemo(
@@ -212,6 +233,10 @@ export default function Tables() {
   };
 
   const syncData = async () => {
+    if (!restaurantId) {
+      return;
+    }
+
     await Promise.all([
       preloadCoreData({ force: true }),
       refreshTableOverview({ force: true }),
@@ -219,21 +244,68 @@ export default function Tables() {
   };
 
   useEffect(() => {
+    if (!restaurantId) {
+      return;
+    }
+
     preloadCoreData().catch(() => {
       // Shared store errors are already exposed in UI state.
     });
     refreshTableOverview().catch(() => {
       // Shared store errors are already exposed in UI state.
     });
-  }, [preloadCoreData, refreshTableOverview]);
+  }, [preloadCoreData, refreshTableOverview, restaurantId]);
 
-  useOrderSubscription(restaurantId, () => {
+  useOrderSubscription(restaurantId, (payload) => {
+    if (!restaurantId) {
+      return;
+    }
+
+    const order = payload?.new || {};
+    const tableId = order.table_id || order.tableId;
+    const orderType = String(order.order_type || order.orderType || '').toLowerCase();
+    const assignedTableIds = Array.isArray(currentUser?.assignedTables) ? currentUser.assignedTables : [];
+
+    if (orderType === 'qr' && tableId && assignedTableIds.includes(tableId)) {
+      playLoudBuzzer('waiter');
+    }
+
     refreshTableOverview({ force: true, silent: true }).catch(() => {
       // Shared store errors are already surfaced in the page state.
     });
   });
 
+  useEffect(() => {
+    if (!restaurantId) {
+      return undefined;
+    }
+
+    const cleanup = subscribeToOrderEvents(() => {
+      refreshTableOverview({ force: true, silent: true }).catch(() => {});
+    });
+
+    return cleanup;
+  }, [refreshTableOverview, restaurantId]);
+
+  // Fallback periodic refresh to clear stale busy states even if SSE misses an event
+  useEffect(() => {
+    if (!restaurantId) {
+      return undefined;
+    }
+
+    const intervalId = window.setInterval(() => {
+      refreshTableOverview({ force: true, silent: true }).catch(() => {});
+    }, 10000);
+
+    return () => window.clearInterval(intervalId);
+  }, [refreshTableOverview, restaurantId]);
+
   const openBilling = (table, order = null) => {
+    if (!table?.id) {
+      setError('Table ID is invalid. Unable to open billing.');
+      return;
+    }
+
     if (!canOpenBilling) {
       setError('Open billing from the POS portal to continue with this table.');
       return;
@@ -244,15 +316,14 @@ export default function Tables() {
       return;
     }
 
+    const activeOrder = order || (table.activeOrders || [])[0] || null;
     const searchParams = new URLSearchParams({
       tableId: table.id,
     });
 
-    if (order?.id) {
-      searchParams.set('orderId', order.id);
+    if (activeOrder?.id) {
+      searchParams.set('orderId', activeOrder.id);
     }
-
-    const activeOrder = order || (table.activeOrders || [])[0] || null;
 
     setPendingBillingTarget({
       tableId: table.id,
@@ -260,7 +331,7 @@ export default function Tables() {
       message: activeOrder ? 'Table is currently in use. Opened the existing bill.' : '',
     });
     setSelectedTable(null);
-    navigate(`/pos?${searchParams.toString()}`);
+    navigate(`/pos/billing?${searchParams.toString()}`);
   };
 
   const handleSubmit = async (event) => {
@@ -400,7 +471,9 @@ export default function Tables() {
               <p className="mt-2 text-sm font-medium text-rose-100">
                 {tablesError
                   ? `Tables could not be loaded: ${tablesError}`
-                  : `Open bill data could not be loaded: ${openBillsError}`}
+                  : openBillsError
+                    ? `Failed to load bill`
+                    : 'Failed to load data'}
               </p>
             </div>
             <Button
@@ -431,6 +504,23 @@ export default function Tables() {
           </Button>
         ) : null}
       </div>
+
+      {currentPortal === 'pos' && userRole === 'staff' ? (
+        <div className="flex flex-wrap gap-2 rounded-[1.1rem] border border-[var(--border-color)] bg-[var(--color-panel)] p-2">
+          <Button
+            variant={tableView === 'all' ? 'primary' : 'secondary'}
+            onClick={() => setTableView('all')}
+          >
+            All Tables
+          </Button>
+          <Button
+            variant={tableView === 'assigned' ? 'primary' : 'secondary'}
+            onClick={() => setTableView('assigned')}
+          >
+            QR Assigned Tables
+          </Button>
+        </div>
+      ) : null}
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <StatCard label="Available" value={availableCount} subtitle="Ready for guests" tone="success" />
@@ -475,6 +565,17 @@ export default function Tables() {
         )
       ) : (
         <>
+          {visibleTables.length === 0 ? (
+            <EmptyState
+              icon={TableProperties}
+              title={tableView === 'assigned' ? 'No QR assignments yet' : 'No tables available'}
+              description={
+                tableView === 'assigned'
+                  ? 'You do not have any QR assigned tables right now. They will appear here after a QR confirmation.'
+                  : 'Tables are not available. Please refresh or contact your manager.'
+              }
+            />
+          ) : (
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
             {paginatedTables.map((table) => {
               const meta = TABLE_STATUS_META[table.effectiveStatus] || TABLE_STATUS_META.open;
@@ -526,6 +627,7 @@ export default function Tables() {
               );
             })}
           </div>
+          )}
           {hasPagination ? (
             <PaginationControls
               currentPage={currentPage}

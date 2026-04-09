@@ -9,10 +9,9 @@ import {
   Users,
   Zap,
 } from 'lucide-react';
-import { useMemo } from 'react';
+import { useCallback, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
-import useAutoRefresh from '../hooks/useAutoRefresh';
 import { inventoryAPI, kitchenAPI, orderAPI, restaurantAPI, tableAPI } from '../services/apiEndpoints';
 import { formatCurrency, formatDisplayOrderNumber } from '../utils/formatters';
 import {
@@ -28,7 +27,6 @@ import { useManagerStore } from '../context/managerStore';
 import Card from '../components/common/Card';
 import StatCard from '../components/common/StatCard';
 import EmptyState from '../components/common/EmptyState';
-import ResetRequestsPanel from '../components/manager/ResetRequestsPanel';
 
 const QUICK_ACTIONS = [
   { label: 'Quick Open Table', href: '/manager/tables', helper: 'Open or reassign a table fast' },
@@ -73,7 +71,8 @@ export default function ManagerDashboard() {
   const pendingKot = Array.isArray(kitchenTickets) ? kitchenTickets.filter((ticket) => ticket.status === 'pending') : [];
   const priorityOrders = runningOrders.filter((order) => prioritizedOrders[order.id]?.priority === 'high');
 
-  useAutoRefresh(() => Promise.allSettled([refetchOrders(), refetchTables(), refetchKitchen(), refetchInventory(), refetchStaff()]), 12000);
+  // Realtime subscriptions handle updates - polling disabled for performance
+  // Manual refetch available via direct button click if needed
 
   return (
     <div className="space-y-6">
@@ -197,8 +196,6 @@ export default function ManagerDashboard() {
           </Card>
         </div>
       </div>
-
-      <ResetRequestsPanel />
 
       <div className="grid gap-4 xl:grid-cols-2">
         <Card>

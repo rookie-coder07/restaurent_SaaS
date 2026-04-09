@@ -41,7 +41,17 @@ export const useApi = (apiFunction, deps = []) => {
           }
           return result;
         } catch (err) {
-          const errorMessage = err.response?.data?.message || err.message;
+          let errorMessage = err.response?.data?.message || err.message;
+          // Convert technical errors to user-friendly messages
+          if (err.code === 'ECONNABORTED' || errorMessage?.includes('timeout')) {
+            errorMessage = 'The server is taking too long to respond. Please try again.';
+          } else if (err.message === 'Network Error' || !err.response) {
+            errorMessage = 'Connection problem. Please check your internet and try again.';
+          } else if (err.response?.status === 500) {
+            errorMessage = 'Something went wrong. Please try again in a moment.';
+          } else if (err.response?.status === 503) {
+            errorMessage = 'The service is temporarily unavailable. Please try again soon.';
+          }
           if (activeRequestRef.current === requestId) {
             setError(errorMessage);
           }
@@ -91,7 +101,17 @@ export const useApi = (apiFunction, deps = []) => {
       }
       return result;
     } catch (err) {
-      const errorMessage = err.response?.data?.message || err.message;
+      let errorMessage = err.response?.data?.message || err.message;
+      // Convert technical errors to user-friendly messages
+      if (err.code === 'ECONNABORTED' || errorMessage?.includes('timeout')) {
+        errorMessage = 'The server is taking too long to respond. Please try again.';
+      } else if (err.message === 'Network Error' || !err.response) {
+        errorMessage = 'Connection problem. Please check your internet and try again.';
+      } else if (err.response?.status === 500) {
+        errorMessage = 'Something went wrong. Please try again in a moment.';
+      } else if (err.response?.status === 503) {
+        errorMessage = 'The service is temporarily unavailable. Please try again soon.';
+      }
       if (activeRequestRef.current === requestId) {
         setError(errorMessage);
       }

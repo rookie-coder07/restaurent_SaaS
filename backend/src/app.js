@@ -8,6 +8,7 @@ import { apiLimiter } from './middleware/rateLimit.js';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
 import { sanitizeInput } from './utils/sanitizer.js';
 import routes from './routes/index.js';
+import MaintenanceService from './services/maintenanceService.js';
 
 const app = express();
 const config = getConfig();
@@ -83,6 +84,9 @@ app.get('/health', (req, res) => {
 
 // Initialize Cloudinary
 initCloudinary();
+
+// Initialize maintenance service for scheduled cleanup jobs
+MaintenanceService.init();
 
 // Request logging middleware
 app.use((req, res, next) => {

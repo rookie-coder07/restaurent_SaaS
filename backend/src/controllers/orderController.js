@@ -2,6 +2,7 @@ import logger from '../utils/logger.js';
 import { sendSuccess, sendError } from '../utils/apiResponse.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import OrderService from '../services/orderService.js';
+import supabase from '../config/supabase.js';
 import {
   attachRestaurantStream,
   detachRestaurantStream,
@@ -224,6 +225,142 @@ function extractOnlineOrderFields(body = {}) {
   };
 }
 
+async function upsertTableAssignment(restaurantId, tableId, waiterId) {
+  const now = new Date().toISOString();
+
+  await supabase
+    .from('table_assignments')
+    .update({ is_active: false, updated_at: now })
+    .eq('restaurant_id', restaurantId)
+    .eq('table_id', tableId);
+
+  const { error } = await supabase
+    .from('table_assignments')
+    .upsert(
+      { restaurant_id: restaurantId, table_id: tableId, waiter_id: waiterId, is_active: true, updated_at: now },
+      { onConflict: 'restaurant_id,table_id' }
+    );
+
+  if (error) {
+    throw error;
+  }
+}
+
+// ACCESS CHECK: Validate waiter has access to table using table_assignments as source of truth
+// Options:
+// - isManual: skip assignment checks for POS/manual flows
+// - isReadOnly: skip "another waiter has it" check for read-only operations (fetching data)
+async function validateTableAccess(restaurantId, tableId, currentUser = {}, { isManual = false, isReadOnly = false } = {}) {
+  const currentWaiterId = currentUser.id || currentUser.userId;
+
+  if (!tableId) {
+    return;
+  }
+
+  if (isManual) {
+    // Manual POS flow never blocked
+    return;
+  }
+
+  if (currentUser.role === 'manager' || currentUser.role === 'admin') {
+    return;
+  }
+
+  if (!currentWaiterId) {
+    throw new Error('User must be authenticated');
+  }
+
+  // Check BOTH table_assignments (active sessions) AND users.assigned_tables (UI assignments)
+  const currentWaiterStr = String(currentWaiterId || '').trim();
+
+  // 1. Check for active table_assignments record
+  const { data: activeAssignment, error: activeError } = await supabase
+    .from('table_assignments')
+    .select('waiter_id')
+    .eq('restaurant_id', restaurantId)
+    .eq('table_id', tableId)
+    .eq('is_active', true)
+    .limit(1)
+    .maybeSingle();
+
+  let assignmentError = activeError;
+
+  if (assignmentError && String(assignmentError.message || '').includes('is_active')) {
+    const { data: fallbackAssignment, error: fallbackError } = await supabase
+      .from('table_assignments')
+      .select('waiter_id')
+      .eq('restaurant_id', restaurantId)
+      .eq('table_id', tableId)
+      .limit(1)
+      .maybeSingle();
+
+    if (fallbackError) {
+      assignmentError = fallbackError;
+    }
+  }
+
+  if (assignmentError) {
+    logger.warn('Table assignment lookup failed', {
+      restaurantId,
+      tableId,
+      userId: currentWaiterId,
+      error: assignmentError.message,
+    });
+    throw new Error('Unable to validate table assignment');
+  }
+
+  const assignedWaiterId = activeAssignment?.waiter_id;
+  const assignedWaiterStr = String(assignedWaiterId || '').trim();
+
+  // If table_assignments exists for this waiter, allow access
+  if (assignedWaiterStr === currentWaiterStr) {
+    return;
+  }
+
+  // If table_assignments exists for ANOTHER waiter, block access (unless read-only)
+  if (assignedWaiterStr && assignedWaiterStr !== currentWaiterStr) {
+    if (!isReadOnly) {
+      throw new Error('This table is assigned to another waiter');
+    }
+    // For read-only operations, log but allow access to see the current state
+    logger.info('Read-only access to table assigned to another waiter', {
+      restaurantId,
+      tableId,
+      currentWaiterId,
+      assignedWaiterId,
+    });
+    return;
+  }
+
+  // No table_assignments yet - check users.assigned_tables (UI assignments)
+  const { data: user, error: userError } = await supabase
+    .from('users')
+    .select('assigned_tables')
+    .eq('id', currentWaiterId)
+    .eq('restaurant_id', restaurantId)
+    .single();
+
+  if (!userError && user) {
+    const assignedTables = Array.isArray(user.assigned_tables) ? user.assigned_tables : [];
+    const tableIdStr = String(tableId).trim();
+    const isAssignedToUser = assignedTables.some(tid => String(tid || '').trim() === tableIdStr);
+
+    if (isAssignedToUser) {
+      // Waiter is assigned via UI - create table_assignments entry for current session
+      await upsertTableAssignment(restaurantId, tableId, currentWaiterId);
+      return;
+    }
+  }
+
+  // Not assigned anywhere - waiter can create order but mark as unassigned
+  logger.info('Table access - creating new assignment', {
+    restaurantId,
+    tableId,
+    userId: currentWaiterId,
+  });
+  await upsertTableAssignment(restaurantId, tableId, currentWaiterId);
+}
+
 export const createOrder = asyncHandler(async (req, res) => {
   const orderOrigin = req.orderOrigin || (req.user ? 'pos' : 'qr');
   const normalizedOrder = {
@@ -252,10 +389,19 @@ export const createOrder = asyncHandler(async (req, res) => {
     return sendError(res, 400, 'Table is required for dine-in orders');
   }
 
+  const restaurantId = req.restaurantId || req.user?.restaurantId;
+  if (!restaurantId) {
+    return sendError(res, 401, 'Restaurant ID is required');
+  }
+
   const order = await OrderService.createOrder(
-    req.restaurantId || req.user?.restaurantId,
+    restaurantId,
     normalizedOrder,
-    { actorRole: req.user?.role }
+    {
+      userId: req.user?.id || req.user?.userId,
+      actorRole: req.user?.role,
+      actorName: req.user?.name || req.user?.email || 'System',
+    }
   );
 
   if (order?.reusedExistingBill) {
@@ -272,6 +418,20 @@ export const createOrder = asyncHandler(async (req, res) => {
 
 export const getActiveOrderByTable = asyncHandler(async (req, res) => {
   const { tableId } = req.params;
+  const currentWaiterId = req.user?.userId;
+  
+  if (!currentWaiterId) {
+    return sendError(res, 401, 'User must be authenticated');
+  }
+
+  try {
+    // ACCESS CHECK: Allow read-only access to see current table state (isReadOnly: true)
+    // This prevents false "locked" errors when multiple waiters navigate to the same table
+    await validateTableAccess(req.restaurantId, tableId, req.user || {}, { isManual: false, isReadOnly: true });
+  } catch (validationError) {
+    return sendError(res, 403, validationError.message);
+  }
+
   const order = await OrderService.getActiveOrderByTable(req.restaurantId, tableId);
 
   return sendSuccess(
@@ -297,12 +457,11 @@ export const getOrders = asyncHandler(async (req, res) => {
     tableNumber: req.query.tableNumber ? String(req.query.tableNumber).trim() : undefined,
     startDate: req.query.startDate,
     endDate: req.query.endDate,
-    limit: parseInt(req.query.limit) || 50,
+    limit: parseInt(req.query.limit) || 20,
     skip: parseInt(req.query.skip) || 0,
   };
 
   const result = await OrderService.getOrders(req.user.restaurantId, filters);
-
   return sendSuccess(res, 200, result, 'Orders fetched successfully');
 });
 
@@ -312,6 +471,7 @@ export const getActiveOrders = asyncHandler(async (req, res) => {
 });
 
 export const getOpenBills = asyncHandler(async (req, res) => {
+  logger.info(`API HIT: GET /orders/open - Restaurant: ${req.user.restaurantId}`);
   const orders = await OrderService.getOpenBills(req.user.restaurantId);
   return sendSuccess(res, 200, orders, 'Open bills fetched successfully');
 });
@@ -330,6 +490,10 @@ export const softDeleteOrder = asyncHandler(async (req, res) => {
     currentPassword: req.body.currentPassword || req.body.current_password || '',
   });
 
+  if (!deletedOrder || !deletedOrder.id) {
+    return sendError(res, 400, 'Order deletion failed - no rows were updated in database');
+  }
+
   return sendSuccess(res, 200, deletedOrder, 'Order deleted safely');
 });
 
@@ -347,36 +511,54 @@ export const approveDiscount = asyncHandler(async (req, res) => {
 });
 
 export const streamEvents = (req, res) => {
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache, no-transform');
-  res.setHeader('Connection', 'keep-alive');
-  res.setHeader('X-Accel-Buffering', 'no');
+  try {
+    // Verify user and restaurant ID are set by auth middleware
+    if (!req.user) {
+      return sendError(res, 401, 'Authentication required');
+    }
 
-  if (typeof res.flushHeaders === 'function') {
-    res.flushHeaders();
+    if (!req.user.restaurantId) {
+      return sendError(res, 401, 'Restaurant ID not found in token');
+    }
+
+    if (!req.restaurantId) {
+      return sendError(res, 401, 'Tenant isolation failed');
+    }
+
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+
+    if (typeof res.flushHeaders === 'function') {
+      res.flushHeaders();
+    }
+
+    const client = {
+      id: `${req.user.userId}:${Date.now()}`,
+      res,
+    };
+
+    attachRestaurantStream(req.user.restaurantId, client);
+    writeSseEvent(res, 'connected', {
+      message: 'Realtime notifications connected',
+      restaurantId: req.user.restaurantId,
+      userId: req.user.userId,
+    });
+
+    const heartbeat = setInterval(() => {
+      writeSseEvent(res, 'heartbeat', { timestamp: new Date().toISOString() });
+    }, 25000);
+
+    req.on('close', () => {
+      clearInterval(heartbeat);
+      detachRestaurantStream(req.user.restaurantId, client);
+      res.end();
+    });
+  } catch (error) {
+    logger.error('SSE stream error:', error);
+    return sendError(res, 500, 'Failed to establish stream connection');
   }
-
-  const client = {
-    id: `${req.user.userId}:${Date.now()}`,
-    res,
-  };
-
-  attachRestaurantStream(req.user.restaurantId, client);
-  writeSseEvent(res, 'connected', {
-    message: 'Realtime notifications connected',
-    restaurantId: req.user.restaurantId,
-    userId: req.user.userId,
-  });
-
-  const heartbeat = setInterval(() => {
-    writeSseEvent(res, 'heartbeat', { timestamp: new Date().toISOString() });
-  }, 25000);
-
-  req.on('close', () => {
-    clearInterval(heartbeat);
-    detachRestaurantStream(req.user.restaurantId, client);
-    res.end();
-  });
 };
 
 export const updateOrder = asyncHandler(async (req, res) => {
@@ -403,6 +585,9 @@ export const updateOrder = asyncHandler(async (req, res) => {
     return sendError(res, 400, 'Table is required for dine-in orders');
   }
 
+  // ACCESS CHECK: Validate waiter can access table being updated
+  await validateTableAccess(req.restaurantId, normalizedOrder.tableId, req.user || {}, { isManual: true });
+
   const order = await OrderService.updateOrder(req.restaurantId, orderId, normalizedOrder, {
     actorRole: req.user?.role,
     actorUserId: req.user?.userId,
@@ -413,6 +598,12 @@ export const updateOrder = asyncHandler(async (req, res) => {
 
 export const sendOrderToKitchen = asyncHandler(async (req, res) => {
   const { orderId } = req.params;
+  
+  // ✅ CRITICAL: Validate order ID before sending to kitchen
+  if (!orderId) {
+    return sendError(res, 400, 'Order ID is required');
+  }
+
   const result = await OrderService.sendOrderToKitchen(req.restaurantId, orderId);
   return sendSuccess(res, 200, result, 'Order sent to kitchen successfully');
 });
@@ -434,6 +625,30 @@ export const updateOrderStatus = asyncHandler(async (req, res) => {
 export const settleOrder = asyncHandler(async (req, res) => {
   const { orderId } = req.params;
 
+  if (!orderId) {
+    return sendError(res, 400, 'Order ID is required');
+  }
+
+  // ACCESS CHECK: Fetch order to get table and validate access
+  const { data: order, error: orderError } = await supabase
+    .from('orders')
+    .select('table_id, status, payment_status, total_amount')
+    .eq('id', orderId)
+    .eq('restaurant_id', req.restaurantId)
+    .single();
+
+  if (orderError || !order) {
+    return sendError(res, 404, 'Order not found');
+  }
+
+  if (!order.status) {
+    return sendError(res, 400, 'Order status is invalid');
+  }
+
+  // Validate waiter can access the table (enforce validation for billing)
+  await validateTableAccess(req.restaurantId, order.table_id, req.user || {}, { isManual: false });
+
+  // Fetch fresh bill number and process settlement
   const settlement = await OrderService.settleOrder(req.restaurantId, orderId, {
     method: getOptionalPaymentMethod(req.body),
     amountReceived: getOptionalAmountReceived(req.body),
@@ -454,6 +669,21 @@ export const settleOrder = asyncHandler(async (req, res) => {
 
 export const markOrderPaid = asyncHandler(async (req, res) => {
   const { orderId } = req.params;
+
+  // ACCESS CHECK: Fetch order to get table and validate access
+  const { data: order, error: orderError } = await supabase
+    .from('orders')
+    .select('table_id')
+    .eq('id', orderId)
+    .eq('restaurant_id', req.restaurantId)
+    .single();
+
+  if (orderError || !order) {
+    return sendError(res, 404, 'Order not found');
+  }
+
+  // Validate waiter can access the table (enforce validation for billing)
+  await validateTableAccess(req.restaurantId, order.table_id, req.user || {}, { isManual: false });
 
   const payment = await OrderService.markOrderPaid(req.restaurantId, orderId, {
     method: getOptionalPaymentMethod(req.body),

@@ -16,6 +16,7 @@ import {
   Gift,
   LayoutGrid,
   ListOrdered,
+  KeyRound,
 } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
 import PortalLogoutButton from '../common/PortalLogoutButton';
@@ -30,7 +31,9 @@ const ownerMenuItems = [
   { icon: Users, label: 'Staff Access', href: '/admin/staff', roles: ['owner'] },
   { icon: Gift, label: 'Loyalty', href: '/admin/loyalty', roles: ['owner'] },
   { icon: Sparkles, label: 'Analytics', href: '/admin/analytics', roles: ['owner'] },
+  { icon: BarChart3, label: 'Staff Activity', href: '/admin/staff-activity', roles: ['owner'] },
   { icon: Palette, label: 'Settings', href: '/admin/settings', roles: ['owner'] },
+  { icon: KeyRound, label: 'Change Password', href: '/admin/change-password', roles: ['owner'] },
 ];
 
 const managerMenuItems = [
@@ -42,7 +45,9 @@ const managerMenuItems = [
   { icon: Users, label: 'Waiters', href: '/manager/waiters', roles: ['manager'] },
   { icon: PackageSearch, label: 'Inventory', href: '/manager/inventory', roles: ['manager'] },
   { icon: Receipt, label: 'Bills', href: '/manager/bills', roles: ['manager'] },
+  { icon: BarChart3, label: 'Staff Activity', href: '/manager/staff-activity', roles: ['manager'] },
   { icon: Palette, label: 'Settings', href: '/manager/settings', roles: ['manager'] },
+  { icon: KeyRound, label: 'Change Password', href: '/manager/change-password', roles: ['manager'] },
 ];
 
 const developerMenuItems = [
@@ -51,13 +56,14 @@ const developerMenuItems = [
   { icon: Users, label: 'Users', href: '/developer/users', roles: ['developer'] },
   { icon: Palette, label: 'System', href: '/developer/system', roles: ['developer'] },
   { icon: ClipboardList, label: 'Audit Logs', href: '/developer/audit', roles: ['developer'] },
+  { icon: KeyRound, label: 'Change Password', href: '/developer/change-password', roles: ['developer'] },
 ];
 
 const posMenuItems = [
-  { icon: Receipt, label: 'Billing', href: '/pos', roles: ['staff'] },
-  { icon: ListOrdered, label: 'Orders', href: '/pos/orders', roles: ['staff'] },
   { icon: LayoutGrid, label: 'Tables', href: '/pos/tables', roles: ['staff'] },
+  { icon: ListOrdered, label: 'Orders', href: '/pos/orders', roles: ['staff'] },
   { icon: Palette, label: 'Settings', href: '/pos/settings', roles: ['staff'] },
+  { icon: KeyRound, label: 'Change Password', href: '/pos/change-password', roles: ['staff'] },
 ];
 
 const kotMenuItems = [
@@ -81,7 +87,7 @@ export default function Sidebar({ isOpen, onClose }) {
   const workspaceItems = isKotPortal ? kotMenuItems : isPosPortal ? posMenuItems : isDeveloperPortal ? developerMenuItems : isManagerPortal ? managerMenuItems : ownerMenuItems;
   const filteredMenuItems = workspaceItems.filter((item) => item.roles.includes(activeRole));
   const isActivePath = (href) => location.pathname === href || location.pathname.startsWith(`${href}/`);
-  const homePath = isKotPortal ? '/kot' : isPosPortal ? '/pos' : isDeveloperPortal ? '/developer' : isManagerPortal ? '/manager' : '/admin';
+  const homePath = isKotPortal ? '/kot' : isPosPortal ? '/pos/tables' : isDeveloperPortal ? '/developer' : isManagerPortal ? '/manager' : '/admin';
   const portal = isKotPortal ? 'kot' : isPosPortal ? 'pos' : 'admin';
   const workspaceLabel = isKotPortal ? 'KOT Portal' : isPosPortal ? 'POS Portal' : isDeveloperPortal ? 'Developer Console' : isManagerPortal ? 'Manager Portal' : 'Admin Portal';
   const navLabel = isKotPortal ? 'Kitchen' : isPosPortal ? 'POS Navigation' : isDeveloperPortal ? 'Platform' : isManagerPortal ? 'Operations' : 'Admin';

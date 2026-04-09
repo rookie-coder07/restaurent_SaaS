@@ -122,12 +122,13 @@ export class TableService {
 
   static async deleteTable(restaurantId, tableId) {
     try {
-      // Check if table has active orders
+      // Check if table has active orders (excluding soft-deleted)
       const { count, error: countError } = await supabase
         .from('orders')
         .select('*', { count: 'exact', head: true })
         .eq('restaurant_id', restaurantId)
         .eq('table_id', tableId)
+        .eq('is_deleted', false)
         .neq('status', 'completed');
 
       if (countError) throw countError;

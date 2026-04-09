@@ -12,7 +12,16 @@ export const createCategory = asyncHandler(async (req, res) => {
 });
 
 export const getCategories = asyncHandler(async (req, res) => {
+  logger.info('🏷️  GET /menu/categories - Categories request', {
+    restaurantId: req.user?.restaurantId,
+  });
+  
   const categories = await MenuService.getCategories(req.restaurantId);
+
+  logger.info('✅ Categories fetched', {
+    restaurantId: req.user?.restaurantId,
+    categoryCount: categories?.length || 0,
+  });
 
   const result = {
     categories,
@@ -53,6 +62,12 @@ export const createMenuItem = asyncHandler(async (req, res) => {
 });
 
 export const getMenuItems = asyncHandler(async (req, res) => {
+  logger.info('🍽️  GET /menu/items - Menu items request', {
+    restaurantId: req.user?.restaurantId,
+    userId: req.user?.userId,
+    query: req.query,
+  });
+
   const filters = {
     categoryId: req.query.categoryId,
     tags: req.query.tags ? req.query.tags.split(',') : [],
@@ -62,6 +77,12 @@ export const getMenuItems = asyncHandler(async (req, res) => {
   };
 
   const items = await MenuService.getMenuItems(req.user.restaurantId, filters);
+  
+  logger.info('✅ Menu items fetched', {
+    restaurantId: req.user?.restaurantId,
+    itemCount: items?.length || 0,
+  });
+
   const result = {
     items,
     total: items?.length || 0,

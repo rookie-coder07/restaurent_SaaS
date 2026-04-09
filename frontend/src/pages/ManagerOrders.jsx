@@ -248,7 +248,18 @@ export default function ManagerOrders() {
           ...payload,
           requestId: createRequestRef.current.id,
         });
+    
     let savedOrder = response.data?.data;
+    
+    // ✅ Validate order has been properly created/updated
+    if (!savedOrder?.id) {
+      throw new Error(
+        draftOrderId
+          ? 'Failed to update order: Server did not return order data'
+          : 'Failed to create order: Server did not return order data'
+      );
+    }
+    
     if (savedOrder?.id) {
       createRequestRef.current = { id: '', signature: '' };
     }
@@ -302,6 +313,12 @@ export default function ManagerOrders() {
   };
 
   const handleSettleBill = async () => {
+    // PREVENT DOUBLE SUBMISSION: Guard against concurrent settle attempts
+    if (loadingAction) {
+      setError('Bill settlement is already in progress. Please wait...');
+      return;
+    }
+
     try {
       setLoadingAction(true);
       setError('');

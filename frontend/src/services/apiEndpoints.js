@@ -1,4 +1,5 @@
 import api from './api.js';
+import { getCurrentPortalAccessToken, getCurrentRestaurantId } from './api.js';
 
 export const authAPI = {
   register: (data) => api.post('/v1/auth/register', data),
@@ -7,8 +8,6 @@ export const authAPI = {
   logout: () => api.post('/v1/auth/logout'),
   getCurrentUser: () => api.get('/v1/auth/me'),
   changePassword: (data) => api.post('/v1/auth/change-password', data),
-  requestPasswordReset: (data) => api.post('/v1/auth/request-password-reset', data),
-  getResetRequests: () => api.get('/v1/reset-requests'),
   resetUserPassword: (data) => api.post('/v1/manager/reset-user-password', data),
 };
 
@@ -28,6 +27,12 @@ export const restaurantAPI = {
     return api.get('/v1/restaurants/staff', { params });
   },
   deactivateStaff: (staffId) => api.delete(`/v1/restaurants/staff/${staffId}`),
+  resetStaffPassword: (staffId, data) => api.put(`/v1/restaurants/staff/${staffId}/reset-password`, data),
+  
+  // Activity API
+  getActivityStaffList: () => api.get('/v1/activity/staff'),
+  getActivityLogs: (userId) => api.get(`/v1/activity/${userId}/logs`),
+  getUserActivityInfo: (userId) => api.get(`/v1/activity/${userId}/info`),
 };
 
 export const menuAPI = {
@@ -52,7 +57,16 @@ export const orderAPI = {
   getOpenBills: () => api.get('/v1/orders/open'),
   getOnlineInbox: (filters) => api.get('/v1/orders/inbox/online', { params: filters }),
   cancelPendingBills: (data) => api.post('/v1/orders/cancel-pending', data),
-  getActiveOrderForTable: (tableId) => api.get(`/v1/orders/table/${tableId}/active`),
+  getActiveOrderForTable: (tableId) => {
+    const token = getCurrentPortalAccessToken();
+    const restaurantId = getCurrentRestaurantId();
+    return api.get(`/v1/orders/table/${tableId}/active`, {
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(restaurantId ? { 'X-Restaurant-Id': restaurantId } : {}),
+      },
+    });
+  },
   getOrder: (orderId) => api.get(`/v1/orders/${orderId}`),
   updateOrder: (orderId, data) => api.put(`/v1/orders/${orderId}`, data),
   approveDiscount: (orderId, data) => api.post(`/v1/orders/${orderId}/discount-approval`, data),

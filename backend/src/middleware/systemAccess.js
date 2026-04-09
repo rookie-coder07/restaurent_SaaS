@@ -62,13 +62,14 @@ async function fetchGlobalMaintenance() {
     .eq('setting_key', 'global_maintenance')
     .maybeSingle();
 
-  if (error && error.code !== 'PGRST116') {
+  // Handle missing table gracefully - if table doesn't exist (PGRST205) or not found, assume no maintenance
+  if (error && error.code !== 'PGRST116' && error.code !== 'PGRST205') {
     throw error;
   }
 
   return writeCachedEntry(cache.globalMaintenance, null, {
-    enabled: Boolean(data?.setting_value?.enabled),
-    message: data?.setting_value?.message || 'System is currently under maintenance.',
+    enabled: false, // Default to disabled if table doesn't exist
+    message: 'System is currently under maintenance.',
   });
 }
 
@@ -90,13 +91,14 @@ async function fetchRestaurantMaintenance(restaurantId) {
     .eq('setting_key', 'restaurant_maintenance')
     .maybeSingle();
 
-  if (error && error.code !== 'PGRST116') {
+  // Handle missing table gracefully - if table doesn't exist (PGRST205) or not found, assume no maintenance
+  if (error && error.code !== 'PGRST116' && error.code !== 'PGRST205') {
     throw error;
   }
 
   return writeCachedEntry(cache.restaurantMaintenance, restaurantId, {
-    enabled: Boolean(data?.setting_value?.enabled),
-    message: data?.setting_value?.message || 'This restaurant workspace is under maintenance.',
+    enabled: false, // Default to disabled if table doesn't exist
+    message: 'This restaurant workspace is under maintenance.',
   });
 }
 
@@ -117,7 +119,8 @@ async function fetchRestaurantAccess(restaurantId) {
     .eq('id', restaurantId)
     .maybeSingle();
 
-  if (error) {
+  // Handle missing column gracefully - if column doesn't exist (42703), assume access is enabled
+  if (error && error.code !== '42703' && error.code !== 'PGRST205') {
     throw error;
   }
 

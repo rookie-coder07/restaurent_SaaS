@@ -1,7 +1,31 @@
 const PORTAL_STORAGE_PREFIX = 'portal-auth';
 
+const memoryStore = new Map();
+const memoryStorage = {
+  getItem: (k) => memoryStore.get(k) || null,
+  setItem: (k, v) => {
+    memoryStore.set(k, String(v));
+  },
+  removeItem: (k) => memoryStore.delete(k),
+};
+
 function getStorage() {
-  return window.sessionStorage;
+  // Try sessionStorage, fall back to localStorage, then in-memory map when blocked by tracking prevention
+  try {
+    const probeKey = '__portal_probe__';
+    window.sessionStorage.setItem(probeKey, '1');
+    window.sessionStorage.removeItem(probeKey);
+    return window.sessionStorage;
+  } catch {
+    try {
+      const probeKey = '__portal_probe__';
+      window.localStorage.setItem(probeKey, '1');
+      window.localStorage.removeItem(probeKey);
+      return window.localStorage;
+    } catch {
+      return memoryStorage;
+    }
+  }
 }
 
 function decodeTokenPayload(token) {
@@ -36,7 +60,12 @@ function getPortalStorageKey(portal) {
 }
 
 export function savePortalSession(portal, session) {
-  getStorage().setItem(getPortalStorageKey(portal), JSON.stringify(session));
+  try {
+    getStorage().setItem(getPortalStorageKey(portal), JSON.stringify(session));
+  } catch {
+    // If storage is blocked mid-flight, keep an in-memory backup
+    memoryStorage.setItem(getPortalStorageKey(portal), JSON.stringify(session));
+  }
 }
 
 export function readPortalSession(portal = 'admin') {

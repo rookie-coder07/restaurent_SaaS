@@ -28,7 +28,7 @@ export const changePasswordSchema = Joi.object({
 
 export const requestPasswordResetSchema = Joi.object({
   email: Joi.string().email().lowercase().required(),
-  role: Joi.string().valid('manager', 'pos').required(),
+  role: Joi.string().valid('owner', 'manager', 'staff', 'developer', 'pos', 'pos_staff').required(),
 });
 
 export const resetUserPasswordSchema = Joi.object({

@@ -53,15 +53,13 @@ function handleAuthError(res, error) {
     return sendError(res, error.statusCode, error.message);
   }
 
-  logger.error('Auth middleware error:', error);
-  return sendError(res, 401, 'Authentication failed');
+  return sendError(res, 500, 'Authentication error');
 }
 
 export const authMiddleware = (req, res, next) => {
   try {
     const token = extractAuthToken(req);
     req.user = verifyAccessToken(token);
-    logger.info(`Auth successful for user: ${req.user.email}`);
     next();
   } catch (error) {
     return handleAuthError(res, error);
@@ -71,8 +69,10 @@ export const authMiddleware = (req, res, next) => {
 export const streamAuthMiddleware = (req, res, next) => {
   try {
     const token = extractAuthToken(req, { allowQuery: true });
+    if (!token) {
+      throw new AppError('UNAUTHORIZED', 'No token provided');
+    }
     req.user = verifyAccessToken(token);
-    logger.info(`Stream auth successful for user: ${req.user.email}`);
     next();
   } catch (error) {
     return handleAuthError(res, error);
@@ -82,13 +82,11 @@ export const streamAuthMiddleware = (req, res, next) => {
 export const optionalAuth = (req, res, next) => {
   try {
     const token = extractAuthToken(req);
-
     if (token) {
       req.user = verifyAccessToken(token);
     }
   } catch (error) {
-    logger.debug('Optional auth failed, continuing as unauthenticated');
+    // Continue as unauthenticated
   }
-
   next();
 };

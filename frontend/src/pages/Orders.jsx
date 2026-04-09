@@ -48,9 +48,8 @@ export default function Orders() {
   const navigate = useNavigate();
   const user = useAuthStore((state) => state.user);
   const isManagerUser = user?.role === 'manager';
-  const canDeleteOrders = user?.role === 'owner';
-  const { data: ordersData = {}, loading, execute: refetchOrders, refetch: refetchOrdersLatest } = useApi(() => orderAPI.getOrders({ limit: 100 }));
-  const { data: tablesData = {}, refetch: refetchTables } = useApi(() => tableAPI.getTables({}));
+  const isAdminUser = user?.role === 'owner';
+  const canDeleteOrders = isAdminUser; // Only admins (owners) can delete orders
 
   const [filterStatus, setFilterStatus] = useState('all');
   const [datePreset, setDatePreset] = useState('all');
@@ -62,24 +61,37 @@ export default function Orders() {
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
-  const [pendingDeleteOrder, setPendingDeleteOrder] = useState(null);
-  const [isDeletingOrder, setIsDeletingOrder] = useState(false);
+  const [page, setPage] = useState(0);
+  const pageSize = 20;
   const [selectedOrderIds, setSelectedOrderIds] = useState([]);
+  const [pendingDeletionQueue, setPendingDeletionQueue] = useState([]);
+  const [removedOrderIds, setRemovedOrderIds] = useState([]);
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+  const [pendingDeleteOrder, setPendingDeleteOrder] = useState(null);
+  const [deletePassword, setDeletePassword] = useState('');
+  const [isDeletingOrder, setIsDeletingOrder] = useState(false);
+  const [deleteMode, setDeleteMode] = useState('selected');
   const [showBulkDeleteModal, setShowBulkDeleteModal] = useState(false);
   const [isBulkDeletingOrders, setIsBulkDeletingOrders] = useState(false);
-  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
-  const [pendingDeletionQueue, setPendingDeletionQueue] = useState([]);
   const [deleteClock, setDeleteClock] = useState(Date.now());
-  const [deletePassword, setDeletePassword] = useState('');
-  const pendingDeletionQueueRef = useRef([]);
-  const requiresDeletePassword = user?.role === 'owner';
-
-  const orders = ordersData?.items || [];
-  const tables = tablesData?.tables || [];
-  const pendingDeletionIds = useMemo(
-    () => new Set(pendingDeletionQueue.flatMap((entry) => entry.orderIds)),
-    [pendingDeletionQueue]
+  const pendingDeletionQueueRef = useRef(null);
+  const requiresDeletePassword = true; // Config: Set to false if password not required for delete
+  
+  const { data: ordersData = {}, loading, execute: refetchOrders } = useApi(() => 
+    orderAPI.getOrders({ limit: pageSize, skip: page * pageSize })
   );
+  const { data: tablesData = {}, refetch: refetchTables } = useApi(() => tableAPI.getTables({ limit: 50 }));
+
+  const orders = useMemo(() => ordersData?.items || [], [ordersData?.items]);
+  const tables = useMemo(() => tablesData?.tables || [], [tablesData?.tables]);
+
+  const pendingDeletionIds = useMemo(() => {
+    const ids = new Set();
+    pendingDeletionQueue.forEach((entry) => {
+      entry.orderIds.forEach((id) => ids.add(id));
+    });
+    return ids;
+  }, [pendingDeletionQueue]);
 
   const applyDatePreset = (preset) => {
     const now = new Date();
@@ -144,27 +156,21 @@ export default function Orders() {
     hasPagination,
   } = useResponsivePagination(filteredOrders, { mobileItemsPerPage: 6, desktopItemsPerPage: 12 });
 
-  useAutoRefresh(() => Promise.allSettled([refetchOrdersLatest(), refetchTables()]), 12000);
+  useAutoRefresh(() => Promise.allSettled([refetchOrders(), refetchTables()]), 12000);
 
   useEffect(() => {
     pendingDeletionQueueRef.current = pendingDeletionQueue;
   }, [pendingDeletionQueue]);
 
   useEffect(() => {
-    if (pendingDeletionQueue.length === 0) {
-      return undefined;
-    }
+    setRemovedOrderIds([]);
+  }, [ordersData]);
 
-    const intervalId = window.setInterval(() => {
-      setDeleteClock(Date.now());
-    }, 500);
-
-    return () => window.clearInterval(intervalId);
-  }, [pendingDeletionQueue.length]);
-
-  useEffect(() => () => {
-    pendingDeletionQueueRef.current.forEach((entry) => window.clearTimeout(entry.timeoutId));
-  }, []);
+  useEffect(() => {
+    if (!pendingDeleteOrder) return;
+    const interval = setInterval(() => setDeleteClock(Date.now()), 100);
+    return () => clearInterval(interval);
+  }, [pendingDeleteOrder]);
 
   const handleStatusUpdate = async (orderId, newStatus) => {
     try {
@@ -211,15 +217,24 @@ export default function Orders() {
 
   const finalizePendingDeletion = async (entry) => {
     try {
-      await Promise.all(
+      const responses = await Promise.all(
         entry.orderIds.map((orderId) =>
           orderAPI.softDeleteOrder(orderId, {
             currentPassword: entry.currentPassword || '',
           })
         )
       );
+
+      // Verify all deletions were successful
+      const allSuccessful = responses.every((response) => response?.status === 200 && response?.data?.data?.id);
+      
+      if (!allSuccessful) {
+        throw new Error('One or more orders failed to delete. No rows were affected.');
+      }
+
       removePendingDeletionEntry(entry.id);
-      await refetchOrders();
+      setRemovedOrderIds((current) => Array.from(new Set([...current, ...entry.orderIds])));
+      await Promise.allSettled([refetchOrders(), refetchTables()]);
       setSuccess(
         entry.orderIds.length === 1
           ? `${entry.label} deleted permanently.`
@@ -228,12 +243,13 @@ export default function Orders() {
       window.setTimeout(() => setSuccess(null), 4000);
     } catch (err) {
       removePendingDeletionEntry(entry.id);
-      setError(err.response?.data?.message || 'Failed to delete orders.');
-      await refetchOrders();
+      setRemovedOrderIds((ids) => ids.filter((id) => !entry.orderIds.includes(id)));
+      setError(err.response?.data?.message || err.message || 'Failed to delete orders.');
+      await Promise.allSettled([refetchOrders(), refetchTables()]);
     }
   };
 
-  const queueDeletion = (ordersToDelete) => {
+  const queueDeletion = (ordersToDelete, passwordOverride) => {
     const uniqueOrders = Array.from(new Map(ordersToDelete.map((order) => [order.id, order])).values());
 
     if (uniqueOrders.length === 0) {
@@ -244,21 +260,27 @@ export default function Orders() {
       id: `delete-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       orderIds: uniqueOrders.map((order) => order.id),
       label: uniqueOrders.length === 1 ? formatDisplayOrderNumber(uniqueOrders[0]) : `${uniqueOrders.length} orders`,
-      expiresAt: Date.now() + 10000,
+      currentPassword:
+        passwordOverride !== undefined
+          ? passwordOverride
+          : requiresDeletePassword
+            ? deletePassword
+            : '',
+      expiresAt: Date.now() + 2000,
       timeoutId: null,
-      currentPassword: requiresDeletePassword ? deletePassword : '',
     };
 
     entry.timeoutId = window.setTimeout(() => {
       finalizePendingDeletion(entry);
-    }, 10000);
+    }, 2000);
 
     setPendingDeletionQueue((current) => [entry, ...current]);
+    setRemovedOrderIds((current) => Array.from(new Set([...current, ...entry.orderIds])));
     setSelectedOrderIds((current) => current.filter((id) => !entry.orderIds.includes(id)));
     setSuccess(
       uniqueOrders.length === 1
-        ? `${entry.label} removed from the list. Undo available for 10 seconds.`
-        : `${uniqueOrders.length} orders removed from the list. Undo available for 10 seconds.`
+        ? `${entry.label} scheduled for deletion. Undo available for 2 seconds.`
+        : `${uniqueOrders.length} orders scheduled for deletion. Undo available for 2 seconds.`
     );
     window.setTimeout(() => setSuccess(null), 4000);
   };
@@ -270,6 +292,7 @@ export default function Orders() {
         window.clearTimeout(entry.timeoutId);
       }
 
+      setRemovedOrderIds((ids) => ids.filter((id) => !(entry?.orderIds || []).includes(id)));
       return current.filter((candidate) => candidate.id !== entryId);
     });
   };
@@ -332,7 +355,19 @@ export default function Orders() {
       return;
     }
 
+    setDeleteMode('timeline');
     setSelectedOrderIds(timelineOrders.map((order) => order.id));
+    setShowBulkDeleteModal(true);
+  };
+
+  const deleteAllOrders = () => {
+    if (filteredOrders.length === 0) {
+      setError('No orders available to delete.');
+      return;
+    }
+
+    setDeleteMode('all');
+    setSelectedOrderIds(filteredOrders.map((order) => order.id));
     setShowBulkDeleteModal(true);
   };
 
@@ -345,13 +380,15 @@ export default function Orders() {
     try {
       setIsBulkDeletingOrders(true);
       setError(null);
-      if (requiresDeletePassword && !deletePassword.trim()) {
-        setError('Enter admin password to delete previous orders.');
+      const bulkPasswordRequired = deleteMode === 'all' || requiresDeletePassword || selectedBulkOrders.length > 10;
+      if (bulkPasswordRequired && !deletePassword.trim()) {
+        setError('Enter admin password to delete orders.');
         return;
       }
-      queueDeletion(selectedBulkOrders);
+      queueDeletion(selectedBulkOrders, bulkPasswordRequired ? deletePassword : undefined);
       setShowBulkDeleteModal(false);
       setDeletePassword('');
+      setDeleteMode('selected');
     } catch (err) {
       setError(err.response?.data?.message || 'Failed to queue selected orders for deletion.');
     } finally {
@@ -573,25 +610,27 @@ export default function Orders() {
         ) : null}
       </Card>
 
-      {canDeleteOrders && selectedBulkOrders.length > 0 ? (
+      {canDeleteOrders && filteredOrders.length > 0 ? (
         <Card className="border-[var(--color-primary)]/20 bg-[var(--color-primary-soft)]/40">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div>
-              <p className="text-sm font-semibold text-[var(--color-text)]">{selectedBulkOrders.length} orders selected</p>
-              <p className="text-sm text-[var(--color-text-muted)]">Delete the selected orders permanently from the system.</p>
+              <p className="text-sm font-semibold text-[var(--color-text)]">
+                {selectedBulkOrders.length > 0
+                  ? `${selectedBulkOrders.length} orders selected`
+                  : `${filteredOrders.length} orders in view`}
+              </p>
+              <p className="text-sm text-[var(--color-text-muted)]">
+                Delete permanently across Admin, POS, and KOT. This action cannot be undone.
+              </p>
             </div>
             <div className="flex flex-wrap gap-2">
-              <Button variant="secondary" onClick={toggleSelectAllVisible}>
-                {bulkDeletableOrders.every((order) => selectedOrderIds.includes(order.id))
-                  ? 'Clear Visible Selection'
-                  : 'Select Visible'}
-              </Button>
-              <Button
-                variant="danger"
-                onClick={() => setShowBulkDeleteModal(true)}
-                disabled={selectedBulkOrders.length === 0}
-              >
-                Delete Selected ({selectedBulkOrders.length})
+              {selectedBulkOrders.length > 0 ? (
+                <Button variant="secondary" onClick={() => { setDeleteMode('selected'); setShowBulkDeleteModal(true); }}>
+                  Delete Selected ({selectedBulkOrders.length})
+                </Button>
+              ) : null}
+              <Button variant="danger" onClick={deleteAllOrders}>
+                Delete All ({filteredOrders.length})
               </Button>
             </div>
           </div>
@@ -941,7 +980,11 @@ export default function Orders() {
           </Modal>
 
           <Modal
-            title={`Delete ${selectedBulkOrders.length} Selected Order${selectedBulkOrders.length === 1 ? '' : 's'}`}
+            title={
+              deleteMode === 'all'
+                ? `Delete All (${filteredOrders.length}) Orders`
+                : `Delete ${selectedBulkOrders.length} Selected Order${selectedBulkOrders.length === 1 ? '' : 's'}`
+            }
             isOpen={showBulkDeleteModal}
             onClose={() => {
               if (isBulkDeletingOrders) {
@@ -955,10 +998,12 @@ export default function Orders() {
           >
             <div className="space-y-4">
               <div className="rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm font-medium text-red-300">
-                The selected orders will be removed from the list now. You can undo them for 10 seconds before they are deleted permanently.
+                {deleteMode === 'all'
+                  ? 'All filtered orders will be removed from the list now. You can undo for 10 seconds before they are deleted permanently.'
+                  : 'Selected orders will be removed from the list now. You can undo for 10 seconds before they are deleted permanently.'}
               </div>
 
-              {requiresDeletePassword ? (
+              {(requiresDeletePassword || deleteMode === 'all') ? (
                 <Input
                   label="Admin Password"
                   type="password"

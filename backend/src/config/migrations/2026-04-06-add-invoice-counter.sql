@@ -62,7 +62,7 @@ BEGIN
   END LOOP;
 
   IF v_current.restaurant_id IS NOT NULL AND p_starting_number IS NOT NULL AND p_starting_number < v_current.next_number THEN
-    RAISE EXCEPTION 'Invoice starting number must be greater than or equal to the current next number (%)', v_current.next_number;
+    RAISE EXCEPTION 'Bill starting number must be greater than or equal to the current next number (%)', v_current.next_number;
   END IF;
 
   UPDATE invoice_counters
@@ -73,7 +73,7 @@ BEGIN
       ELSE GREATEST(next_number, p_starting_number)
     END,
     updated_at = NOW()
-  WHERE invoice_counters.restaurant_id = p_restaurant_id;
+  WHERE restaurant_id = p_restaurant_id;
 
   RETURN QUERY
   SELECT
@@ -94,30 +94,35 @@ RETURNS TABLE (
 LANGUAGE plpgsql
 AS $$
 DECLARE
-  v_counter invoice_counters%ROWTYPE;
+  v_current_number BIGINT;
+  v_prefix TEXT;
 BEGIN
   IF p_restaurant_id IS NULL THEN
     RAISE EXCEPTION 'restaurant_id is required';
   END IF;
 
-  PERFORM set_invoice_counter_config(p_restaurant_id, 'INV', 1001);
+  -- Ensure counter exists (idempotent, don't reset)
+  BEGIN
+    INSERT INTO invoice_counters (restaurant_id, prefix, next_number)
+    VALUES (p_restaurant_id, 'INV', 1001)
+    ON CONFLICT (restaurant_id) DO NOTHING;
+  EXCEPTION
+    WHEN unique_violation THEN
+      NULL;
+  END;
 
-  SELECT *
-  INTO v_counter
-  FROM invoice_counters
-  WHERE invoice_counters.restaurant_id = p_restaurant_id
-  FOR UPDATE;
-
+  -- Lock and atomically increment
   UPDATE invoice_counters
-  SET
-    next_number = v_counter.next_number + 1,
-    updated_at = NOW()
-  WHERE invoice_counters.restaurant_id = p_restaurant_id;
+  SET next_number = next_number + 1,
+      updated_at = NOW()
+  WHERE restaurant_id = p_restaurant_id
+  RETURNING prefix, next_number INTO v_prefix, v_current_number;
 
-  RETURN QUERY
-  SELECT
-    v_counter.prefix::TEXT,
-    v_counter.next_number,
-    (v_counter.prefix || '-' || v_counter.next_number::TEXT)::TEXT;
+  IF v_prefix IS NULL THEN
+    RAISE EXCEPTION 'Failed to get invoice counter for restaurant %', p_restaurant_id;
+  END IF;
+
+  -- Return the incremented number (the one we just assigned)
+  RETURN QUERY SELECT v_prefix::TEXT, v_current_number, (v_prefix || '-' || v_current_number::TEXT)::TEXT;
 END;
 $$;

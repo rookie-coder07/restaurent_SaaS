@@ -121,6 +121,24 @@ export const requireBillingRole = () => {
   };
 };
 
+export const requireOwnerRole = () => {
+  return (req, res, next) => {
+    try {
+      const normalizedRole = normalizeRole(req.user?.role);
+
+      if (normalizedRole !== 'owner') {
+        logger.warn(`Owner action denied for user ${req.user?.email} with role ${normalizedRole}`);
+        return sendError(res, 403, 'Unauthorized: Only admin can perform this action');
+      }
+
+      next();
+    } catch (error) {
+      logger.error('Owner role check error:', error);
+      return sendError(res, 500, 'Owner role check failed');
+    }
+  };
+};
+
 export const verifyRequestRestaurantId = (req, res, next) => {
   try {
     const requestRestaurantId =

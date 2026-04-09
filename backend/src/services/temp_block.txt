@@ -1,0 +1,80 @@
+        tableNumber: table.tableNumber,
+        qrCodeUrl,
+        qrCode: `restaurant:${restaurantId}/table:${tableId}`,
+      };
+    } catch (error) {
+      logger.error('❌ Generate QR URL error:', error);
+      throw error;
+    }
+  }
+
+  static async claimTable(restaurantId, tableId, waiterId) {
+    try {
+      // FETCH current table state
+      const { data: table, error: tableError } = await supabase
+        .from('tables')
+        .select('*')
+        .eq('id', tableId)
+        .eq('restaurant_id', restaurantId)
+        .single();
+
+      if (tableError || !table) {
+        throw tableError || new Error('Table not found');
+      }
+
+      // ACCESS VALIDATION - Core logic
+      const lockedBy = table.assigned_to;
+      const currentWaiter = waiterId;
+      
+      logger.info('ACCESS CHECK', {
+        table_id: tableId,
+        locked_by: lockedBy,
+        assigned_waiter: currentWaiter,
+        locked_by_qr: table.locked_by_qr,
+      });
+
+      // RULE: If lock exists, check who owns it
+      if (table.locked_by_qr && lockedBy) {
+        const lockedByStr = String(lockedBy).trim().toLowerCase();
+        const currentWaiterStr = String(currentWaiter).trim().toLowerCase();
+        const isAssignedWaiter = lockedByStr === currentWaiterStr;
+
+        logger.info('LOCK VALIDATION', {
+          table_id: tableId,
+          is_assigned_waiter: isAssignedWaiter,
+          locked_by: lockedByStr,
+          current_waiter: currentWaiterStr,
+        });
+
+        // IF locked to THIS waiter → allow access
+        if (isAssignedWaiter) {
+          logger.info('✅ ASSIGNED WAITER HAS ACCESS - Lock is for this waiter');
+          const [enrichedTable] = await this.attachAssignedWaiterNames(restaurantId, [table]);
+          return this.transformTable(enrichedTable);
+        }
+
+        // IF locked to DIFFERENT waiter → THIS IS STALE LOCK
+        logger.warn('🔓 STALE LOCK DETECTED - Deleting', {
+          table_id: tableId,
+          locked_by: lockedByStr,
+          current_waiter: currentWaiterStr,
+        });
+
+        // DELETE lock from all sources
+        const { error: deleteError } = await supabase
+          .from('tables')
+          .update({
+            locked_by_qr: false,
+            assigned_to: currentWaiter,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', tableId)
+          .eq('restaurant_id', restaurantId);
+
+        if (deleteError) {
+          logger.error('FAILED: Could not clear stale lock', deleteError);
+          throw new Error('Failed to clear stale lock');
+        }
+
+        logger.info('✅ STALE LOCK DELETED - Access granted');
+      }

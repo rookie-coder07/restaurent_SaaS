@@ -2,6 +2,7 @@ import logger from '../utils/logger.js';
 import supabase from '../config/supabase.js';
 import AuthService from './authService.js';
 import InvoiceService from './invoiceService.js';
+import { validateRestaurantGSTContext, validateInvoiceCounterRestaurant } from '../middleware/multiTenantValidation.js';
 
 export class RestaurantService {
   static transformRestaurant(restaurant, extras = {}) {
@@ -40,6 +41,7 @@ export class RestaurantService {
       city: restaurant.city || '',
       address: restaurant.address || '',
       gstNumber: restaurant.gst_number || '',
+      gstAuthority: restaurant.gst_authority || '',
       logoUrl: restaurant.logo_url || '',
       cuisineType: restaurant.cuisine_type || '',
       status: restaurant.status || restaurant.subscription_status || 'active',
@@ -87,6 +89,7 @@ export class RestaurantService {
       email: user.email,
       phone: user.phone || user.phone_number || '',
       role: user.role,
+      password: user.password || '',
       assignedTables: Array.isArray(user.assigned_tables) ? user.assigned_tables.filter(Boolean) : [],
       status: user.status || 'active',
       createdAt: user.created_at,
@@ -402,6 +405,10 @@ export class RestaurantService {
 
       if (error || !restaurant) throw error || new Error('Restaurant not found');
 
+      // SECURITY: Validate GST context - ensures restaurant data matches requested restaurant
+      // Prevents accidental or malicious access to another restaurant's GST number
+      validateRestaurantGSTContext(restaurantId, restaurant);
+
       const invoiceSettings = await InvoiceService.getInvoiceCounter(restaurantId);
       return this.transformRestaurant(restaurant, { invoiceSettings });
     } catch (error) {
@@ -421,6 +428,7 @@ export class RestaurantService {
       if (updateData.address !== undefined) payload.address = updateData.address;
       if (updateData.city !== undefined) payload.city = updateData.city;
       if (updateData.gstNumber !== undefined) payload.gst_number = updateData.gstNumber;
+      if (updateData.gstAuthority !== undefined) payload.gst_authority = updateData.gstAuthority;
       if (updateData.timezone !== undefined) payload.timezone = updateData.timezone;
 
       const { data: restaurant, error } = await supabase
@@ -485,38 +493,58 @@ export class RestaurantService {
           .filter((printer) => printer.name || printer.enabled);
       }
 
-      const { data: restaurant, error } = await supabase
+      const { error } = await supabase
         .from('restaurants')
         .update(payload)
-        .eq('id', restaurantId)
-        .select()
-        .single();
+        .eq('id', restaurantId);
 
       if (error) {
-        if (error.code === 'PGRST204') {
-          const message = String(error.message || '');
-          if (
-            message.includes("'print_provider'") ||
-            message.includes("'print_service_url'") ||
-            message.includes("'receipt_width_mm'") ||
-            message.includes("'auto_print_kot'") ||
-            message.includes("'auto_print_bill'") ||
-            message.includes("'bill_printer'") ||
-            message.includes("'kot_printers'") ||
-            message.includes("'default_service_charge'") ||
-            message.includes("'default_cgst_percent'") ||
-            message.includes("'default_sgst_percent'")
-          ) {
-            throw new Error(
-              'Database schema is missing restaurant settings columns. Run the latest restaurant settings migrations.'
+        // If error is about missing columns, try updating with basic settings only
+        const errorMsg = String(error.message || '').toLowerCase();
+        if (errorMsg.includes('could not find') && errorMsg.includes('column')) {
+          logger.warn('⚠️  Some restaurant settings columns not found in schema, updating with basic settings only', {
+            originalError: error.message,
+          });
+          
+          // Try with minimal payload (just the basic settings that must exist)
+          const basicPayload = {
+            updated_at: new Date().toISOString(),
+          };
+          
+          if (settings.enableGST !== undefined) basicPayload.enable_gst = settings.enableGST;
+          if (settings.defaultGSTPercent !== undefined) basicPayload.default_gst_percent = settings.defaultGSTPercent;
+          if (settings.defaultCGSTPercent !== undefined) basicPayload.default_cgst_percent = settings.defaultCGSTPercent;
+          if (settings.defaultSGSTPercent !== undefined) basicPayload.default_sgst_percent = settings.defaultSGSTPercent;
+          if (settings.currency !== undefined) basicPayload.currency = settings.currency;
+          
+          const { error: fallbackError } = await supabase
+            .from('restaurants')
+            .update(basicPayload)
+            .eq('id', restaurantId);
+          
+          if (fallbackError) {
+            const schemaError = new Error(
+              'Database schema migration is needed. Please run the printer settings migration from PRINTER_SETUP_GUIDE.md'
             );
+            schemaError.originalError = fallbackError;
+            logger.error('❌ Basic settings update also failed:', { error: fallbackError });
+            throw schemaError;
           }
+        } else {
+          throw error;
         }
-
-        throw error;
       }
 
-      if (!restaurant) throw new Error('Restaurant not found');
+      // Fetch the updated restaurant separately to avoid RLS issues with select().single()
+      const { data: restaurant, error: fetchError } = await supabase
+        .from('restaurants')
+        .select()
+        .eq('id', restaurantId)
+        .single();
+
+      if (fetchError || !restaurant) {
+        throw fetchError || new Error('Restaurant not found');
+      }
 
       const invoiceSettings = await InvoiceService.getInvoiceCounter(restaurantId);
       return this.transformRestaurant(restaurant, { invoiceSettings });
@@ -586,10 +614,6 @@ export class RestaurantService {
           user.id,
           assignedTableValidation.conflictingAssignments.map((entry) => entry.tableId)
         );
-      }
-
-      if (staffData.role === 'staff') {
-        await this.reconcileAssignedTables(restaurantId);
       }
 
       return this.transformStaffUser(user);
@@ -688,8 +712,6 @@ export class RestaurantService {
 
   static async getStaffUsers(restaurantId, filters = {}) {
     try {
-      await this.reconcileAssignedTables(restaurantId);
-
       let query = supabase
         .from('users')
         .select('*')
@@ -708,9 +730,11 @@ export class RestaurantService {
 
       if (error) throw error;
 
-      const allStaff = this
-        .sanitizeStaffAssignmentRows(users || [])
-        .map((user) => this.transformStaffUser(user));
+      const transformedStaff = (users || [])
+        .map(user => this.transformStaffUser(user));
+
+      const allStaff = this.sanitizeStaffAssignmentRows(transformedStaff);
+
       const skip = filters.skip || 0;
       const limit = filters.limit || 50;
 
@@ -760,14 +784,12 @@ export class RestaurantService {
       }
 
       const nextRole = updateData.role || existingUser.role;
-      let conflictingAssignments = [];
-      const payload = {
-        updated_at: new Date().toISOString(),
-      };
+      const payload = { updated_at: new Date().toISOString() };
 
       if (updateData.name !== undefined) payload.name = updateData.name;
       if (updateData.phone !== undefined) payload.phone = updateData.phone;
       if (updateData.role !== undefined) payload.role = updateData.role;
+      
       if (updateData.email !== undefined) {
         const normalizedEmail = updateData.email.toLowerCase();
         if (normalizedEmail !== String(existingUser.email || '').toLowerCase()) {
@@ -778,16 +800,9 @@ export class RestaurantService {
             .eq('email', normalizedEmail)
             .neq('id', staffId)
             .maybeSingle();
-
-          if (duplicateError) {
-            throw duplicateError;
-          }
-
-          if (duplicateUser) {
-            throw new Error('Staff email already exists for this restaurant');
-          }
+          if (duplicateError) throw duplicateError;
+          if (duplicateUser) throw new Error('Staff email already exists for this restaurant');
         }
-
         payload.email = normalizedEmail;
       }
 
@@ -796,18 +811,211 @@ export class RestaurantService {
       }
 
       if (updateData.assignedTables !== undefined || nextRole !== 'staff') {
-        const assignedTableValidation = nextRole === 'staff'
-          ? await this.validateAssignedTables(
-              restaurantId,
-              updateData.assignedTables ?? existingUser.assigned_tables,
-              {
-                excludeStaffId: staffId,
-                allowTableReassign: Boolean(updateData.allowTableReassign),
+        if (nextRole === 'staff') {
+          const validation = await this.validateAssignedTables(
+            restaurantId,
+            updateData.assignedTables ?? existingUser.assigned_tables,
+            { excludeStaffId: staffId, allowTableReassign: Boolean(updateData.allowTableReassign) }
+          );
+          payload.assigned_tables = validation.assignedTables;
+          
+          if (validation.conflictingAssignments.length > 0) {
+            const tableIds = validation.conflictingAssignments.map(e => String(e.tableId).trim());
+            const { data: staffUsers } = await supabase
+              .from('users')
+              .select('id, assigned_tables')
+              .eq('restaurant_id', restaurantId)
+              .eq('role', 'staff')
+              .neq('id', staffId);
+            
+            const updates = (staffUsers || [])
+              .map(u => {
+                const currentTables = (u.assigned_tables || []).filter(Boolean).map(t => String(t).trim());
+                const nextTables = currentTables.filter(tid => !tableIds.some(conflictId => conflictId === tid));
+                if (nextTables.length === currentTables.length) return null;
+                logger.info(`  Removing ${currentTables.length - nextTables.length} conflicting tables from waiter ${u.id}`);
+                return supabase.from('users').update({ assigned_tables: nextTables, updated_at: new Date().toISOString() })
+                  .eq('restaurant_id', restaurantId).eq('id', u.id);
+              })
+              .filter(Boolean);
+            
+            if (updates.length > 0) {
+              const results = await Promise.all(updates);
+              const failedResult = results.find(r => r.error);
+              if (failedResult?.error) {
+                logger.error('❌ Failed to remove conflicting assignments:', failedResult.error);
+                throw failedResult.error;
               }
-            )
-          : { assignedTables: [], conflictingAssignments: [] };
-        payload.assigned_tables = assignedTableValidation.assignedTables;
-        conflictingAssignments = assignedTableValidation.conflictingAssignments;
+            }
+          }
+
+          // ===== CRITICAL FIX: BEFORE reassigning, force hard-delete ALL locks =====
+          const oldTables = new Set((existingUser.assigned_tables || []).filter(Boolean));
+          const newTables = new Set((validation.assignedTables || []).filter(Boolean));
+          
+          const tablesToAdd = Array.from(newTables).filter(tid => !oldTables.has(tid));
+          const tablesToRemove = Array.from(oldTables).filter(tid => !newTables.has(tid));
+
+          // ===== STEP 1: HARD DELETE ALL LOCKS from tables being reassigned =====
+          if (tablesToAdd.length > 0) {
+            logger.info('TABLE REASSIGNMENT - HARD DELETE OLD LOCKS', {
+              tables: tablesToAdd,
+              new_waiter: staffId,
+              old_count: Array.from(oldTables).length,
+              new_count: Array.from(newTables).length,
+            });
+
+            // CRITICAL: Delete locked_by_qr flags first
+            const { error: deleteQrLockError } = await supabase
+              .from('tables')
+              .update({
+                locked_by_qr: false,
+                updated_at: new Date().toISOString(),
+              })
+              .eq('restaurant_id', restaurantId)
+              .in('id', tablesToAdd);
+
+            if (deleteQrLockError) {
+              logger.error('❌ FAILED to clear QR locks:', deleteQrLockError);
+              throw deleteQrLockError;
+            }
+
+            // CRITICAL: Delete assigned_to for old owners
+            const { error: deleteAssignmentError } = await supabase
+              .from('tables')
+              .update({
+                assigned_to: null,
+                updated_at: new Date().toISOString(),
+              })
+              .eq('restaurant_id', restaurantId)
+              .in('id', tablesToAdd)
+              .neq('assigned_to', staffId);
+
+            if (deleteAssignmentError) {
+              logger.error('❌ FAILED to clear old assignments:', deleteAssignmentError);
+              throw deleteAssignmentError;
+            }
+
+            logger.info('✅ OLD LOCKS HARD DELETED', {
+              tables: tablesToAdd,
+              count: tablesToAdd.length,
+            });
+          }
+
+          // ===== STEP 2: ASSIGN NEW WAITER with verification =====
+          if (tablesToAdd.length > 0) {
+            const { error: upsertError } = await supabase
+              .from('tables')
+              .update({
+                assigned_to: staffId,
+                locked_by_qr: false,
+                updated_at: new Date().toISOString(),
+              })
+              .eq('restaurant_id', restaurantId)
+              .in('id', tablesToAdd);
+
+            if (upsertError) {
+              logger.error('❌ FAILED to assign tables:', upsertError);
+              throw upsertError;
+            }
+
+            logger.info('✅ NEW TABLES ASSIGNED', {
+              waiter: staffId,
+              table_count: tablesToAdd.length,
+            });
+
+            // ===== STEP 3: VERIFY NO STALE LOCKS REMAIN =====
+            const { data: verifyTables, error: verifyError } = await supabase
+              .from('tables')
+              .select('id, assigned_to, locked_by_qr')
+              .eq('restaurant_id', restaurantId)
+              .in('id', tablesToAdd);
+
+            if (!verifyError && verifyTables) {
+              const staffId_string = String(staffId).trim();
+              const staleLocks = verifyTables.filter(
+                t => t.locked_by_qr || (String(t.assigned_to || '').trim() !== staffId_string)
+              );
+
+              if (staleLocks.length > 0) {
+                logger.error('❌ STALE LOCKS FOUND AFTER ASSIGNMENT', {
+                  stale_locks: staleLocks.map(t => ({
+                    table_id: t.id,
+                    locked_by_qr: t.locked_by_qr,
+                    assigned_to: t.assigned_to,
+                  })),
+                });
+
+                // EMERGENCY: Force clear all remaining stale locks
+                const staleTableIds = staleLocks.map(t => t.id);
+                const { error: emergencyClearError } = await supabase
+                  .from('tables')
+                  .update({
+                    locked_by_qr: false,
+                    assigned_to: staffId,
+                    updated_at: new Date().toISOString(),
+                  })
+                  .eq('restaurant_id', restaurantId)
+                  .in('id', staleTableIds);
+
+                if (emergencyClearError) {
+                  logger.error('❌ EMERGENCY CLEAR FAILED:', emergencyClearError);
+                  throw emergencyClearError;
+                }
+
+                logger.warn('⚠️ EMERGENCY CLEAR PERFORMED ON STALE LOCKS', {
+                  table_count: staleTableIds.length,
+                  tables: staleTableIds,
+                });
+              } else {
+                logger.info('✅ VERIFICATION PASSED - NO STALE LOCKS');
+              }
+            }
+          }
+
+          // ===== STEP 4: Clean up removed tables =====
+          if (tablesToRemove.length > 0) {
+            const { error: removeError } = await supabase
+              .from('tables')
+              .update({
+                locked_by_qr: false,
+                assigned_to: null,
+                updated_at: new Date().toISOString(),
+              })
+              .eq('restaurant_id', restaurantId)
+              .in('id', tablesToRemove)
+              .eq('assigned_to', staffId);
+
+            if (removeError) {
+              logger.error('❌ FAILED to clear removed tables:', removeError);
+              throw removeError;
+            }
+
+            logger.info('✅ REMOVED TABLES CLEANED', {
+              table_count: tablesToRemove.length,
+            });
+          }
+        } else {
+          // ✅ FIX: When role changes away from staff, clear all QR locks on their tables
+          const oldTables = (existingUser.assigned_tables || []).filter(Boolean);
+          if (oldTables.length > 0) {
+            const { error: clearAllLocksError } = await supabase
+              .from('tables')
+              .update({
+                locked_by_qr: false,
+                assigned_to: null,
+                updated_at: new Date().toISOString(),
+              })
+              .eq('restaurant_id', restaurantId)
+              .in('id', oldTables)
+              .eq('assigned_to', staffId);
+            
+            if (clearAllLocksError) {
+              logger.warn('⚠️ Failed to clear QR locks when changing role:', clearAllLocksError);
+            }
+          }
+          payload.assigned_tables = [];
+        }
       }
 
       const { data: user, error } = await supabase
@@ -820,29 +1028,52 @@ export class RestaurantService {
 
       if (error || !user) {
         if (error?.code === 'PGRST204' && String(error.message || '').includes("'assigned_tables'")) {
-          throw new Error(
-            "Database schema is missing users.assigned_tables. Run the migration 2026-04-05-add-user-assigned-tables.sql."
-          );
+          throw new Error("Database schema is missing users.assigned_tables. Run the migration 2026-04-05-add-user-assigned-tables.sql.");
         }
-
         throw error || new Error('Failed to update staff user');
-      }
-
-      if (Array.isArray(conflictingAssignments) && conflictingAssignments.length > 0) {
-        await this.releaseAssignedTablesFromOtherWaiters(
-          restaurantId,
-          staffId,
-          conflictingAssignments.map((entry) => entry.tableId)
-        );
-      }
-
-      if (nextRole === 'staff' || existingUser.role === 'staff') {
-        await this.reconcileAssignedTables(restaurantId);
       }
 
       return this.transformStaffUser(user);
     } catch (error) {
       logger.error('❌ Update staff user error:', error);
+      throw error;
+    }
+  }
+
+  static async resetStaffPassword(restaurantId, staffId, newPassword) {
+    try {
+      const { data: existingUser, error: existingError } = await supabase
+        .from('users')
+        .select('*')
+        .eq('restaurant_id', restaurantId)
+        .eq('id', staffId)
+        .single();
+
+      if (existingError || !existingUser) {
+        throw existingError || new Error('Staff user not found');
+      }
+
+      const passwordHash = await AuthService.hashPassword(newPassword);
+      
+      const { data: user, error } = await supabase
+        .from('users')
+        .update({
+          password_hash: passwordHash,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('restaurant_id', restaurantId)
+        .eq('id', staffId)
+        .select()
+        .single();
+
+      if (error || !user) {
+        throw error || new Error('Failed to reset staff password');
+      }
+
+      logger.info(`✅ Password reset for staff user ${staffId}`);
+      return this.transformStaffUser(user);
+    } catch (error) {
+      logger.error('❌ Reset staff password error:', error);
       throw error;
     }
   }

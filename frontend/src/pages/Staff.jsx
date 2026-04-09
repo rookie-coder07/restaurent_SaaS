@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { ChefHat, Loader, Pencil, Plus, Trash2, User, Users } from 'lucide-react';
+import { ChefHat, Loader, Pencil, Plus, Trash2, User, Users, Lock, AlertCircle } from 'lucide-react';
 import { useApi } from '../hooks/useApi';
 import { restaurantAPI, tableAPI } from '../services/apiEndpoints';
 import { compareTableLabels } from '../utils/formatters';
@@ -321,6 +321,7 @@ export default function StaffManagement() {
             {paginatedStaff.map((member) => {
               const meta = ROLE_META[member.role] || ROLE_META.staff;
               const Icon = meta.icon;
+              const hasPendingReset = false;
 
               return (
                 <Card key={member.id} className="p-4 sm:p-5">
@@ -330,11 +331,21 @@ export default function StaffManagement() {
                         <h3 className="break-words text-lg font-bold text-[var(--color-text)]">{member.name}</h3>
                         <p className="mt-1 break-all text-sm text-[var(--color-text-muted)]">{member.email}</p>
                       </div>
-                      <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold ${meta.color}`}>
-                        <Icon className="h-4 w-4" />
-                        {meta.label}
-                      </span>
+                      <div className="flex flex-col gap-2">
+                        <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold ${meta.color}`}>
+                          <Icon className="h-4 w-4" />
+                          {meta.label}
+                        </span>
+                      </div>
                     </div>
+
+                    {hasPendingReset && (
+                      <div className="rounded-2xl border-2 border-[var(--color-warning-subtle)] bg-[var(--color-warning-soft)] p-3">
+                        <p className="text-xs font-medium text-[var(--color-warning)]">
+                          ⚠️ This staff member requested a password reset. Visit the Manage Passwords section to set a new password.
+                        </p>
+                      </div>
+                    )}
 
                     <div className="rounded-2xl bg-[var(--color-surface-muted)] p-4">
                       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">

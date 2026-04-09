@@ -60,8 +60,6 @@ export default function BillView() {
   const [invoiceOverride, setInvoiceOverride] = useState(location.state?.invoice || null);
   const [printing, setPrinting] = useState(false);
   const [markingPaid, setMarkingPaid] = useState(false);
-  const [confirmMethod, setConfirmMethod] = useState(String(location.state?.order?.paymentMethod || location.state?.invoice?.paymentMode || 'upi').toLowerCase());
-  const [receivedAmount, setReceivedAmount] = useState('');
 
   const returnTo = useMemo(
     () => resolveReturnPath(location.pathname, location.state?.returnTo || ''),
@@ -140,59 +138,70 @@ export default function BillView() {
     [invoice]
   );
   const isPaid = String(order?.paymentStatus || invoice?.paymentStatus || '').toLowerCase() === 'paid';
-  const finalAmount = Number(invoice?.summary?.grandTotal || order?.finalAmount || order?.totalAmount || 0);
-  const numericReceivedAmount = receivedAmount === '' ? NaN : Number(receivedAmount);
+  const finalAmount = Number(
+    order?.totalAmount ||
+    order?.finalAmount ||
+    invoice?.summary?.grandTotal ||
+    invoice?.finalAmount ||
+    0
+  );
+  // Auto-fill received amount with final amount
+  const numericReceivedAmount = finalAmount;
 
-  const handlePrint = async () => {
-    if (!invoice) {
+  const handleSettleAndPrint = async () => {
+    if (!order?.id) {
       return;
     }
 
-    try {
-      setPrinting(true);
-      const result = await printBillReceipt({
-        order,
-        restaurant,
-        invoice,
-        cashierName: location.state?.cashierName || order?.billing?.cashierName || '',
-        fallbackToBrowser: true,
-      });
-      if (result?.fallback && result?.error) {
-        setError('Billing printer was unavailable, so browser print opened instead.');
-      }
-    } catch (printError) {
-      setError(printError.message || 'Failed to print the bill.');
-    } finally {
-      setPrinting(false);
-    }
-  };
-
-  const handleMarkPaid = async () => {
-    if (!order?.id || isPaid) {
+    // PREVENT DOUBLE SUBMISSION: Guard against concurrent settle attempts
+    if (markingPaid || printing) {
+      setError('Bill settlement and printing is already in progress. Please wait...');
       return;
     }
 
     try {
       setMarkingPaid(true);
       setError('');
-      const response = await orderAPI.markOrderPaid(order.id, {
-        paymentMethod: confirmMethod,
-        amountReceived: numericReceivedAmount,
-      });
-      const paidOrder = response.data?.data || null;
-      setOrder(paidOrder);
-      setInvoiceOverride(
-        buildInvoiceData({
-          order: paidOrder,
+
+      let finalOrder = order;
+      let finalInvoice = invoice;
+
+      // Mark order as paid if not already paid
+      if (!isPaid) {
+        const response = await orderAPI.markOrderPaid(order.id, {
+          paymentMethod: 'cash',
+          amountReceived: numericReceivedAmount,
+        });
+        finalOrder = response.data?.data || null;
+        setOrder(finalOrder);
+        
+        // Build fresh invoice with the paid order
+        finalInvoice = buildInvoiceData({
+          order: finalOrder,
           restaurant: restaurant || {},
-          cashierName: paidOrder?.billing?.cashierName || location.state?.cashierName || '',
-        })
-      );
-      setReceivedAmount('');
+          cashierName: finalOrder?.billing?.cashierName || location.state?.cashierName || '',
+        });
+        setInvoiceOverride(finalInvoice);
+      }
+
+      // Print the bill with the correct order and invoice data
+      setPrinting(true);
+      const result = await printBillReceipt({
+        order: finalOrder || {},
+        restaurant,
+        invoice: finalInvoice,
+        cashierName: location.state?.cashierName || finalOrder?.billing?.cashierName || '',
+        fallbackToBrowser: true,
+      });
+      if (result?.fallback && result?.error) {
+        setError('Bill printed via browser. Billing printer was unavailable.');
+      }
     } catch (requestError) {
-      setError(requestError.response?.data?.message || 'Failed to mark the bill paid.');
+      const errMsg = requestError.response?.data?.message || requestError.message || 'Failed to process bill.';
+      setError(errMsg);
     } finally {
       setMarkingPaid(false);
+      setPrinting(false);
     }
   };
 
@@ -228,53 +237,30 @@ export default function BillView() {
     );
   }
 
+  if (!invoice?.summary) {
+    return (
+      <div className="space-y-6">
+        <Card>
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--color-text-subtle)]">Billing</p>
+          <h1 className="mt-3 text-3xl font-bold text-[var(--color-text)]">Invalid Bill Data</h1>
+          <p className="mt-2 text-sm text-[var(--color-text-muted)]">
+            The bill data structure is incomplete. Unable to render bill.
+          </p>
+          <div className="mt-5">
+            <Button onClick={() => navigate(returnTo)}>
+              <ArrowLeft className="h-4 w-4" />
+              Go Back
+            </Button>
+          </div>
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div className="compact-page thermal-print-page space-y-4" style={{ '--thermal-width': `${paperWidthMm}mm` }}>
       <style>{`@page { size: ${paperWidthMm}mm auto; margin: 0; }`}</style>
       {error ? <Toast type="error" message={error} /> : null}
-
-      {!isPaid ? (
-        <Card>
-          <div className="grid gap-4 lg:grid-cols-[1.15fr,0.85fr]">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--color-text-subtle)]">Payment Confirmation</p>
-              <h2 className="mt-2 text-xl font-bold text-[var(--color-text)]">Confirm exact amount</h2>
-              <p className="mt-2 text-sm text-[var(--color-text-muted)]">
-                Final amount to collect: {formatCurrency(finalAmount)}
-              </p>
-              {qrCodeImage ? (
-                <div className="mt-4 inline-flex rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card-muted)] p-3">
-                  <div className="text-center">
-                    <img src={qrCodeImage} alt="Payment QR" className="h-28 w-28 object-contain" />
-                    <p className="mt-2 text-sm font-semibold text-[var(--text-primary)]">
-                      Scan QR for {formatCurrency(finalAmount)}
-                    </p>
-                  </div>
-                </div>
-              ) : null}
-            </div>
-            <div className="space-y-3">
-              <label className="block space-y-2">
-                <span className="text-sm font-medium text-[var(--text-primary)]">Payment method</span>
-                <select value={confirmMethod} onChange={(event) => setConfirmMethod(event.target.value)} className="input">
-                  <option value="upi">UPI</option>
-                  <option value="cash">Cash</option>
-                </select>
-              </label>
-              <Input
-                label="Received amount"
-                type="number"
-                value={receivedAmount}
-                onChange={(event) => setReceivedAmount(event.target.value)}
-                placeholder={finalAmount ? String(finalAmount) : '0'}
-              />
-              <p className="text-xs text-[var(--color-text-muted)]">
-                Confirmation is blocked if received amount is less than {formatCurrency(finalAmount)}.
-              </p>
-            </div>
-          </div>
-        </Card>
-      ) : null}
 
       <Card className="bill-print-toolbar">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
@@ -295,15 +281,12 @@ export default function BillView() {
               </Button>
             </Link>
             <Button
-              variant="secondary"
-              onClick={handleMarkPaid}
-              disabled={markingPaid || isPaid || !Number.isFinite(numericReceivedAmount) || numericReceivedAmount + 0.001 < finalAmount}
+              variant="primary"
+              onClick={handleSettleAndPrint}
+              disabled={markingPaid || printing}
             >
-              {markingPaid ? 'Updating...' : isPaid ? 'Paid' : 'Confirm Payment'}
-            </Button>
-            <Button onClick={handlePrint} disabled={printing}>
               <Printer className="h-4 w-4" />
-              {printing ? 'Printing...' : 'Print Bill'}
+              {markingPaid || printing ? 'Processing...' : isPaid ? 'Print Bill' : 'Settle Bill'}
             </Button>
           </div>
         </div>
@@ -320,6 +303,11 @@ export default function BillView() {
                   {invoice.phone ? `Ph: ${invoice.phone}` : ''}
                   {invoice.phone && invoice.gstin ? ' | ' : ''}
                   {invoice.gstin ? `GSTIN: ${invoice.gstin}` : ''}
+                </div>
+              ) : null}
+              {invoice.gstAuthority ? (
+                <div className="thermal-muted" style={{ fontSize: '0.7rem' }}>
+                  {invoice.gstAuthority}
                 </div>
               ) : null}
             </div>
@@ -349,14 +337,20 @@ export default function BillView() {
             <div className="thermal-separator">--------------------------------</div>
 
             <div className="thermal-items">
-              {invoice.items.map((item, index) => (
-                <div key={`${item.name}-${index}`} className="thermal-bill-row">
-                  <span className="thermal-item-name">{item.name}</span>
-                  <span className="thermal-align-right">{item.quantity}</span>
-                  <span className="thermal-align-right">{formatCurrency(item.price)}</span>
-                  <span className="thermal-align-right thermal-strong">{formatCurrency(item.total)}</span>
+              {!invoice?.items || invoice.items.length === 0 ? (
+                <div className="thermal-bill-row">
+                  <span className="thermal-item-name text-[var(--color-text-muted)]">No items</span>
                 </div>
-              ))}
+              ) : (
+                (invoice?.items || []).map((item, index) => (
+                  <div key={`${item?.name || 'item'}-${index}`} className="thermal-bill-row">
+                    <span className="thermal-item-name">{item?.name || '-'}</span>
+                    <span className="thermal-align-right">{item?.quantity || 0}</span>
+                    <span className="thermal-align-right">{formatCurrency(item?.price || 0)}</span>
+                    <span className="thermal-align-right thermal-strong">{formatCurrency(item?.total || 0)}</span>
+                  </div>
+                ))
+              )}
             </div>
 
             <div className="thermal-separator">--------------------------------</div>
@@ -366,9 +360,15 @@ export default function BillView() {
               {totalDiscountAmount > 0 ? (
                 <div className="thermal-summary-row"><span>Discount</span><span>-{formatCurrency(totalDiscountAmount)}</span></div>
               ) : null}
-              <div className="thermal-summary-row"><span>Taxable</span><span>{formatCurrency(invoice.summary.taxableAmount)}</span></div>
-              <div className="thermal-summary-row"><span>CGST ({invoice.summary.cgstRate}%)</span><span>{formatCurrency(invoice.summary.cgstAmount)}</span></div>
-              <div className="thermal-summary-row"><span>SGST ({invoice.summary.sgstRate}%)</span><span>{formatCurrency(invoice.summary.sgstAmount)}</span></div>
+              {invoice.summary.cgstRate > 0 || invoice.summary.sgstRate > 0 ? (
+                <div className="thermal-summary-row"><span>Taxable</span><span>{formatCurrency(invoice.summary.taxableAmount)}</span></div>
+              ) : null}
+              {invoice.summary.cgstRate > 0 ? (
+                <div className="thermal-summary-row"><span>CGST ({invoice.summary.cgstRate}%)</span><span>{formatCurrency(invoice.summary.cgstAmount)}</span></div>
+              ) : null}
+              {invoice.summary.sgstRate > 0 ? (
+                <div className="thermal-summary-row"><span>SGST ({invoice.summary.sgstRate}%)</span><span>{formatCurrency(invoice.summary.sgstAmount)}</span></div>
+              ) : null}
               {invoice.summary.chargesTotal > 0 ? (
                 <div className="thermal-summary-row"><span>Charges</span><span>{formatCurrency(invoice.summary.chargesTotal)}</span></div>
               ) : null}

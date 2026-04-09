@@ -45,9 +45,9 @@ function CartPanel({
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="max-h-[60vh] overflow-y-auto">
         {items.length === 0 ? (
-          <div className="flex h-full min-h-[16rem] items-center justify-center rounded-[1.6rem] border border-dashed border-[var(--border-color)] bg-[var(--bg-card-muted)] p-6 text-center">
+          <div className="flex min-h-[10rem] items-center justify-center rounded-[1.6rem] border border-dashed border-[var(--border-color)] bg-[var(--bg-card-muted)] p-6 text-center">
             <div>
               <p className="text-base font-semibold text-[var(--text-primary)]">No items yet</p>
               <p className="mt-2 text-sm text-[var(--text-secondary)]">Tap menu items on the left to start billing.</p>

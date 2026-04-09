@@ -32,6 +32,8 @@ export default function Settings() {
     email: '',
     phone: '',
     address: '',
+    gstNumber: '',
+    gstAuthority: '',
   });
   const [settingsForm, setSettingsForm] = useState({
     enableGST: true,
@@ -56,14 +58,16 @@ export default function Settings() {
     invoice: 'idle',
   });
   const [invoiceForm, setInvoiceForm] = useState({
-    prefix: 'INV',
-    startingNumber: 1001,
+    prefix: null,
+    startingNumber: null,
   });
   const [invoiceMeta, setInvoiceMeta] = useState({
-    currentNextNumber: 1001,
-    currentPrefix: 'INV',
+    currentNextNumber: null,
+    currentPrefix: null,
   });
+  const [invoiceLoading, setInvoiceLoading] = useState(true);
   const [invoiceError, setInvoiceError] = useState('');
+  const [settingsError, setSettingsError] = useState('');
 
   useEffect(() => {
     if (!profileData) {
@@ -75,11 +79,11 @@ export default function Settings() {
       email: profileData.email || '',
       phone: profileData.phone || '',
       address: profileData.address || '',
+      gstNumber: profileData.gstNumber || '',
+      gstAuthority: profileData.gstAuthority || '',
     });
 
     const printerSettings = getRestaurantPrinterSettings(profileData);
-    const currentPrefix = String(profileData.invoiceSettings?.prefix || 'INV').trim() || 'INV';
-    const currentNextNumber = Number(profileData.invoiceSettings?.nextNumber || 1001);
 
     setSettingsForm({
       enableGST: profileData.enableGST ?? true,
@@ -104,16 +108,39 @@ export default function Settings() {
           }))
           : [emptyKotPrinter()],
     });
-    setInvoiceForm({
-      prefix: currentPrefix,
-      startingNumber: currentNextNumber,
-    });
-    setInvoiceMeta({
-      currentNextNumber,
-      currentPrefix,
-    });
-    setInvoiceError('');
+    setSettingsError('');
   }, [profileData]);
+
+  // Ensure bill settings always reflect latest backend state on mount
+  useEffect(() => {
+    const syncBillSettings = async () => {
+      try {
+        const { data } = await restaurantAPI.getProfile();
+        const settings = data?.data?.invoiceSettings;
+        if (settings?.nextNumber !== undefined && settings?.prefix) {
+          const nextNumber = Number(settings.nextNumber);
+          const prefix = String(settings.prefix).trim();
+          
+          setInvoiceMeta({
+            currentNextNumber: nextNumber,
+            currentPrefix: prefix,
+          });
+          setInvoiceForm({
+            prefix: prefix,
+            startingNumber: nextNumber,
+          });
+          setInvoiceError('');
+        }
+      } catch (error) {
+        console.error('Failed to fetch bill settings:', error);
+        setInvoiceError('Unable to load bill settings');
+      } finally {
+        setInvoiceLoading(false);
+      }
+    };
+
+    syncBillSettings();
+  }, []);
 
   const handleProfileChange = (event) => {
     const { name, value } = event.target;
@@ -202,13 +229,14 @@ export default function Settings() {
     const { name, value } = event.target;
     setInvoiceForm((current) => ({
       ...current,
-      [name]: name === 'startingNumber' ? Number(value || 0) : value.toUpperCase(),
+      [name]: name === 'startingNumber' ? (value === '' ? null : Number(value)) : value.toUpperCase(),
     }));
   };
 
   const handleSettingsSave = async () => {
     try {
       setSaveState((current) => ({ ...current, settings: 'saving' }));
+      setSettingsError('');
       await restaurantAPI.updateSettings({
         enableGST: settingsForm.enableGST,
         defaultCGSTPercent: Number(settingsForm.defaultCGSTPercent || 0),
@@ -234,6 +262,8 @@ export default function Settings() {
       setSaveState((current) => ({ ...current, settings: 'saved' }));
     } catch (error) {
       console.error('Failed to save workspace settings', error);
+      const errorMsg = error?.response?.data?.message || error?.message || 'Failed to save printer settings';
+      setSettingsError(errorMsg);
       setSaveState((current) => ({ ...current, settings: 'error' }));
     }
   };
@@ -243,19 +273,19 @@ export default function Settings() {
     const normalizedStartingNumber = Number(invoiceForm.startingNumber || 0);
 
     if (!/^[A-Z0-9][A-Z0-9-]{0,19}$/.test(normalizedPrefix)) {
-      setInvoiceError('Invoice prefix can use only uppercase letters, numbers, and hyphens.');
+      setInvoiceError('Bill prefix can use only uppercase letters, numbers, and hyphens.');
       setSaveState((current) => ({ ...current, invoice: 'error' }));
       return;
     }
 
     if (!Number.isInteger(normalizedStartingNumber) || normalizedStartingNumber <= 0) {
-      setInvoiceError('Starting invoice number must be a whole number greater than zero.');
+      setInvoiceError('Starting bill number must be a whole number greater than zero.');
       setSaveState((current) => ({ ...current, invoice: 'error' }));
       return;
     }
 
     if (normalizedStartingNumber < Number(invoiceMeta.currentNextNumber || 0)) {
-      setInvoiceError(`Starting invoice number cannot be lower than ${invoiceMeta.currentNextNumber}.`);
+      setInvoiceError(`Starting bill number cannot be lower than ${invoiceMeta.currentNextNumber}.`);
       setSaveState((current) => ({ ...current, invoice: 'error' }));
       return;
     }
@@ -263,19 +293,30 @@ export default function Settings() {
     try {
       setInvoiceError('');
       setSaveState((current) => ({ ...current, invoice: 'saving' }));
-      const response = await restaurantAPI.updateInvoiceSettings({
+      
+      await restaurantAPI.updateInvoiceSettings({
         prefix: normalizedPrefix,
         startingNumber: normalizedStartingNumber,
       });
-      const savedSettings = response.data?.data || {};
-      setInvoiceForm({
-        prefix: String(savedSettings.prefix || normalizedPrefix),
-        startingNumber: Number(savedSettings.nextNumber || normalizedStartingNumber),
-      });
-      setInvoiceMeta({
-        currentPrefix: String(savedSettings.prefix || normalizedPrefix),
-        currentNextNumber: Number(savedSettings.nextNumber || normalizedStartingNumber),
-      });
+
+      // Refetch to ensure form reflects backend state
+      const { data } = await restaurantAPI.getProfile();
+      const settings = data?.data?.invoiceSettings;
+      
+      if (settings?.nextNumber !== undefined && settings?.prefix) {
+        const nextNumber = Number(settings.nextNumber);
+        const prefix = String(settings.prefix).trim();
+        
+        setInvoiceMeta({
+          currentNextNumber: nextNumber,
+          currentPrefix: prefix,
+        });
+        setInvoiceForm({
+          prefix: prefix,
+          startingNumber: nextNumber,
+        });
+      }
+      
       setSaveState((current) => ({ ...current, invoice: 'saved' }));
     } catch (error) {
       setInvoiceError(error.response?.data?.message || 'Could not save invoice settings.');
@@ -320,6 +361,8 @@ export default function Settings() {
               <Input label="Email" name="email" type="email" value={profileForm.email} onChange={handleProfileChange} />
               <Input label="Phone" name="phone" value={profileForm.phone} onChange={handleProfileChange} />
               <Input label="Address" name="address" value={profileForm.address} onChange={handleProfileChange} />
+              <Input label="GST Number (GSTIN)" name="gstNumber" value={profileForm.gstNumber} onChange={handleProfileChange} placeholder="e.g., 27AABCU1234H1Z0" />
+              <Input label="GST Authority" name="gstAuthority" value={profileForm.gstAuthority} onChange={handleProfileChange} placeholder="e.g., GSTIN Registration Authority" />
             </div>
 
             <div className="mt-4 flex flex-col gap-3 border-t border-[var(--border-color)] pt-4 sm:flex-row sm:items-center sm:justify-between">
@@ -562,13 +605,34 @@ export default function Settings() {
             </div>
 
             <div className="mt-4 flex flex-col gap-3 border-t border-[var(--border-color)] pt-4 sm:flex-row sm:items-center sm:justify-between">
-              <p className="text-sm text-[var(--color-text-muted)]">
-                {saveState.settings === 'saved'
-                  ? 'Billing and printer settings saved.'
-                  : saveState.settings === 'error'
-                    ? 'Could not save printer settings.'
+              {saveState.settings === 'error' ? (
+                <div className="flex-1">
+                  <div className="rounded-lg border border-red-300/50 bg-red-50 p-3">
+                    <p className="text-sm font-medium text-red-900">Could not save printer settings</p>
+                    {settingsError && (
+                      <p className="mt-1 text-xs text-red-700">{settingsError}</p>
+                    )}
+                    <p className="mt-2 text-xs text-red-700">
+                      <strong>Fix:</strong> See{' '}
+                      <a href="#" className="underline hover:text-red-900"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          window.open('https://github.com', '_blank'); // Link to guide when available
+                        }}
+                      >
+                        Printer Setup Guide
+                      </a>{' '}
+                      for the migration SQL and troubleshooting steps.
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-sm text-[var(--color-text-muted)]">
+                  {saveState.settings === 'saved'
+                    ? 'Billing and printer settings saved.'
                     : 'Only this restaurant will use these printers and auto-print rules.'}
-              </p>
+                </p>
+              )}
               <Button onClick={handleSettingsSave} disabled={saveState.settings === 'saving'}>
                 {saveState.settings === 'saving' ? 'Saving...' : 'Save settings'}
               </Button>
@@ -583,55 +647,63 @@ export default function Settings() {
                   <Settings2 className="h-5 w-5" />
                 </div>
                 <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--color-text-subtle)]">Invoice numbering</p>
-                  <h2 className="mt-1 text-lg font-semibold text-[var(--color-text)]">Invoice settings</h2>
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--color-text-subtle)]">Bill numbering</p>
+                  <h2 className="mt-1 text-lg font-semibold text-[var(--color-text)]">Bill settings</h2>
                   <p className="mt-2 text-sm leading-6 text-[var(--color-text-muted)]">
-                    Only the owner can change the invoice prefix and next invoice number.
+                    Only the owner can change the bill prefix and next bill number.
                   </p>
                 </div>
               </div>
 
-              <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
-                <Input
-                  label="Invoice Prefix"
-                  name="prefix"
-                  value={invoiceForm.prefix}
-                  onChange={handleInvoiceChange}
-                  placeholder="INV"
-                />
-                <Input
-                  label="Starting Invoice Number"
-                  name="startingNumber"
-                  type="number"
-                  min="1"
-                  step="1"
-                  value={invoiceForm.startingNumber}
-                  onChange={handleInvoiceChange}
-                  placeholder="1001"
-                />
-              </div>
+              {invoiceLoading ? (
+                <div className="mt-4 rounded-[var(--radius-card)] border border-[var(--border-color)] bg-[var(--bg-card-muted)] p-4 text-center text-sm text-[var(--color-text-muted)]">
+                  Loading bill settings...
+                </div>
+              ) : (
+                <>
+                  <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
+                    <Input
+                      label="Bill Prefix"
+                      name="prefix"
+                      value={invoiceForm.prefix ?? ''}
+                      onChange={handleInvoiceChange}
+                      placeholder="INV"
+                    />
+                    <Input
+                      label="Starting Bill Number"
+                      name="startingNumber"
+                      type="number"
+                      min="1"
+                      step="1"
+                      value={invoiceForm.startingNumber ?? ''}
+                      onChange={handleInvoiceChange}
+                      placeholder="1001"
+                    />
+                  </div>
 
-              <div className="mt-4 rounded-[var(--radius-card)] border border-[var(--border-color)] bg-[var(--bg-card-muted)] p-4 text-sm text-[var(--color-text-muted)]">
-                <p>Current prefix: <span className="font-semibold text-[var(--color-text)]">{invoiceMeta.currentPrefix}</span></p>
-                <p className="mt-1">Next invoice number: <span className="font-semibold text-[var(--color-text)]">{invoiceMeta.currentNextNumber}</span></p>
-                <p className="mt-1">Preview: <span className="font-semibold text-[var(--color-text)]">{`${invoiceForm.prefix || 'INV'}-${invoiceForm.startingNumber || 0}`}</span></p>
-                <p className="mt-2 text-xs text-[var(--color-text-subtle)]">You can only keep the same next number or increase it.</p>
-              </div>
+                  <div className="mt-4 rounded-[var(--radius-card)] border border-[var(--border-color)] bg-[var(--bg-card-muted)] p-4 text-sm text-[var(--color-text-muted)]">
+                    <p>Current prefix: <span className="font-semibold text-[var(--color-text)]">{invoiceMeta.currentPrefix || 'INV'}</span></p>
+                    <p className="mt-1">Current next bill number: <span className="font-semibold text-[var(--color-text)]">{invoiceMeta.currentNextNumber || 'loading'}</span></p>
+                    <p className="mt-1">Preview: <span className="font-semibold text-[var(--color-text)]">{`${invoiceForm.prefix || invoiceMeta.currentPrefix || 'INV'}-${invoiceForm.startingNumber ?? invoiceMeta.currentNextNumber ?? 0}`}</span></p>
+                    <p className="mt-2 text-xs text-[var(--color-text-subtle)]">You can only keep the same next number or increase it. Bill numbers come from the backend.</p>
+                  </div>
 
-              <div className="mt-4 flex flex-col gap-3 border-t border-[var(--border-color)] pt-4 sm:flex-row sm:items-center sm:justify-between">
-                <p className="text-sm text-[var(--color-text-muted)]">
-                  {invoiceError
-                    ? invoiceError
-                    : saveState.invoice === 'saved'
-                      ? 'Invoice settings saved.'
-                      : saveState.invoice === 'error'
-                        ? 'Could not save invoice settings.'
-                        : 'Invoice numbers are generated only from the backend.'}
-                </p>
-                <Button onClick={handleInvoiceSave} disabled={saveState.invoice === 'saving'}>
-                  {saveState.invoice === 'saving' ? 'Saving...' : 'Save invoice settings'}
-                </Button>
-              </div>
+                  <div className="mt-4 flex flex-col gap-3 border-t border-[var(--border-color)] pt-4 sm:flex-row sm:items-center sm:justify-between">
+                    <p className="text-sm text-[var(--color-text-muted)]">
+                      {invoiceError
+                        ? invoiceError
+                        : saveState.invoice === 'saved'
+                          ? 'Bill settings saved.'
+                          : saveState.invoice === 'error'
+                            ? 'Could not save bill settings.'
+                            : 'Bill numbers are generated only from the backend.'}
+                    </p>
+                    <Button onClick={handleInvoiceSave} disabled={saveState.invoice === 'saving'}>
+                      {saveState.invoice === 'saving' ? 'Saving...' : 'Save bill settings'}
+                    </Button>
+                  </div>
+                </>
+              )}
             </Card>
           ) : null}
 
@@ -640,8 +712,8 @@ export default function Settings() {
               title="Change Password"
               helper={
                 userRole === 'manager'
-                  ? 'Update your manager account password here. If you ever forget it, request a manual reset from Admin.'
-                  : 'Update your POS password here. If you ever forget it, send a reset request to Manager or Admin.'
+                  ? 'Update your manager account password here. Use your admin account password reset option if needed.'
+                  : 'Update your POS password here. Use the OTP-based password reset option at login if you forget your password.'
               }
             />
           ) : null}

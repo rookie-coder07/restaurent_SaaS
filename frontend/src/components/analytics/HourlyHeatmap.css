@@ -1,0 +1,62 @@
+.heatmap-container {
+  width: 100%;
+}
+
+.heatmap-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(60px, 1fr));
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.heatmap-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  min-height: 80px;
+  border: 2px solid transparent;
+}
+
+.heatmap-cell:hover {
+  border-color: #333;
+  transform: scale(1.05);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+.heatmap-hour {
+  font-size: 14px;
+  font-weight: 600;
+  color: #333;
+}
+
+.heatmap-value {
+  font-size: 18px;
+  font-weight: 700;
+  color: #333;
+  margin-top: 4px;
+}
+
+.heatmap-legend {
+  display: flex;
+  gap: 20px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+}
+
+.legend-box {
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+}

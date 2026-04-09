@@ -9,7 +9,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useApi } from '../hooks/useApi';
 import { getCurrentPortalAccessToken } from '../services/api';
 import { subscribeToOrderEvents } from '../utils/liveOrderEvents';
-import { inventoryAPI, orderAPI, restaurantAPI, tableAPI } from '../services/apiEndpoints';
+import { inventoryAPI, orderAPI, restaurantAPI, tableAPI, authAPI } from '../services/apiEndpoints';
 import { useManagerStore } from '../context/managerStore';
 import { formatDate } from '../utils/formatters';
 import { buildSmartNotifications, getPriorityMeta } from '../utils/adminMonitoring';

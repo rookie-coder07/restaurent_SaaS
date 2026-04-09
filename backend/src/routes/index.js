@@ -9,6 +9,7 @@ import analyticsRoutes from './analytics.js';
 import customerRoutes from './customer.js';
 import inventoryRoutes from './inventory.js';
 import takeawayRoutes from './takeaway.js';
+import activityRoutes from './activity.js';
 import developerRoutes from './developer.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { optionalAuth } from '../middleware/auth.js';
@@ -24,7 +25,6 @@ const apiVersion = process.env.API_VERSION || 'v1';
 
 // Public/Auth routes
 router.use(`/${apiVersion}/auth`, authRoutes);
-router.get(`/${apiVersion}/reset-requests`, authMiddleware, tenantIsolation, authController.getResetRequests);
 router.post(
   `/${apiVersion}/manager/reset-user-password`,
   authMiddleware,
@@ -47,6 +47,7 @@ router.use(`/${apiVersion}/kitchen`, kitchenRoutes);
 router.use(`/${apiVersion}/tables`, tableRoutes);
 router.use(`/${apiVersion}/analytics`, analyticsRoutes);
 router.use(`/${apiVersion}/inventory`, inventoryRoutes);
+router.use(`/${apiVersion}/activity`, activityRoutes);
 
 // Health check
 router.get('/health', (req, res) => {

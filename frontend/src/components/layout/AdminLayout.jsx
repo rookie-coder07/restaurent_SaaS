@@ -36,6 +36,10 @@ const PAGE_META = {
     section: 'Analytics',
     title: 'Revenue Analytics',
   },
+  '/admin/staff-activity': {
+    section: 'Staff Activity',
+    title: 'Staff Activity Tracking',
+  },
   '/admin/tables': {
     section: 'Tables',
     title: 'Live Floor View',
@@ -75,6 +79,10 @@ const PAGE_META = {
   '/manager/bills': {
     section: 'Bills',
     title: 'Billing Control',
+  },
+  '/manager/staff-activity': {
+    section: 'Staff Activity',
+    title: 'Staff Activity Tracking',
   },
   '/manager/settings': {
     section: 'Settings',

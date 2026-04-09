@@ -18,4 +18,14 @@ router.get('/eod/latest', checkPermission(['view_analytics']), analyticsControll
 router.get('/eod/history', checkPermission(['view_analytics']), analyticsController.getEodSummaryHistory);
 router.get('/loyalty', checkPermission(['view_analytics']), analyticsController.getLoyaltySummary);
 
+// PowerBI Dashboard endpoints
+router.get('/dashboard', checkPermission(['view_analytics']), analyticsController.getPowerBIDashboard);
+router.get('/kpi', checkPermission(['view_analytics']), analyticsController.getKPI);
+router.get('/revenue-trend', checkPermission(['view_analytics']), analyticsController.getRevenueTrend);
+router.get('/orders-vs-revenue', checkPermission(['view_analytics']), analyticsController.getOrdersVsRevenue);
+router.get('/category-performance', checkPermission(['view_analytics']), analyticsController.getCategoryPerformance);
+router.get('/items', checkPermission(['view_analytics']), analyticsController.getTopItemsList);
+router.get('/payment-methods', checkPermission(['view_analytics']), analyticsController.getPaymentMethods);
+router.get('/hourly-data', checkPermission(['view_analytics']), analyticsController.getHourlyData);
+
 export default router;

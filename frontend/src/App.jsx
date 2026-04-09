@@ -10,6 +10,7 @@ import KOTLayout from './components/layout/KOTLayout';
 const HomeAccess = lazy(() => import('./pages/HomeAccess'));
 const Login = lazy(() => import('./pages/Login'));
 const ResetPassword = lazy(() => import('./pages/ResetPassword'));
+const StaffPasswordResetOTP = lazy(() => import('./pages/StaffPasswordResetOTP'));
 const Register = lazy(() => import('./pages/Register'));
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const Notifications = lazy(() => import('./pages/Notifications'));
@@ -26,7 +27,6 @@ const Staff = lazy(() => import('./pages/Staff'));
 const NotFound = lazy(() => import('./pages/NotFound'));
 const Settings = lazy(() => import('./pages/Settings'));
 const Inventory = lazy(() => import('./pages/Inventory'));
-const StaffAccess = lazy(() => import('./pages/StaffAccess'));
 const Kitchen = lazy(() => import('./pages/Kitchen'));
 const BillView = lazy(() => import('./pages/BillView'));
 const KitchenTicket = lazy(() => import('./pages/KitchenTicket'));
@@ -38,6 +38,9 @@ const ManagerWaiters = lazy(() => import('./pages/ManagerWaiters'));
 const ManagerInventory = lazy(() => import('./pages/ManagerInventory'));
 const ManagerBills = lazy(() => import('./pages/ManagerBills'));
 const DeveloperConsole = lazy(() => import('./pages/DeveloperConsole'));
+const ChangePassword = lazy(() => import('./pages/ChangePassword'));
+const UserPasswordManagement = lazy(() => import('./pages/UserPasswordManagement'));
+const StaffActivity = lazy(() => import('./pages/StaffActivity'));
 import { useAuthStore } from './context/authStore';
 import { useManagerStore } from './context/managerStore';
 import { readPortalSession } from './utils/authStorage';
@@ -119,14 +122,15 @@ function App() {
           {/* Public Routes */}
           <Route path="/" element={withSuspense(<HomeAccess />)} />
           <Route path="/login" element={<Navigate to="/" replace />} />
-          <Route path="/staff/login" element={withSuspense(<StaffAccess />)} />
+          <Route path="/staff/login" element={<Navigate to="/pos/login" replace />} />
           <Route path="/admin/login" element={withSuspense(<Login portal="admin" />)} />
           <Route path="/admin/reset-password" element={withSuspense(<ResetPassword />)} />
           <Route path="/manager/login" element={withSuspense(<Login portal="admin" initialModeKey="manager" />)} />
           <Route path="/developer/login" element={withSuspense(<Login portal="admin" initialModeKey="developer" />)} />
           <Route path="/pos/login" element={withSuspense(<Login portal="pos" />)} />
-          <Route path="/kitchen/login" element={<Navigate to="/staff/login" replace />} />
-          <Route path="/kot/login" element={<Navigate to="/staff/login" replace />} />
+          <Route path="/pos/reset-password" element={withSuspense(<StaffPasswordResetOTP />)} />
+          <Route path="/kitchen/login" element={<Navigate to="/pos/login" replace />} />
+          <Route path="/kot/login" element={<Navigate to="/pos/login" replace />} />
           <Route path="/register" element={withSuspense(<Register />)} />
           <Route path="/menu" element={withSuspense(<CustomerMenu />)} />
           <Route path="/order-status" element={withSuspense(<OrderStatus />)} />
@@ -143,6 +147,9 @@ function App() {
             <Route path="/admin/analytics" element={withSuspense(<Analytics />)} />
             <Route path="/admin/tables" element={withSuspense(<Tables />)} />
             <Route path="/admin/settings" element={withSuspense(<Settings />)} />
+            <Route path="/admin/change-password" element={withSuspense(<ChangePassword />)} />
+            <Route path="/admin/manage-user-passwords" element={withSuspense(<UserPasswordManagement />)} />
+            <Route path="/admin/staff-activity" element={withSuspense(<StaffActivity />)} />
           </Route>
 
           <Route element={<ProtectedRoute layout={AdminLayout} allowedRoles={['manager']} portal="admin" />}>
@@ -156,6 +163,9 @@ function App() {
             <Route path="/manager/bills" element={withSuspense(<ManagerBills />)} />
             <Route path="/manager/bills/:orderId" element={withSuspense(<BillView />)} />
             <Route path="/manager/settings" element={withSuspense(<Settings />)} />
+            <Route path="/manager/change-password" element={withSuspense(<ChangePassword />)} />
+            <Route path="/manager/manage-user-passwords" element={withSuspense(<UserPasswordManagement />)} />
+            <Route path="/manager/staff-activity" element={withSuspense(<StaffActivity />)} />
           </Route>
 
           <Route element={<ProtectedRoute layout={AdminLayout} allowedRoles={['developer']} portal="admin" />}>
@@ -164,14 +174,16 @@ function App() {
             <Route path="/developer/users" element={withSuspense(<DeveloperConsole view="users" />)} />
             <Route path="/developer/system" element={withSuspense(<DeveloperConsole view="system" />)} />
             <Route path="/developer/audit" element={withSuspense(<DeveloperConsole view="audit" />)} />
+            <Route path="/developer/change-password" element={withSuspense(<ChangePassword />)} />
           </Route>
 
           <Route element={<ProtectedRoute layout={PosLayout} allowedRoles={['staff']} portal="pos" />}>
             <Route path="/pos" element={withSuspense(<POS />)} />
+            <Route path="/pos/billing" element={<Navigate to="/pos" replace />} />
             <Route path="/pos/orders" element={withSuspense(<POSOrders />)} />
             <Route path="/pos/tables" element={withSuspense(<Tables />)} />
             <Route path="/pos/settings" element={withSuspense(<Settings />)} />
-            <Route path="/pos/bill/:orderId" element={withSuspense(<BillView />)} />
+            <Route path="/pos/change-password" element={withSuspense(<ChangePassword />)} />
             <Route path="/pos/kot/:orderId" element={withSuspense(<KitchenTicket />)} />
           </Route>
 

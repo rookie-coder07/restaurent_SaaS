@@ -1,5 +1,5 @@
 import { BadgePercent, BellRing, Loader, Receipt, RefreshCw, Wallet } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
 import useAutoRefresh from '../hooks/useAutoRefresh';
@@ -115,8 +115,10 @@ function normalizePhoneForDisplay(value) {
 
 export default function ManagerBills() {
   const navigate = useNavigate();
+  const [currentPage, setCurrentPage] = useState(0);
+  const PAGE_SIZE = 20;
   const { data: ordersData = {}, loading, execute: reloadOrders, refetch: refetchOrders } = useApi(() =>
-    orderAPI.getOrders({ limit: 150 })
+    orderAPI.getOrders({ limit: PAGE_SIZE, skip: currentPage * PAGE_SIZE })
   );
   const { data: menuData = {} } = useApi(() => menuAPI.getItems({ limit: 300 }));
   const { data: categoriesData = {} } = useApi(menuAPI.getCategories);
@@ -145,16 +147,23 @@ export default function ManagerBills() {
   const hasPrimedAlertsRef = useRef(false);
   const previousUnpaidIdsRef = useRef(new Set());
 
-  useAutoRefresh(() => Promise.allSettled([refetchOrders(), refetchProfile()]), 12000);
+  // Polling disabled - realtime subscriptions handle updates
+  // Only refetch on manual user action
+  const fetchInFlightRef = useRef(false);
 
-  const fetchFreshBill = async (bill) => {
-    if (!bill?.id) {
+  const fetchFreshBill = useCallback(async (bill) => {
+    if (fetchInFlightRef.current || !bill?.id) {
       return bill;
     }
 
-    const response = await orderAPI.getOrder(bill.id);
-    return response.data?.data || bill;
-  };
+    fetchInFlightRef.current = true;
+    try {
+      const response = await orderAPI.getOrder(bill.id);
+      return response.data?.data || bill;
+    } finally {
+      fetchInFlightRef.current = false;
+    }
+  }, []);
 
   const bills = useMemo(
     () => (ordersData?.items || []).filter((order) => order?.status !== 'cancelled'),
@@ -292,7 +301,8 @@ export default function ManagerBills() {
     [activeApproval?.percent, activeBilling.deliveryCharge, activeBilling.packingCharge, loyaltyRedeemPreview, numericServiceCharge, previewOrderDiscountAmount, previewSubtotal, restaurantBillingSettings]
   );
   const billTotalWithServiceCharge = Number(previewSummaryBeforeLoyalty.grandTotal || activeBillSummary.grandTotal || 0);
-  const payableAfterLoyalty = Number(previewSummary.grandTotal || billTotalWithServiceCharge || 0);
+  // Use stored bill total first (what was actually billed), fall back to fresh calculation if needed
+  const payableAfterLoyalty = Number(activeBillSummary.grandTotal || previewSummary.grandTotal || 0);
   const paymentGap = Math.max(0, Number((payableAfterLoyalty - numericAmountReceived).toFixed(2)));
   const changeDue = Math.max(0, Number((numericAmountReceived - payableAfterLoyalty).toFixed(2)));
   const editingSubtotal = useMemo(
@@ -318,15 +328,15 @@ export default function ManagerBills() {
     [editingSubtotal, numericServiceCharge, restaurantBillingSettings]
   );
 
-  useEffect(() => {
-    const refreshManagerBills = () => {
-      Promise.allSettled([refetchOrders(), refetchProfile()]).catch(() => {
-        // Page-level error state already exists.
-      });
-    };
-
-    const intervalId = window.setInterval(refreshManagerBills, 10000);
-    return () => window.clearInterval(intervalId);
+  // Manual refresh on user action only (realtime handles auto-updates)
+  const handleManualRefresh = useCallback(async () => {
+    if (fetchInFlightRef.current) return;
+    fetchInFlightRef.current = true;
+    try {
+      await Promise.allSettled([refetchOrders(), refetchProfile()]);
+    } finally {
+      fetchInFlightRef.current = false;
+    }
   }, [refetchOrders, refetchProfile]);
 
   useEffect(() => {
@@ -445,6 +455,12 @@ export default function ManagerBills() {
       return;
     }
 
+    // PREVENT DOUBLE SUBMISSION: Guard against concurrent settle attempts
+    if (actioningBillId === payingBill.id) {
+      setError('Bill settlement is already in progress. Please wait...');
+      return;
+    }
+
     const approval = payingBill?.approvedDiscount || approvedDiscounts[payingBill.id];
     setActioningBillId(payingBill.id);
     setError('');
@@ -501,6 +517,12 @@ export default function ManagerBills() {
 
   const confirmBillPaid = async (bill) => {
     if (!bill?.id) {
+      return;
+    }
+
+    // PREVENT DOUBLE SUBMISSION: Guard against concurrent settle attempts
+    if (actioningBillId === bill.id) {
+      setError('Bill payment confirmation is already in progress. Please wait...');
       return;
     }
 
@@ -761,6 +783,9 @@ export default function ManagerBills() {
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
                       <p className="text-sm font-bold text-[var(--text-primary)]">{formatDisplayOrderNumber(bill)}</p>
+                      {bill.invoiceNumber && (
+                        <p className="text-xs font-semibold text-[var(--text-secondary)]">Bill: {bill.invoiceNumber}</p>
+                      )}
                       <span
                         className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.16em] ${
                           unpaid
@@ -847,6 +872,32 @@ export default function ManagerBills() {
             );
           })}
           </div>
+
+          {(ordersData?.total || 0) > PAGE_SIZE && (
+            <div className="mt-6 flex items-center justify-between border-t border-[var(--border-color)] pt-4">
+              <div className="text-sm text-[var(--text-secondary)]">
+                Showing {currentPage * PAGE_SIZE + 1}-{Math.min((currentPage + 1) * PAGE_SIZE, ordersData?.total || 0)} of {ordersData?.total || 0} bills
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setCurrentPage(Math.max(0, currentPage - 1))}
+                  disabled={currentPage === 0 || loading}
+                >
+                  Previous
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setCurrentPage(currentPage + 1)}
+                  disabled={(currentPage + 1) * PAGE_SIZE >= (ordersData?.total || 0) || loading}
+                >
+                  Next
+                </Button>
+              </div>
+            </div>
+          )}
       </div>
 
       <Modal
@@ -1113,8 +1164,15 @@ export default function ManagerBills() {
 
               <div className="space-y-2 rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card)] p-4 text-sm">
                 <div className="flex justify-between text-[var(--text-secondary)]"><span>Subtotal</span><span>{formatCurrency(editingSummary.subtotal)}</span></div>
-                <div className="flex justify-between text-[var(--text-secondary)]"><span>CGST ({editingSummary.cgstRate}%)</span><span>{formatCurrency(editingSummary.cgstAmount)}</span></div>
-                <div className="flex justify-between text-[var(--text-secondary)]"><span>SGST ({editingSummary.sgstRate}%)</span><span>{formatCurrency(editingSummary.sgstAmount)}</span></div>
+                {editingSummary.cgstRate > 0 || editingSummary.sgstRate > 0 ? (
+                  <div className="flex justify-between text-[var(--text-secondary)]"><span>Taxable</span><span>{formatCurrency(editingSummary.taxableAmount)}</span></div>
+                ) : null}
+                {editingSummary.cgstRate > 0 ? (
+                  <div className="flex justify-between text-[var(--text-secondary)]"><span>CGST ({editingSummary.cgstRate}%)</span><span>{formatCurrency(editingSummary.cgstAmount)}</span></div>
+                ) : null}
+                {editingSummary.sgstRate > 0 ? (
+                  <div className="flex justify-between text-[var(--text-secondary)]"><span>SGST ({editingSummary.sgstRate}%)</span><span>{formatCurrency(editingSummary.sgstAmount)}</span></div>
+                ) : null}
                 {numericServiceCharge > 0 ? (
                   <div className="flex justify-between text-[var(--text-secondary)]"><span>Service charge</span><span>{formatCurrency(numericServiceCharge)}</span></div>
                 ) : null}

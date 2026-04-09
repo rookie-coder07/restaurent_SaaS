@@ -4,17 +4,13 @@ import Navbar from './Navbar';
 import Sidebar from './Sidebar';
 
 const PAGE_META = {
-  '/pos': {
-    section: 'POS',
-    title: 'Billing & Floor Operations',
+  '/pos/tables': {
+    section: 'POS Tables',
+    title: 'Floor Operations',
   },
   '/pos/orders': {
     section: 'POS Orders',
     title: 'Unified Online Orders',
-  },
-  '/pos/tables': {
-    section: 'POS Tables',
-    title: 'Live Floor View',
   },
   '/pos/settings': {
     section: 'POS Settings',
@@ -29,8 +25,8 @@ export default function PosLayout({ children }) {
   const pageMeta = useMemo(
     () =>
       PAGE_META[location.pathname] || {
-        section: 'POS',
-        title: 'Billing & Floor Operations',
+        section: 'POS Tables',
+        title: 'Floor Operations',
       },
     [location.pathname]
   );

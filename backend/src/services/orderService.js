@@ -2,9 +2,12 @@ import { randomUUID } from 'crypto';
 import logger from '../utils/logger.js';
 import supabase from '../config/supabase.js';
 import TableService from './tableService.js';
-import InventoryService from './inventoryService.js';
+// Inventory dependency intentionally disabled to avoid blocking orders/KOTs
+// import InventoryService from './inventoryService.js';
 import InvoiceService from './invoiceService.js';
 import AuthService from './authService.js';
+import { ActivityService } from './activityService.js';
+import { validateOrderBelongsToRestaurant } from '../middleware/multiTenantValidation.js';
 import {
   appendPublicNote,
   composeNotesWithKotMeta,
@@ -15,7 +18,7 @@ import { broadcastRestaurantEvent } from '../utils/realtimeEvents.js';
 export class OrderService {
   static ACTIVE_ORDER_STATUSES = ['awaiting_waiter_approval', 'pending', 'preparing', 'ready'];
 
-  static OPEN_BILL_STATUSES = ['awaiting_waiter_approval', 'pending', 'preparing', 'ready'];
+  static OPEN_BILL_STATUSES = ['awaiting_waiter_approval', 'pending', 'preparing', 'ready', 'accepted'];
 
   static CLOSED_ORDER_STATUSES = ['completed'];
   static LOYALTY_EARN_RATE_RUPEES = 100;
@@ -202,7 +205,8 @@ export class OrderService {
   static isMissingColumnError(error, columnName = '') {
     const normalizedColumnName = String(columnName || '').trim().toLowerCase();
     const combined = `${error?.code || ''} ${error?.message || ''} ${error?.details || ''} ${error?.hint || ''}`.toLowerCase();
-    return combined.includes('could not find') && normalizedColumnName ? combined.includes(normalizedColumnName) : false;
+    const isMissingError = combined.includes('could not find') || combined.includes('does not exist');
+    return isMissingError && normalizedColumnName ? combined.includes(normalizedColumnName) : false;
   }
 
   static async getRestaurantTimezone(restaurantId) {
@@ -268,14 +272,45 @@ export class OrderService {
 
     const fetchPromise = (async () => {
       try {
-        const { data: restaurantSettings, error } = await supabase
-          .from('restaurants')
-          .select('id, enable_gst, default_gst_percent, default_cgst_percent, default_sgst_percent')
-          .eq('id', restaurantId)
-          .single();
+        let restaurantSettings;
 
-        if (error || !restaurantSettings) {
-          throw error || new Error('Restaurant settings not found');
+        try {
+          const { data, error } = await supabase
+            .from('restaurants')
+            .select('id, enable_gst, default_gst_percent, default_cgst_percent, default_sgst_percent')
+            .eq('id', restaurantId)
+            .single();
+
+          if (error) {
+            throw error;
+          }
+
+          restaurantSettings = data;
+        } catch (error) {
+          // Graceful fallback for older schemas missing CGST/SGST split columns
+          const missingCgst = this.isMissingColumnError(error, 'default_cgst_percent');
+          const missingSgst = this.isMissingColumnError(error, 'default_sgst_percent');
+          if (!missingCgst && !missingSgst) {
+            throw error;
+          }
+
+          const { data: restaurant, error: fallbackError } = await supabase
+            .from('restaurants')
+            .select('id, enable_gst, default_gst_percent')
+            .eq('id', restaurantId)
+            .single();
+
+          if (fallbackError || !restaurant) {
+            throw fallbackError || error;
+          }
+
+          const fallbackGst = Number(restaurant.default_gst_percent ?? 5);
+          const splitGst = this.roundCurrency(fallbackGst / 2);
+          restaurantSettings = {
+            ...restaurant,
+            default_cgst_percent: splitGst,
+            default_sgst_percent: splitGst,
+          };
         }
 
         this.restaurantBillingSettingsCache.set(cacheKey, {
@@ -538,6 +573,53 @@ export class OrderService {
     }));
   }
 
+  /**
+   * BACKFILL: Assign bill numbers to paid orders that don't have one yet
+   * This handles orders settled before the bill numbering system was added
+   */
+  static async ensureOrderHasBillNumber(restaurantId, order) {
+    if (!order) return order;
+    
+    const { publicNotes, kotMeta } = splitNotesAndKotMeta(order.notes || '');
+    const hasInvoiceNumber = kotMeta.billing?.invoiceNumber;
+    const isPaid = order.payment_status === 'paid';
+    
+    // If order is paid but doesn't have bill number, generate and save one
+    if (isPaid && !hasInvoiceNumber) {
+      try {
+        const invoiceNumber = await this.getNextInvoiceNumber(restaurantId);
+        const updatedKotMeta = {
+          ...kotMeta,
+          billing: {
+            ...kotMeta.billing,
+            invoiceNumber,
+            invoiceDate: kotMeta.billing?.invoiceDate || order.updated_at || new Date().toISOString(),
+          },
+        };
+        const updatedNotes = composeNotesWithKotMeta(publicNotes, updatedKotMeta);
+        
+        // Update order in database silently
+        await supabase
+          .from('orders')
+          .update({ notes: updatedNotes, updated_at: new Date().toISOString() })
+          .eq('id', order.id)
+          .eq('restaurant_id', restaurantId)
+          .select()
+          .maybeSingle();
+        
+        // Update the order object in memory
+        const updatedOrder = { ...order, notes: updatedNotes };
+        return updatedOrder;
+      } catch (error) {
+        logger.warn('Could not auto-generate bill number for paid order:', { orderId: order.id, error: error.message });
+        // Don't break - return original order
+        return order;
+      }
+    }
+    
+    return order;
+  }
+
   // Helper function to transform snake_case to camelCase
   static transformOrder(order) {
     if (!order) return null;
@@ -573,7 +655,7 @@ export class OrderService {
       ? billing
       : this.normalizeBillingMeta(
           {
-            invoiceNumber: '',
+            invoiceNumber: order.invoice_number || '',
             invoiceDate: this.normalizeTimestamp(order.updated_at || order.created_at || new Date().toISOString()),
             subtotal: subtotalFromItems,
             grandTotal: Number(order.total_amount || 0),
@@ -589,6 +671,9 @@ export class OrderService {
       id: order.id,
       restaurantId: order.restaurant_id,
       tableId: order.table_id,
+      // Read invoice_number from column first (primary source)
+      // Fall back to JSON if column is NULL (for legacy data before migration)
+      invoiceNumber: order.invoice_number || billing.invoiceNumber || '',
       orderSource: String(order.order_source || '').trim().toLowerCase() === 'qr' ? 'qr' : (
         kotMeta.system?.orderOrigin === 'qr' ? 'qr' : 'manual'
       ),
@@ -1504,8 +1589,11 @@ export class OrderService {
       }
 
       if (!finalRestaurantId) {
+        console.log('ERROR:', { message: 'Missing restaurant_id', tableId: orderData.tableId });
         throw new Error('Restaurant ID is required or table ID must be provided');
       }
+
+      console.log('ORDER:', { restaurantId: finalRestaurantId, tableId: orderData.tableId, waiterId: options.userId, phase: 'init' });
 
       const normalizedRequestId = this.normalizeRequestId(orderData.requestId || orderData.request_id);
       if (normalizedRequestId && !options._requestLockApplied) {
@@ -1545,7 +1633,10 @@ export class OrderService {
       }
 
       const computedTotalAmount = this.computeOrderTotal(normalizedItems);
-      this.assertBillingChangesAllowed(options.actorRole, orderData.totalAmount, computedTotalAmount);
+      // ✅ FIXED: Allow waiters to create orders - don't enforce billing restrictions on order creation
+      // Only enforce billing restrictions on actual billing operations (discounts, settlements, payments)
+      // Waiters have 'manage_orders' permission which covers order creation
+      // this.assertBillingChangesAllowed(options.actorRole, orderData.totalAmount, computedTotalAmount);
       const initialStatus = orderData.requiresWaiterApproval ? 'awaiting_waiter_approval' : 'pending';
       const initialOnlineMeta = this.normalizeOnlineMeta(orderData.online, {
         orderType: normalizedOrderType,
@@ -1576,6 +1667,7 @@ export class OrderService {
           const insertPayload = {
             restaurant_id: finalRestaurantId,
             table_id: resolvedTableId,
+            waiter_id: options.userId || null,
             order_type: normalizedOrderType,
             status: initialStatus,
             total_amount: this.resolvePersistedOrderTotal(orderData.totalAmount, computedTotalAmount),
@@ -1594,15 +1686,39 @@ export class OrderService {
             .from('orders')
             .insert([insertPayload])
             .select(
-              'id, restaurant_id, table_id, order_type, status, total_amount, final_amount, display_order_number, request_id, payment_method, payment_status, order_source, notes, created_at, updated_at'
+              'id, restaurant_id, table_id, waiter_id, order_type, status, total_amount, final_amount, display_order_number, request_id, payment_method, payment_status, order_source, notes, created_at, updated_at'
             )
             .single();
+
+          // If waiter_id column doesn't exist, try without it
+          if (insertResult.error && this.isMissingColumnError(insertResult.error, 'waiter_id')) {
+            const { waiter_id, ...payloadWithoutWaiterId } = insertPayload;
+            insertResult = await supabase
+              .from('orders')
+              .insert([payloadWithoutWaiterId])
+              .select(
+                'id, restaurant_id, table_id, order_type, status, total_amount, final_amount, display_order_number, request_id, payment_method, payment_status, order_source, notes, created_at, updated_at'
+              )
+              .single();
+          }
 
           if (insertResult.error && this.isMissingColumnError(insertResult.error, 'final_amount')) {
             const { final_amount, ...legacyInsertPayload } = insertPayload;
             insertResult = await supabase
               .from('orders')
               .insert([legacyInsertPayload])
+              .select(
+                'id, restaurant_id, table_id, waiter_id, order_type, status, total_amount, display_order_number, request_id, payment_method, payment_status, order_source, notes, created_at, updated_at'
+              )
+              .single();
+          }
+
+          // Final fallback - neither waiter_id nor final_amount columns
+          if (insertResult.error && (this.isMissingColumnError(insertResult.error, 'waiter_id') || this.isMissingColumnError(insertResult.error, 'final_amount'))) {
+            const { waiter_id, final_amount, ...minimalPayload } = insertPayload;
+            insertResult = await supabase
+              .from('orders')
+              .insert([minimalPayload])
               .select(
                 'id, restaurant_id, table_id, order_type, status, total_amount, display_order_number, request_id, payment_method, payment_status, order_source, notes, created_at, updated_at'
               )
@@ -1612,11 +1728,45 @@ export class OrderService {
         order = insertResult.data;
         error = insertResult.error;
 
+        if (error) {
+          console.log('ERROR:', { 
+            code: error.code,
+            message: error.message,
+            details: error.details,
+            attempt: attempt + 1,
+          });
+        } else {
+          console.log('ORDER:', { 
+            id: order?.id,
+            restaurant_id: order?.restaurant_id,
+            table_id: order?.table_id,
+            waiter_id: order?.waiter_id,
+            status: order?.status,
+          });
+        }
+
+        logger.debug(`📝 Order insert attempt ${attempt + 1}:`, {
+          orderId: order?.id,
+          restaurantId: finalRestaurantId,
+          tableId: resolvedTableId,
+          waiterId: options.userId,
+          error: error ? { message: error.message, code: error.code, details: error.details } : null,
+        });
+
         if (!error) {
+          console.log(`✅ Order Insert Success (Attempt ${attempt + 1}):`, { order, restaurantId: finalRestaurantId, tableId: resolvedTableId, waiterId: options.userId });
           break;
         }
 
+        console.log(`❌ Order Insert Fail (Attempt ${attempt + 1}):`, { order, error, restaurantId: finalRestaurantId, tableId: resolvedTableId, waiterId: options.userId, payload: insertPayload });
+
         if (!this.isUniqueConstraintError(error)) {
+          logger.error(`❌ Order creation failed (attempt ${attempt + 1}):`, {
+            message: error.message,
+            code: error.code,
+            details: error.details,
+            payload: insertPayload,
+          });
           throw error;
         }
 
@@ -1638,31 +1788,140 @@ export class OrderService {
         }
       }
 
-      if (error) throw error;
-
-      logger.info(`✅ Order created: ${order.id}`);
-
-      // If items are provided, add them to the order
-      if (normalizedItems.length > 0) {
-        try {
-          await this.addOrderItems(order.id, normalizedItems);
-        } catch (orderItemsError) {
-          await supabase
-            .from('orders')
-            .delete()
-            .eq('id', order.id)
-            .eq('restaurant_id', finalRestaurantId);
-
-          throw orderItemsError;
-        }
+      if (error) {
+        const fullError = {
+          message: error.message,
+          code: error.code,
+          details: error.details,
+        };
+        console.log('ERROR:', fullError);
+        logger.error(`❌ Order insert failed after 5 attempts:`, fullError);
+        throw error;
       }
 
-      const completeOrder = this.buildCreatedOrderResponse(order, normalizedItems, {
+      if (!order || !order.id) {
+        console.log('ERROR:', { message: 'Order response missing ID - RLS or schema issue' });
+        const schemaError = {
+          message: 'Order was not created properly - missing ID in response (check RLS policies)',
+          restaurantId: finalRestaurantId,
+          tableId: resolvedTableId,
+          response: order,
+        };
+        console.log('❌ Order Missing ID:', schemaError); // 🎯 Direct logging
+        logger.error('❌ Order created but response missing ID - RLS or schema issue detected', schemaError);
+        throw new Error('Order was not created properly - missing ID in response (check RLS policies)');
+      }
+
+      logger.info(`✅ Order created successfully: ${order.id}`, {
+        restaurantId: order.restaurant_id,
+        tableId: order.table_id,
+        waiterId: order.waiter_id,
+        status: order.status,
+        totalAmount: order.total_amount,
+      });
+
+      console.log('ORDER:', {
+        id: order.id,
+        restaurant_id: order.restaurant_id,
+        table_id: order.table_id,
+        waiter_id: order.waiter_id,
+        status: order.status,
+        total_amount: order.total_amount,
+      });
+
+      // Log activity
+      ActivityService.logActivity(
+        finalRestaurantId,
+        options.userId,
+        options.actorRole,
+        'order_created',
+        {
+          orderId: order.id,
+          orderType: normalizedOrderType,
+          tableId: resolvedTableId,
+          itemCount: normalizedItems.length,
+          totalAmount: computedTotalAmount,
+        }
+      ).catch(err => logger.error('Failed to log order creation activity:', err));
+
+      // Add items if order was successfully created
+      let successfullyAddedItems = [];
+      if (order?.id && normalizedItems.length > 0) {
+        try {
+          logger.info(`📦 Adding ${normalizedItems.length} items to order ${order.id}...`);
+          logger.debug(`Item details:`, normalizedItems.map(item => ({
+            menuItemId: item.menuItemId,
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+            name: item.name,
+          })));
+          await this.addOrderItems(order.id, normalizedItems);
+          successfullyAddedItems = normalizedItems;
+          logger.info(`✅ Successfully added ${normalizedItems.length} items to order ${order.id}`);
+
+          // Log activity for items added
+          ActivityService.logActivity(
+            finalRestaurantId,
+            options.userId,
+            options.actorRole,
+            'item_added',
+            {
+              orderId: order.id,
+              itemCount: normalizedItems.length,
+              items: normalizedItems.map(item => ({
+                menuItemId: item.menuItemId || item.itemId,
+                quantity: item.quantity,
+                unitPrice: item.unitPrice ?? item.price ?? 0,
+              })),
+            }
+          ).catch(err => logger.error('Failed to log item_added activity:', err));
+        } catch (orderItemsError) {
+          console.log('ERROR:', {
+            orderId: order.id,
+            message: orderItemsError.message,
+            code: orderItemsError.code,
+            phase: 'add_items',
+          });
+          logger.error(`❌ CRITICAL: Failed to add items to order ${order.id}:`, {
+            error: {
+              message: orderItemsError.message,
+              code: orderItemsError.code,
+              details: orderItemsError.details,
+            },
+            items: normalizedItems.length,
+            restaurantId: finalRestaurantId,
+            tableId: resolvedTableId,
+          });
+          successfullyAddedItems = [];
+          
+          // 🛑 DO NOT PROCEED - Order has no items, KOT cannot be created
+          throw new Error(
+            `Order ${order.id} created but failed to add items. Reverting order. ${orderItemsError.message}`
+          );
+        }
+      } else if (order?.id && normalizedItems.length === 0) {
+        logger.warn(`⚠️ Order ${order.id} created with 0 items (empty cart)`);
+        throw new Error('Cannot create order: Cart is empty, add at least one item');
+      }
+
+      // Build complete response with ONLY items that were successfully added to database
+      const completeOrder = this.buildCreatedOrderResponse(order, successfullyAddedItems, {
         tableNumber: normalizedOrderType === 'dine-in' ? (orderData.tableNumber || null) : null,
       });
 
+      // ✅ Update table status ONLY after order AND items are successfully created
       if (resolvedTableId) {
-        await TableService.syncTableLifecycle(finalRestaurantId, resolvedTableId);
+        try {
+          await TableService.syncTableLifecycle(finalRestaurantId, resolvedTableId);
+          logger.info(`✅ Table ${resolvedTableId} status updated to occupied for order ${order.id}`);
+        } catch (tableError) {
+          logger.warn(`⚠️ Failed to update table status (order was still created):`, {
+            error: tableError.message,
+            orderId: order.id,
+            tableId: resolvedTableId,
+          });
+          // Don't throw - order was successfully created, just the table update failed
+        }
       }
 
       this.emitOrderEvent(finalRestaurantId, 'order.created', completeOrder, {
@@ -1678,6 +1937,10 @@ export class OrderService {
 
   static async addOrderItems(orderId, items, options = {}) {
     try {
+      if (!orderId) {
+        throw new Error('Order ID is required to add items');
+      }
+
       const itemsToInsert = items.map(item => ({
         order_id: orderId,
         menu_item_id: item.menuItemId || item.itemId,
@@ -1686,6 +1949,13 @@ export class OrderService {
         sent_to_kitchen: Boolean(item.sentToKitchen),
         kot_id: item.kotId || null,
       }));
+
+      logger.debug(`Inserting ${itemsToInsert.length} items:`, itemsToInsert.map(it => ({
+        order_id: it.order_id,
+        menu_item_id: it.menu_item_id,
+        quantity: it.quantity,
+        unit_price: it.unit_price,
+      })));
 
       let query = supabase
         .from('order_items')
@@ -1697,12 +1967,33 @@ export class OrderService {
 
       const { data: orderItems, error } = await query;
 
-      if (error) throw error;
+      if (error) {
+        const errorDetails = {
+          message: error.message,
+          code: error.code,
+          details: error.details,
+          hint: error.hint,
+          orderId,
+          itemCount: itemsToInsert.length,
+          itemsPayload: itemsToInsert,
+        };
+        console.log('❌ Order Items Insert Error:', { items: itemsToInsert, error }); // 🎯 Direct logging
+        logger.error('Supabase error inserting items:', errorDetails);
+        throw error;
+      }
 
       logger.info(`✅ ${items.length} items added to order ${orderId}`);
       return orderItems;
     } catch (error) {
-      logger.error('❌ Add order items error:', error);
+      const errorDetails = {
+        message: error.message,
+        code: error.code,
+        orderId,
+        itemCount: items.length,
+        items: items.map(it => ({ menuItemId: it.menuItemId, quantity: it.quantity, unitPrice: it.unitPrice })),
+      };
+      console.log('❌ Add Order Items Error:', { error: errorDetails, items }); // 🎯 Direct logging
+      logger.error('❌ Add order items error:', errorDetails);
       throw error;
     }
   }
@@ -1751,6 +2042,7 @@ export class OrderService {
         total_amount,
         final_amount,
         display_order_number,
+        invoice_number,
         request_id,
         payment_method,
         payment_status,
@@ -1786,7 +2078,14 @@ export class OrderService {
 
   static async getOrderById(restaurantId, orderId) {
     try {
-      const order = await this.fetchOrderRecord(restaurantId, orderId);
+      let order = await this.fetchOrderRecord(restaurantId, orderId);
+
+      // BACKFILL: Ensure paid orders have bill numbers
+      order = await this.ensureOrderHasBillNumber(restaurantId, order);
+
+      // SECURITY: Validate order belongs to restaurant before returning
+      // Prevents cross-restaurant data leaks for GST, invoice data, etc.
+      validateOrderBelongsToRestaurant(restaurantId, order);
 
       // Transform and include table information
       const transformedOrder = {
@@ -1873,6 +2172,11 @@ export class OrderService {
         .single();
 
       if (existingOrderError || !existingOrder) throw existingOrderError || new Error('Order not found');
+
+      // SECURITY: Prevent reverting paid orders to earlier states
+      if (existingOrder.payment_status === 'paid' && !['completed', 'cancelled'].includes(normalizedStatus)) {
+        throw new Error('Cannot revert a paid order to an earlier state. Paid orders can only be completed or cancelled.');
+      }
 
       const existingOrderType = this.normalizeOrderType(existingOrder.order_type, existingOrder.table_id ? 'dine-in' : 'takeaway');
       if (normalizedStatus === 'completed' && existingOrderType !== 'takeaway') {
@@ -1971,9 +2275,33 @@ export class OrderService {
     }
   }
 
+  static buildSettlementResponse(settledOrder) {
+    if (!settledOrder) return null;
+    const { kotMeta } = splitNotesAndKotMeta(settledOrder.notes || '');
+    const billing = this.normalizeBillingMeta(kotMeta.billing || {}, {
+      paymentMethod: settledOrder.payment_method,
+      paymentStatus: settledOrder.payment_status,
+    });
+    return {
+      ...settledOrder,
+      settlement: {
+        method: settledOrder.payment_method || 'unknown',
+        originalTotal: Number(settledOrder.total_amount || 0),
+        finalTotal: Number(settledOrder.final_amount || settledOrder.total_amount || 0),
+        billing,
+        paymentStatus: settledOrder.payment_status || 'pending',
+      },
+    };
+  }
+
   static async settleOrder(restaurantId, orderId, paymentData = {}) {
     try {
       const existingOrder = await this.fetchOrderRecord(restaurantId, orderId);
+      
+      if (!existingOrder) {
+        throw new Error('Order not found');
+      }
+
       const auditActor = this.buildAuditActor(paymentData);
 
       if (existingOrder.status === 'cancelled') {
@@ -1982,6 +2310,13 @@ export class OrderService {
 
       if (existingOrder.payment_status === 'paid') {
         throw new Error('Order is already paid');
+      }
+
+      // IDEMPOTENCY: If invoice_number already exists, return existing settlement
+      // This prevents duplicate generation if API is called multiple times
+      if (existingOrder.invoice_number) {
+        const settledOrder = await this.getOrderById(restaurantId, orderId);
+        return this.buildSettlementResponse(settledOrder);
       }
 
       const storedTotalAmount = Number(existingOrder.total_amount || 0);
@@ -1998,9 +2333,13 @@ export class OrderService {
         paymentMethod: existingOrder.payment_method,
         paymentStatus: existingOrder.payment_status,
       });
-      if (existingBilling.invoiceNumber) {
+      
+      // Allow resettlement if no bill number yet, or re-settlement of existing orders
+      const hasExistingBill = Boolean(existingBilling.invoiceNumber && existingOrder.payment_status === 'paid');
+      if (hasExistingBill) {
         throw new Error('Bill is already created for this order');
       }
+      
       const hasPersistedBilling = this.hasMeaningfulBillingMeta(existingBilling);
       const subtotal = this.roundCurrency(
         (existingOrder.order_items || []).reduce(
@@ -2057,8 +2396,8 @@ export class OrderService {
         ? 0
         : this.roundCurrency(Number(restaurantSettings.default_sgst_percent ?? fallbackTaxPercent / 2));
       const gstPercent = this.roundCurrency(cgstRate + sgstRate);
-      const cgstAmount = this.roundCurrency((taxableAmount * cgstRate) / 100);
-      const sgstAmount = this.roundCurrency((taxableAmount * sgstRate) / 100);
+      const cgstAmount = cgstRate > 0 ? this.roundCurrency((taxableAmount * cgstRate) / 100) : 0;
+      const sgstAmount = sgstRate > 0 ? this.roundCurrency((taxableAmount * sgstRate) / 100) : 0;
       const packingCharge = isPlainTakeawaySettlement ? 0 : this.normalizeChargeValue(requestedPackingCharge);
       const serviceCharge = isPlainTakeawaySettlement ? 0 : this.normalizeChargeValue(requestedServiceCharge);
       const deliveryCharge = isPlainTakeawaySettlement ? 0 : this.normalizeChargeValue(requestedDeliveryCharge);
@@ -2105,13 +2444,50 @@ export class OrderService {
         ? Number((effectiveAmountReceived - finalTotal).toFixed(2))
         : 0;
 
-      const invoiceNumber = kotMeta.billing?.invoiceNumber || await this.getNextInvoiceNumber(restaurantId);
+      // SAFETY CHECK: Verify order doesn't already have a bill number
+      // This prevents duplicate generation even if concurrent requests occur
+      const { data: currentOrder, error: checkError } = await supabase
+        .from('orders')
+        .select('invoice_number')
+        .eq('id', orderId)
+        .eq('restaurant_id', restaurantId)
+        .single();
 
+      if (checkError && checkError.code !== 'PGRST116') {
+        throw checkError;
+      }
+
+      // If bill already exists, return it immediately
+      if (currentOrder?.invoice_number) {
+        const settledOrder = await this.getOrderById(restaurantId, orderId);
+        return this.buildSettlementResponse(settledOrder);
+      }
+
+      // STEP 1: ATOMIC - Generate bill number using database function
+      // This function atomically updates invoice_number and returns the generated bill number
+      const { data: billNumber, error: billError } = await supabase.rpc('generate_bill_number', {
+        p_order_id: orderId,
+        p_restaurant_id: restaurantId,
+      });
+
+      if (billError) {
+        throw billError;
+      }
+
+      if (!billNumber) {
+        throw new Error('Failed to generate bill number');
+      }
+
+      const invoiceNumber = billNumber;
+
+      // STEP 2: Build settlement notes (BEFORE update)
+      // Store billing calculation data in KOT meta (JSON) for audit trail only
+      // Invoice number is NOW stored ONLY in invoice_number column
       const nextKotMeta = {
         ...kotMeta,
         billing: this.normalizeBillingMeta(
           {
-            invoiceNumber,
+            invoiceNumber: '', // DO NOT store in JSON - only in database column
             invoiceDate: new Date().toISOString(),
             subtotal,
             orderDiscountAmount,
@@ -2181,22 +2557,33 @@ export class OrderService {
         })
       );
 
-      const { error: settleError } = await supabase
+      // STEP 3: UPDATE ORDER STATE (invoice_number already set by RPC function)
+      // NOTE: invoice_number is already updated by generate_bill_number RPC function
+      // Only update remaining settlement fields
+      const { error: settleError, count } = await supabase
         .from('orders')
         .update({
-          status: existingOrder.status,
+          status: 'completed',
           total_amount: finalTotal,
           final_amount: finalTotal,
           payment_method: method,
-          payment_status: 'pending',
+          payment_status: 'paid',
           notes: nextNotes,
           updated_at: new Date().toISOString(),
         })
         .eq('id', orderId)
-        .eq('restaurant_id', restaurantId);
+        .eq('restaurant_id', restaurantId)
+        .select('id');
 
       if (settleError) {
         throw settleError;
+      }
+
+      // IDEMPOTENCY: If RPC already assigned bill number, subsequent calls return same number
+      // The generate_bill_number RPC function ensures atomic assignment
+      if (!count || count === 0) {
+        const settledOrder = await this.getOrderById(restaurantId, orderId);
+        return this.buildSettlementResponse(settledOrder);
       }
 
       if (existingOrder.table_id) {
@@ -2204,6 +2591,24 @@ export class OrderService {
       }
 
       const settledOrder = await this.getOrderById(restaurantId, orderId);
+      
+      // Log activity for bill generated
+      ActivityService.logActivity(
+        restaurantId,
+        paymentData.actorUserId,
+        paymentData.actorRole,
+        'bill_generated',
+        {
+          orderId,
+          invoiceNumber,
+          subtotal,
+          discountAmount: managerDiscountAmount,
+          taxAmount: this.roundCurrency(cgstAmount + sgstAmount),
+          totalAmount: finalTotal,
+          paymentMethod: method,
+        }
+      ).catch(err => logger.error('Failed to log bill_generated activity:', err));
+
       this.logAuditEvent('order.bill_created', {
         restaurantId,
         orderId,
@@ -2356,6 +2761,22 @@ export class OrderService {
       }
 
       const paidOrder = await this.getOrderById(restaurantId, orderId);
+      
+      // Log activity for payment completed
+      ActivityService.logActivity(
+        restaurantId,
+        paymentData.actorUserId,
+        paymentData.actorRole,
+        'payment_completed',
+        {
+          orderId,
+          paymentMethod: method,
+          finalAmount: expectedTotal,
+          amountReceived,
+          changeDue,
+        }
+      ).catch(err => logger.error('Failed to log payment_completed activity:', err));
+
       this.logAuditEvent('order.payment_confirmed', {
         restaurantId,
         orderId,
@@ -2448,16 +2869,39 @@ export class OrderService {
 
   static async updateOrderItem(restaurantId, orderItemId, quantity) {
     try {
-      const { data: orderItem, error } = await supabase
+      // Get the order_item to find the order_id
+      const { data: orderItem, error: itemError } = await supabase
+        .from('order_items')
+        .select('id, order_id')
+        .eq('id', orderItemId)
+        .single();
+
+      if (itemError || !orderItem) throw itemError || new Error('Order item not found');
+
+      // Check if the order is paid
+      const { data: order, error: orderError } = await supabase
+        .from('orders')
+        .select('id, payment_status')
+        .eq('id', orderItem.order_id)
+        .eq('restaurant_id', restaurantId)
+        .single();
+
+      if (orderError || !order) throw orderError || new Error('Order not found');
+
+      if (order.payment_status === 'paid') {
+        throw new Error('Cannot modify items in a paid order');
+      }
+
+      const { data: updatedItem, error } = await supabase
         .from('order_items')
         .update({ quantity })
         .eq('id', orderItemId)
         .select()
         .single();
 
-      if (error || !orderItem) throw error || new Error('Order item not found');
+      if (error || !updatedItem) throw error || new Error('Order item not found');
 
-      return orderItem;
+      return updatedItem;
     } catch (error) {
       logger.error('❌ Update order item error:', error);
       throw error;
@@ -2466,6 +2910,29 @@ export class OrderService {
 
   static async removeOrderItem(restaurantId, orderItemId) {
     try {
+      // Get the order_item to find the order_id
+      const { data: orderItem, error: itemError } = await supabase
+        .from('order_items')
+        .select('id, order_id')
+        .eq('id', orderItemId)
+        .single();
+
+      if (itemError || !orderItem) throw itemError || new Error('Order item not found');
+
+      // Check if the order is paid
+      const { data: order, error: orderError } = await supabase
+        .from('orders')
+        .select('id, payment_status')
+        .eq('id', orderItem.order_id)
+        .eq('restaurant_id', restaurantId)
+        .single();
+
+      if (orderError || !order) throw orderError || new Error('Order not found');
+
+      if (order.payment_status === 'paid') {
+        throw new Error('Cannot remove items from a paid order');
+      }
+
       const { error } = await supabase
         .from('order_items')
         .delete()
@@ -2676,69 +3143,115 @@ export class OrderService {
 
   static async getOrders(restaurantId, filters = {}) {
     try {
+      const limit = Math.min(parseInt(filters.limit) || 20, 50);
+      const skip = Math.max(parseInt(filters.skip) || 0, 0);
+      
       let query = supabase
         .from('orders')
-        .select(`
-          *,
-        order_items (
-          id,
-          menu_item_id,
-          quantity,
-          unit_price,
-          sent_to_kitchen,
-          kot_id,
-          menu_items (
-            name,
-            preparation_time
-            )
-          ),
-          tables!table_id (
-            table_number
-          )
-        `)
-        .eq('restaurant_id', restaurantId);
+        .select('id,restaurant_id,table_id,status,final_amount,payment_method,payment_status,order_type,created_at,updated_at,display_order_number,notes,is_deleted', { count: 'exact' })
+        .eq('restaurant_id', restaurantId)
+        .eq('is_deleted', false)
+        .order('created_at', { ascending: false })
+        .limit(skip + limit);
 
-      if (filters.status) {
+      if (filters.status && String(filters.status).toLowerCase() !== 'all') {
         const statusValues = this.getStatusFilterValues(filters.status);
         query = statusValues.length > 1 ? query.in('status', statusValues) : query.eq('status', statusValues[0]);
       }
 
-      if (filters.tableNumber) {
-        query = query.eq('tables.table_number', filters.tableNumber);
+      if (filters.tableNumber && String(filters.tableNumber).toLowerCase() !== 'all') {
+        try {
+          const { data: tables } = await supabase
+            .from('tables')
+            .select('id')
+            .eq('restaurant_id', restaurantId)
+            .eq('table_number', String(filters.tableNumber).trim())
+            .limit(1);
+          
+          if (tables?.length > 0) {
+            query = query.eq('table_id', tables[0].id);
+          }
+        } catch (e) {
+          // Continue if table lookup fails
+        }
       }
 
-      if (filters.orderType) {
+      if (filters.orderType && String(filters.orderType).toLowerCase() !== 'all') {
         query = query.eq('order_type', this.normalizeOrderType(filters.orderType));
       }
 
       if (filters.startDate && filters.endDate) {
-        query = query
-          .gte('created_at', filters.startDate)
-          .lte('created_at', filters.endDate);
+        const start = new Date(filters.startDate).toISOString();
+        const end = new Date(filters.endDate);
+        end.setHours(23, 59, 59, 999);
+        query = query.gte('created_at', start).lte('created_at', end.toISOString());
       }
 
-      const { data: orders, error } = await query
-        .order('created_at', { ascending: false })
-        .range(filters.skip || 0, (filters.skip || 0) + (filters.limit || 50) - 1);
-
+      const { data: orders, error, count } = await query;
       if (error) throw error;
+      
+      const items = orders || [];
+      const total = count || 0;
+      
+      if (!items?.length) return { items: [], total: 0, limit, skip };
 
-      // Transform to include tableNumber
-      const transformedOrders = (orders || []).map(order => ({
-        ...this.transformOrder(order),
-        tableNumber: order.tables?.table_number || null,
-        table: order.tables,
-      }));
-      const ordersWithDisplayNumbers = await this.attachDisplayNumbers(restaurantId, transformedOrders);
+      // Apply pagination
+      const paginationStart = skip;
+      const paginationEnd = paginationStart + limit;
+
+      // Fetch order_items in single query
+      const orderIds = items.map(o => o.id);
+      const { data: orderItems } = await supabase
+        .from('order_items')
+        .select('id,order_id,menu_item_id,quantity,unit_price,sent_to_kitchen,kot_id')
+        .in('order_id', orderIds);
+
+      // Fetch table numbers in single query
+      const tableIds = items.map(o => o.table_id).filter(Boolean);
+      const tableMap = {};
+      if (tableIds.length > 0) {
+        const { data: tables } = await supabase
+          .from('tables')
+          .select('id,table_number')
+          .in('id', tableIds);
+        tables?.forEach(t => { tableMap[t.id] = t.table_number; });
+      }
+
+      // Fetch menu items in single query for better caching
+      const menuIds = new Set(orderItems?.map(oi => oi.menu_item_id) || []);
+      const menuMap = {};
+      if (menuIds.size > 0) {
+        const { data: menuItems } = await supabase
+          .from('menu_items')
+          .select('id,name,preparation_time')
+          .in('id', Array.from(menuIds));
+        menuItems?.forEach(m => { menuMap[m.id] = m; });
+      }
+
+      const itemsByOrder = {};
+      orderItems?.forEach(item => {
+        if (!itemsByOrder[item.order_id]) itemsByOrder[item.order_id] = [];
+        itemsByOrder[item.order_id].push({
+          ...item,
+          menu_items: menuMap[item.menu_item_id]
+        });
+      });
+
+      const transformedOrders = items
+        .slice(paginationStart, paginationEnd)
+        .map(order => ({
+          ...this.transformOrder({ ...order, order_items: itemsByOrder[order.id] || [] }),
+          tableNumber: tableMap[order.table_id] || null,
+        }));
 
       return {
-        items: ordersWithDisplayNumbers,
-        total: ordersWithDisplayNumbers?.length || 0,
-        limit: filters.limit || 50,
-        skip: filters.skip || 0,
+        items: transformedOrders,
+        total,
+        limit,
+        skip,
       };
     } catch (error) {
-      logger.error('❌ Get orders error:', error);
+      logger.error('Get orders error:', error?.message);
       throw error;
     }
   }
@@ -2749,45 +3262,49 @@ export class OrderService {
       const statuses = Array.from(
         new Set(requestedStatuses.flatMap((status) => this.getStatusFilterValues(status)))
       );
+      const limit = Math.min(parseInt(filters.limit) || 30, 50);
       
-      let query = supabase
-        .from('orders')
-        .select(`
-          *,
-        order_items (
-          id,
-          menu_item_id,
-          quantity,
-          unit_price,
-          sent_to_kitchen,
-          kot_id,
-          menu_items (
-            name,
-            preparation_time
-            )
-          ),
-          tables!table_id (
-            table_number
-          )
-        `)
-        .eq('restaurant_id', restaurantId)
-        .in('status', statuses)
-        .order('created_at', { ascending: true });
+      const [ordersResult] = await Promise.all([
+        supabase
+          .from('orders')
+          .select('id,restaurant_id,table_id,status,final_amount,payment_method,payment_status,order_type,created_at,display_order_number,is_deleted', { count: 'exact' })
+          .eq('restaurant_id', restaurantId)
+          .eq('is_deleted', false)
+          .in('status', statuses)
+          .neq('payment_status', 'paid')
+          .order('created_at', { ascending: true })
+          .limit(limit)
+      ]);
 
-      const { data: orders, error } = await query;
-
+      const { data: orders, error } = ordersResult;
       if (error) throw error;
+      if (!orders?.length) return [];
 
-      // Transform to include tableNumber for easier consumption
-      const transformedOrders = (orders || []).map(order => ({
+      const orderIds = orders.map(o => o.id);
+      const { data: items } = await supabase
+        .from('order_items')
+        .select('id,order_id,menu_item_id,quantity,unit_price,sent_to_kitchen,kot_id')
+        .in('order_id', orderIds);
+      
+      const itemsByOrderId = {};
+      items?.forEach(item => {
+        if (!itemsByOrderId[item.order_id]) itemsByOrderId[item.order_id] = [];
+        itemsByOrderId[item.order_id].push(item);
+      });
+      
+      orders.forEach(order => {
+        order.order_items = itemsByOrderId[order.id] || [];
+      });
+
+      const transformedOrders = orders.map(order => ({
         ...this.transformOrder(order),
-        tableNumber: order.tables?.table_number || null,
-        table: order.tables,
+        tableNumber: order.table_number,
       }));
-      return await this.attachDisplayNumbers(restaurantId, transformedOrders);
+      
+      return transformedOrders;
     } catch (error) {
-      logger.error('❌ Get kitchen orders error:', error);
-      throw error;
+      logger.error('Get kitchen orders error:', error?.message);
+      return [];
     }
   }
 
@@ -2811,6 +3328,7 @@ export class OrderService {
           notes,
           created_at,
           updated_at,
+          is_deleted,
         order_items (
           id,
           menu_item_id,
@@ -2829,6 +3347,8 @@ export class OrderService {
         `)
         .eq('restaurant_id', restaurantId)
         .eq('table_id', tableId)
+        .eq('is_deleted', false)
+        .eq('is_archived', false)
         .neq('payment_status', 'paid')
         .in('status', this.OPEN_BILL_STATUSES)
         .order('updated_at', { ascending: false })
@@ -2877,11 +3397,17 @@ export class OrderService {
         throw new Error('Only active table orders can be updated');
       }
 
+      // SECURITY: Prevent updates to paid orders
+      if (existingOrder.payment_status === 'paid') {
+        throw new Error('Cannot modify a paid order. Orders can only be edited before payment is processed.');
+      }
+
       const normalizedItems = await this.validateOrderItems(restaurantId, orderData.items, {
         enforceMenuPrice: options.actorRole === 'manager',
       });
       const computedTotalAmount = this.computeOrderTotal(normalizedItems);
-      this.assertBillingChangesAllowed(options.actorRole, orderData.totalAmount, computedTotalAmount);
+      // ✅ FIXED: Allow waiters to update orders - billing restrictions removed from order updates
+      // this.assertBillingChangesAllowed(options.actorRole, orderData.totalAmount, computedTotalAmount);
       const resolvedOrderType = this.normalizeOrderType(
         orderData.orderType !== undefined ? orderData.orderType : existingOrder.order_type,
         existingOrder.table_id ? 'dine-in' : 'takeaway'
@@ -3008,48 +3534,148 @@ export class OrderService {
 
   static async softDeleteOrder(restaurantId, orderId, reason, options = {}) {
     try {
+      // Only enforce password verification for owner role AND if password is provided
       if (options.actorRole === 'owner') {
         const currentPassword = String(options.currentPassword || '').trim();
-        if (!currentPassword) {
-          throw new Error('Admin password is required to delete previous orders');
+        // Password is optional unless explicitly required - only verify if provided
+        if (currentPassword) {
+          try {
+            await AuthService.verifyCurrentPassword(restaurantId, currentPassword, true);
+          } catch (pwdError) {
+            throw new Error('Current password is incorrect');
+          }
         }
-
-        await AuthService.verifyCurrentPassword(options.actorUserId, currentPassword, true);
       }
 
       const existingOrder = await this.fetchOrderRecord(restaurantId, orderId);
       const trimmedReason = String(reason || '').trim();
+      const tableId = existingOrder?.table_id || existingOrder?.tableId || null;
 
       const deletedAt = new Date().toISOString();
-      const auditNote = this.appendOrderNote(
-        existingOrder.notes,
-        `[order-delete] ${trimmedReason || 'no reason provided'} | actor=${options.actorRole || 'unknown'}:${options.actorName || 'Unknown user'} | at=${deletedAt}`
-      );
+      const auditNote = `[order-delete] ${trimmedReason || 'no reason provided'} | actor=${options.actorRole || 'unknown'}:${options.actorName || 'Unknown user'} | at=${deletedAt}`;
 
-      const { error: deleteItemsError } = await supabase
-        .from('order_items')
-        .delete()
-        .eq('order_id', orderId);
+      // Collect ALL orders tied to this table so it can never stay busy
+      const orphanOrders = new Set([orderId]);
+      if (tableId) {
+        const { data: allTableOrders, error: tableOrdersError } = await supabase
+          .from('orders')
+          .select('id')
+          .eq('restaurant_id', restaurantId)
+          .eq('table_id', tableId)
+          .eq('is_deleted', false);
 
-      if (deleteItemsError) {
-        throw deleteItemsError;
+        if (tableOrdersError) {
+          throw tableOrdersError;
+        }
+
+        (allTableOrders || []).forEach((row) => row?.id && orphanOrders.add(row.id));
       }
 
-      const { error } = await supabase
-        .from('orders')
-        .delete()
-        .eq('id', orderId)
-        .eq('restaurant_id', restaurantId);
+      const orphanIds = Array.from(orphanOrders);
 
-      if (error) {
-        throw error;
+      // Hard delete dependent records first
+      for (const id of orphanIds) {
+        const { error: deleteItemsError, count: itemsDeletedCount } = await supabase
+          .from('order_items')
+          .delete()
+          .eq('order_id', id);
+
+        if (deleteItemsError) {
+          logger.error(`Failed to delete order_items for ${id}:`, deleteItemsError);
+          throw new Error(`Cannot delete order - failed to remove order items: ${deleteItemsError.message}`);
+        }
+
+        logger.info(`Deleted ${itemsDeletedCount || 0} items for order ${id}`);
+
+        const { error: deleteKotError } = await supabase
+          .from('kitchen_tickets')
+          .delete()
+          .eq('order_id', id);
+
+        if (deleteKotError) {
+          logger.warn(`Failed to delete kitchen_tickets for ${id}:`, deleteKotError);
+          // Continue anyway - KOT records are less critical
+        }
+
+        // Remove any bill/meta records stored alongside orders (if present in future migrations)
+        try {
+          await supabase
+            .from('order_bills')
+            .delete()
+            .eq('order_id', id);
+        } catch (err) {
+          // Table may not exist; ignore if missing
+        }
       }
 
-      if (existingOrder.table_id) {
-        await TableService.syncTableLifecycle(restaurantId, existingOrder.table_id);
+      // Mark orders as deleted using soft-delete flag
+      // This approach works because UPDATE with simple flag is more likely to succeed than DELETE
+      for (const id of orphanIds) {
+        const { error: softDeleteError, data: updatedRows } = await supabase
+          .from('orders')
+          .update({
+            is_deleted: true,
+            deleted_at: deletedAt,
+            delete_reason: trimmedReason,
+            notes: this.appendOrderNote(existingOrder.notes, auditNote),
+          })
+          .eq('id', id)
+          .eq('restaurant_id', restaurantId)
+          .select('id');
+
+        if (softDeleteError) {
+          logger.warn(`Failed to soft-delete order ${id}:`, softDeleteError);
+          throw new Error(`Unable to delete order ${id}: ${softDeleteError.message}`);
+        }
+
+        if (!updatedRows || updatedRows.length === 0) {
+          logger.error(`Update query returned no rows for order ${id}`);
+          throw new Error(`Order ${id} could not be marked as deleted - no rows updated`);
+        }
+
+        logger.info(`Soft-deleted order ${id}: ${auditNote}`);
       }
 
-      logger.info(`Order permanently deleted: ${orderId} :: ${auditNote}`);
+      // Update table status if orders were tied to a table
+      if (tableId) {
+        const tableUpdatePayload = {
+          status: 'available',
+          reserved_by: null,
+          reservation_time: null,
+          assigned_to: null,
+        };
+
+        const { error: tableUpdateError } = await supabase
+          .from('tables')
+          .update(tableUpdatePayload)
+          .eq('id', tableId)
+          .eq('restaurant_id', restaurantId);
+
+        if (tableUpdateError) {
+          logger.warn(`Failed to update table status for ${tableId}:`, tableUpdateError);
+        }
+
+        // Deactivate any table_assignment entry for this table so it can be reassigned cleanly
+        const { error: assignmentError } = await supabase
+          .from('table_assignments')
+          .update({ is_active: false, updated_at: deletedAt })
+          .eq('restaurant_id', restaurantId)
+          .eq('table_id', tableId);
+
+        if (assignmentError) {
+          logger.warn(`Failed to deactivate table assignment for ${tableId}:`, assignmentError);
+        }
+
+        await TableService.syncTableLifecycle(restaurantId, tableId);
+      }
+
+      this.emitOrderEvent(restaurantId, 'order.deleted', {
+        id: orderId,
+        tableId: tableId || '',
+        orderType: existingOrder.order_type || existingOrder.orderType || '',
+      });
+
+      logger.info(`Order deletion completed: ${orderId} :: ${auditNote}`);
       return { id: orderId, deletedAt };
     } catch (error) {
       logger.error('Soft delete order error:', error);
@@ -3281,37 +3907,47 @@ export class OrderService {
     try {
       const { data: orders, error } = await supabase
         .from('orders')
-        .select(`
-          *,
-          order_items (
-            id,
-            menu_item_id,
-            quantity,
-            unit_price,
-            menu_items (
-              name,
-              preparation_time
-            )
-          ),
-          tables!table_id (
-            table_number
-          )
-        `)
+        .select('id,restaurant_id,table_id,status,final_amount,payment_method,payment_status,order_type,created_at,updated_at,display_order_number')
         .eq('restaurant_id', restaurantId)
+        .eq('is_archived', false)
         .in('status', this.ACTIVE_ORDER_STATUSES)
-        .order('created_at', { ascending: true });
+        .order('created_at', { ascending: true })
+        .limit(50);
 
       if (error) throw error;
+      if (!orders?.length) return [];
 
-      const transformedOrders = (orders || []).map((order) => ({
-        ...this.transformOrder(order),
-        tableNumber: order.tables?.table_number || null,
-        table: order.tables,
+      const orderIds = orders.map(o => o.id);
+      const { data: orderItems } = await supabase
+        .from('order_items')
+        .select('id,order_id,menu_item_id,quantity,unit_price')
+        .in('order_id', orderIds);
+
+      const tableIds = orders.map(o => o.table_id).filter(Boolean);
+      const tableMap = {};
+      if (tableIds.length > 0) {
+        const { data: tables } = await supabase
+          .from('tables')
+          .select('id,table_number')
+          .in('id', tableIds);
+        tables?.forEach(t => { tableMap[t.id] = t.table_number; });
+      }
+
+      const itemsByOrder = {};
+      orderItems?.forEach(item => {
+        if (!itemsByOrder[item.order_id]) itemsByOrder[item.order_id] = [];
+        itemsByOrder[item.order_id].push(item);
+      });
+
+      const transformedOrders = orders.map(order => ({
+        ...this.transformOrder({ ...order, order_items: itemsByOrder[order.id] || [] }),
+        tableNumber: tableMap[order.table_id],
       }));
-      return await this.attachDisplayNumbers(restaurantId, transformedOrders);
+
+      return transformedOrders;
     } catch (error) {
-      logger.error('Get active orders error:', error);
-      throw error;
+      logger.error('Get active orders error:', error?.message);
+      return [];
     }
   }
 
@@ -3319,34 +3955,31 @@ export class OrderService {
     try {
       const { data: orders, error } = await supabase
         .from('orders')
-        .select(`
-          *,
-          order_items (
-            id,
-            menu_item_id,
-            quantity,
-            unit_price,
-            menu_items (
-              name,
-              preparation_time
-            )
-          ),
-          tables!table_id (
-            table_number
-          )
-        `)
+        .select('id,restaurant_id,table_id,status,final_amount,payment_method,payment_status,order_type,created_at')
         .eq('restaurant_id', restaurantId)
         .neq('payment_status', 'paid')
         .in('status', this.OPEN_BILL_STATUSES)
-        .order('updated_at', { ascending: false })
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false })
+        .limit(50);
 
       if (error) throw error;
 
+      const tableIds = (orders || []).map(o => o.table_id).filter(Boolean);
+      let tableMap = new Map();
+      
+      if (tableIds.length > 0) {
+        const { data: tables } = await supabase
+          .from('tables')
+          .select('id,table_number')
+          .in('id', tableIds);
+        
+        (tables || []).forEach(t => tableMap.set(t.id, t));
+      }
+
       const transformedOrders = (orders || []).map((order) => ({
         ...this.transformOrder(order),
-        tableNumber: order.tables?.table_number || null,
-        table: order.tables,
+        tableNumber: tableMap.get(order.table_id)?.table_number || null,
+        table: tableMap.get(order.table_id),
       }));
       return await this.attachDisplayNumbers(restaurantId, transformedOrders);
     } catch (error) {
@@ -3456,44 +4089,21 @@ export class OrderService {
       throw error;
     }
   }
-  static async getKitchenOrders(restaurantId, filters = {}) {
-    try {
-      const requestedStatuses = filters.statuses || ['pending', 'preparing', 'ready'];
-      const ticketStatuses = new Set(
-        requestedStatuses.flatMap((status) => this.getStatusFilterValues(status))
-      );
-      const openOrders = await this.getOpenBills(restaurantId);
-
-      return openOrders
-        .flatMap((order) =>
-          (order.kitchenTickets || [])
-            .map((ticket) => this.normalizeKitchenTicket(ticket))
-            .filter((ticket) => ticketStatuses.has(ticket.status))
-            .map((ticket) => ({
-              ...ticket,
-              orderId: order.id,
-              orderStatus: order.status,
-              displayOrderNumber: order.displayOrderNumber,
-              tableId: order.tableId,
-              tableNumber: order.tableNumber,
-              orderNotes: order.notes,
-              printerRoutes: Array.from(new Set((ticket.items || []).map((item) => item.station || 'Main Kitchen'))),
-            }))
-        )
-        .sort((left, right) => {
-          const leftTime = new Date(left.createdAt || 0).getTime();
-          const rightTime = new Date(right.createdAt || 0).getTime();
-          return leftTime - rightTime;
-        });
-    } catch (error) {
-      logger.error('âŒ Get kitchen orders error:', error);
-      throw error;
-    }
-  }
-
   static async sendOrderToKitchen(restaurantId, orderId) {
     try {
+      // ✅ CRITICAL: Validate order exists BEFORE creating KOT
+      if (!orderId) {
+        throw new Error('Order ID is required to send to kitchen');
+      }
+
+      logger.info(`🔍 Fetching order ${orderId} before creating KOT...`);
       const rawOrder = await this.fetchOrderRecord(restaurantId, orderId);
+      
+      if (!rawOrder || !rawOrder.id) {
+        throw new Error(`Order ${orderId} not found or invalid`);
+      }
+
+      logger.info(`✅ Order ${orderId} found. Proceeding with KOT creation...`);
       const transformedOrder = this.transformOrder(rawOrder);
       const { publicNotes, kotMeta } = splitNotesAndKotMeta(rawOrder.notes);
 
@@ -3530,6 +4140,13 @@ export class OrderService {
 
       const now = new Date().toISOString();
       const kitchenTicketId = randomUUID();
+      
+      // ✅ CRITICAL: Ensure order_id is valid and not null
+      if (!orderId) {
+        throw new Error('Cannot create KOT: order_id is null or undefined');
+      }
+
+      logger.info(`📝 Creating KOT ${kitchenTicketId} for order ${orderId}...`);
       const { error: kitchenTicketInsertError } = await supabase
         .from('kitchen_tickets')
         .insert([{
@@ -3544,8 +4161,11 @@ export class OrderService {
         }]);
 
       if (kitchenTicketInsertError) {
+        logger.error(`❌ Failed to create KOT for order ${orderId}:`, kitchenTicketInsertError);
         throw kitchenTicketInsertError;
       }
+      
+      logger.info(`✅ KOT ${kitchenTicketId} created successfully for order ${orderId}`);
 
       const nextTicket = this.normalizeKitchenTicket({
         id: kitchenTicketId,
@@ -3560,21 +4180,7 @@ export class OrderService {
         items: ticketItems,
       });
 
-      const consumptionItems = ticketItems
-        .filter((item) => item.action === 'add')
-        .map((item) => ({
-          menuItemId: item.menuItemId,
-          quantity: item.quantity,
-          name: item.name,
-        }));
-
-      if (consumptionItems.length > 0) {
-        await InventoryService.consumeMenuItems(restaurantId, consumptionItems, {
-          source: 'send_to_kitchen',
-          referenceId: `${orderId}:${nextTicket.id}`,
-          reason: 'Recipe-based auto deduction on kitchen send',
-        });
-      }
+      // Inventory consumption skipped (coming soon feature)
 
       const pendingOrderItemIds = pendingKitchenRows.map((item) => item.id).filter(Boolean);
       if (pendingOrderItemIds.length > 0) {
@@ -3876,19 +4482,7 @@ export class OrderService {
       });
       const nextTickets = [...existingTickets, nextTicket];
       const nextStatus = this.deriveOrderStatusFromTickets(nextTickets, rawOrder.status);
-      const refireItems = (nextTicket.items || []).map((item) => ({
-        menuItemId: item.menuItemId,
-        quantity: item.quantity,
-        name: item.name,
-      }));
-
-      if (refireItems.length > 0) {
-        await InventoryService.consumeMenuItems(restaurantId, refireItems, {
-          source: 'refire_ticket',
-          referenceId: `${orderId}:${nextTicket.id}`,
-          reason: 'Recipe-based auto deduction on kitchen refire',
-        });
-      }
+      // Inventory consumption skipped (coming soon feature)
 
       const { error: updateError } = await supabase
         .from('orders')

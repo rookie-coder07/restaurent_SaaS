@@ -9,6 +9,7 @@ import { subscribeToOrderEvents } from '../utils/liveOrderEvents';
 import { useOrderSubscription } from '../hooks/useOrderSubscription';
 import { syncPortalSessionUser } from '../utils/sessionUserSync';
 import Toast from '../components/common/Toast';
+import { usePosStore } from '../context/posStore';
 
 const WORKFLOW_FILTERS = [
   { id: 'all', label: 'All' },
@@ -75,6 +76,7 @@ export default function POSOrders() {
   const navigate = useNavigate();
   const user = useAuthStore((state) => state.user);
   const restaurantId = useAuthStore((state) => state.restaurantId);
+  const setPendingBillingTarget = usePosStore((state) => state.setPendingBillingTarget);
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -82,6 +84,14 @@ export default function POSOrders() {
   const [workflowFilter, setWorkflowFilter] = useState('all');
   const [sourceFilter, setSourceFilter] = useState('all');
   const [waiterAlertMessage, setWaiterAlertMessage] = useState('');
+  const [targetOrderId, setTargetOrderId] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('orderId') || '';
+  });
+  const [targetTableId, setTargetTableId] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('tableId') || '';
+  });
   const isWaiterAccount = user?.role === 'staff';
   const qrAlertedOrderIdsRef = useRef(new Set());
   const hasPrimedQrAlertsRef = useRef(false);
@@ -97,7 +107,42 @@ export default function POSOrders() {
     try {
       const response = await orderAPI.getOrders({ limit: 150 });
       const nextOrders = response.data?.data?.items || response.data?.data || [];
-      setOrders(Array.isArray(nextOrders) ? nextOrders.filter((order) => order.orderType === 'dine-in') : []);
+      const dineInOrders = Array.isArray(nextOrders) ? nextOrders.filter((order) => order.orderType === 'dine-in') : [];
+      setOrders(dineInOrders);
+
+      if (targetOrderId || targetTableId) {
+        const matched =
+          dineInOrders.find((order) => String(order.id) === String(targetOrderId)) ||
+          dineInOrders.find((order) => String(order.tableId) === String(targetTableId));
+
+        if (!matched && (targetOrderId || targetTableId)) {
+          try {
+            const activeResponse = await orderAPI.getActiveOrderForTable(targetTableId || '');
+            const activeOrder = activeResponse.data?.data || null;
+            if (activeOrder) {
+              setOrders((current) => {
+                const merged = Array.isArray(current) ? current.slice() : [];
+                merged.unshift(activeOrder);
+                return merged;
+              });
+              setSuccess('Running Bill Loaded');
+            } else {
+              setError('Order not found or already settled.');
+            }
+          } catch (err) {
+            setError(err.response?.data?.message || 'Order not found or already settled.');
+          }
+        } else {
+          setSuccess('Running Bill Reopened');
+        }
+
+        const url = new URL(window.location.href);
+        url.searchParams.delete('orderId');
+        url.searchParams.delete('tableId');
+        window.history.replaceState({}, '', url.toString());
+        setTargetOrderId('');
+        setTargetTableId('');
+      }
     } catch (requestError) {
       setOrders([]);
       setError(requestError.response?.data?.message || 'Failed to load POS orders.');
@@ -116,12 +161,28 @@ export default function POSOrders() {
     }, 200);
   }, [loadOrders]);
 
+  const openInBilling = (order) => {
+    if (!order?.tableId) {
+      setError('Order is missing table information.');
+      return;
+    }
+
+    setPendingBillingTarget({
+      tableId: order.tableId,
+      orderId: order.id,
+      message: 'Opening running bill...',
+    });
+    navigate(`/pos/billing?tableId=${order.tableId}&orderId=${order.id}`);
+  };
+
   useEffect(() => {
     loadOrders();
+    const intervalId = window.setInterval(loadOrders, 12000);
     return () => {
       if (reloadTimeoutRef.current) {
         window.clearTimeout(reloadTimeoutRef.current);
       }
+      window.clearInterval(intervalId);
     };
   }, [loadOrders]);
 
@@ -164,17 +225,17 @@ export default function POSOrders() {
     return () => window.clearInterval(intervalId);
   }, [isWaiterAccount, queueOrderReload, user?.id]);
 
-  const pendingAssignedQrOrders = useMemo(
-    () =>
-      orders.filter(
-        (order) =>
-          order?.origin === 'qr' &&
-          order?.orderType === 'dine-in' &&
-          String(order?.status || '') === 'awaiting_waiter_approval' &&
-          (!isWaiterAccount || assignedTableIds.includes(order.tableId))
-      ),
-    [assignedTableIds, isWaiterAccount, orders]
-  );
+  const pendingAssignedQrOrders = useMemo(() => {
+    const list = Array.isArray(orders) ? orders : [];
+    const matches = list.filter(
+      (order) =>
+        order?.origin === 'qr' &&
+        order?.orderType === 'dine-in' &&
+        String(order?.status || '') === 'awaiting_waiter_approval' &&
+        (!isWaiterAccount || assignedTableIds.includes(order.tableId))
+    );
+    return matches;
+  }, [assignedTableIds, isWaiterAccount, orders]);
 
   useEffect(() => {
     const nextIds = new Set(pendingAssignedQrOrders.map((order) => order.id).filter(Boolean));
@@ -369,7 +430,7 @@ export default function POSOrders() {
 
                   <button
                     type="button"
-                    onClick={() => navigate(`/pos?orderId=${order.id}`)}
+                    onClick={() => openInBilling(order, true)}
                     className="inline-flex min-h-[3rem] items-center justify-center gap-2 rounded-2xl bg-[var(--color-primary)] px-4 text-sm font-semibold text-white transition hover:opacity-95 lg:min-w-[9rem]"
                   >
                     Open
@@ -413,7 +474,7 @@ export default function POSOrders() {
                     </p>
                     <button
                       type="button"
-                      onClick={() => navigate(`/pos?tableId=${order.tableId}&orderId=${order.id}`)}
+                      onClick={() => openInBilling(order, true)}
                       className="inline-flex min-h-[3rem] items-center justify-center gap-2 rounded-2xl bg-[var(--color-primary)] px-4 text-sm font-semibold text-white transition hover:opacity-95"
                     >
                       Approve Order

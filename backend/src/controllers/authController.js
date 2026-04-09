@@ -128,15 +128,6 @@ export const requestPasswordReset = asyncHandler(async (req, res) => {
     requestedRole: role,
   });
 
-  return sendSuccess(res, 201, result, 'Password reset request created');
-});
-
-export const getResetRequests = asyncHandler(async (req, res) => {
-  const requests = await AuthService.getPendingResetRequests(req.user.restaurantId, req.user.role);
-
-  return sendSuccess(res, 200, {
-    items: requests,
-  }, 'Pending reset requests fetched');
 });
 
 export const resetUserPassword = asyncHandler(async (req, res) => {
@@ -153,6 +144,7 @@ export const resetUserPassword = asyncHandler(async (req, res) => {
 });
 
 export const getCurrentUser = asyncHandler(async (req, res) => {
+  logger.info('API HIT: GET /auth/me - User: ${req.user.id}');
   const currentUser = await AuthService.getCurrentUserProfile(req.user);
 
   return sendSuccess(res, 200, {

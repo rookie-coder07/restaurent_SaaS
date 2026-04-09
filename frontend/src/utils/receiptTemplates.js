@@ -160,9 +160,9 @@ export function buildBillPrintHtml({ order, restaurant, invoice, cashierName }) 
     <div class="summary">
       <span>Subtotal</span><span>${escapeHtml(formatCurrency(resolvedInvoice.summary.subtotal))}</span>
       ${discountSummary}
-      <span>Taxable</span><span>${escapeHtml(formatCurrency(resolvedInvoice.summary.taxableAmount))}</span>
-      <span>CGST (${escapeHtml(resolvedInvoice.summary.cgstRate)}%)</span><span>${escapeHtml(formatCurrency(resolvedInvoice.summary.cgstAmount))}</span>
-      <span>SGST (${escapeHtml(resolvedInvoice.summary.sgstRate)}%)</span><span>${escapeHtml(formatCurrency(resolvedInvoice.summary.sgstAmount))}</span>
+      ${resolvedInvoice.summary.cgstRate > 0 || resolvedInvoice.summary.sgstRate > 0 ? `<span>Taxable</span><span>${escapeHtml(formatCurrency(resolvedInvoice.summary.taxableAmount))}</span>` : ''}
+      ${resolvedInvoice.summary.cgstRate > 0 ? `<span>CGST (${escapeHtml(resolvedInvoice.summary.cgstRate)}%)</span><span>${escapeHtml(formatCurrency(resolvedInvoice.summary.cgstAmount))}</span>` : ''}
+      ${resolvedInvoice.summary.sgstRate > 0 ? `<span>SGST (${escapeHtml(resolvedInvoice.summary.sgstRate)}%)</span><span>${escapeHtml(formatCurrency(resolvedInvoice.summary.sgstAmount))}</span>` : ''}
       ${resolvedInvoice.summary.chargesTotal ? `<span>Charges</span><span>${escapeHtml(formatCurrency(resolvedInvoice.summary.chargesTotal))}</span>` : ''}
     </div>
     ${loyaltySummary}

@@ -6,6 +6,7 @@ export const updateRestaurantSchema = Joi.object({
   address: Joi.string().trim().optional(),
   city: Joi.string().trim().optional(),
   gstNumber: Joi.string().trim().optional(),
+  gstAuthority: Joi.string().trim().max(100).optional(),
   timezone: Joi.string().optional(),
 });
 

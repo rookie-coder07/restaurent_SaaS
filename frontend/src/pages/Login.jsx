@@ -67,7 +67,6 @@ export default function Login({ portal = 'admin', initialModeKey = '' }) {
     [config.modes, selectedModeKey]
   );
   const canResetAdminPassword = portal === 'admin' && !selectedMode?.isStaff && selectedModeKey === 'owner';
-  const canRequestManualReset = Boolean(selectedMode?.isStaff && selectedModeKey !== 'developer');
 
   useEffect(() => {
     setSelectedModeKey(initialModeKey || config.modes[0]?.key || 'owner');
@@ -123,9 +122,7 @@ export default function Login({ portal = 'admin', initialModeKey = '' }) {
     if (!validateEmail(emailToReset)) {
       setForgotPasswordState({
         isLoading: false,
-        error: canResetAdminPassword
-          ? 'Enter a valid admin email address.'
-          : 'Enter a valid work email address.',
+        error: 'Enter a valid admin email address.',
         success: '',
       });
       return;
@@ -137,49 +134,25 @@ export default function Login({ portal = 'admin', initialModeKey = '' }) {
       success: '',
     });
 
-    if (canResetAdminPassword) {
-      const redirectTo = `${window.location.origin}/admin/reset-password`;
-      const { error } = await supabase.auth.resetPasswordForEmail(emailToReset, {
-        redirectTo,
-      });
+    const redirectTo = `${window.location.origin}/admin/reset-password`;
+    const { error } = await supabase.auth.resetPasswordForEmail(emailToReset, {
+      redirectTo,
+    });
 
-      if (error) {
-        setForgotPasswordState({
-          isLoading: false,
-          error: error.message || 'Unable to send reset link right now.',
-          success: '',
-        });
-        return;
-      }
-
+    if (error) {
       setForgotPasswordState({
         isLoading: false,
-        error: '',
-        success: 'Reset link sent to your email',
-      });
-      return;
-    }
-
-    try {
-      await authAPI.requestPasswordReset({
-        email: emailToReset,
-        role: selectedModeKey === 'manager' ? 'manager' : 'pos',
-      });
-
-      setForgotPasswordState({
-        isLoading: false,
-        error: '',
-        success: 'Request sent to Manager/Admin',
-      });
-      return;
-    } catch (error) {
-      setForgotPasswordState({
-        isLoading: false,
-        error: error.response?.data?.message || 'Unable to send reset request right now.',
+        error: error.message || 'Unable to send reset link right now.',
         success: '',
       });
       return;
     }
+
+    setForgotPasswordState({
+      isLoading: false,
+      error: '',
+      success: 'Reset link sent to your email',
+    });
   };
 
   return (
@@ -276,7 +249,7 @@ export default function Login({ portal = 'admin', initialModeKey = '' }) {
                 {errors.password ? <p className="mt-2 text-sm text-red-500">{errors.password}</p> : null}
               </div>
 
-              {canResetAdminPassword || canRequestManualReset ? (
+              {canResetAdminPassword || portal === 'pos' ? (
                 <div className="flex items-center justify-end">
                   <button
                     type="button"
@@ -302,27 +275,22 @@ export default function Login({ portal = 'admin', initialModeKey = '' }) {
               </Button>
             </form>
 
-            {(canResetAdminPassword || canRequestManualReset) && showForgotPassword ? (
+            {canResetAdminPassword && showForgotPassword ? (
               <form onSubmit={handleForgotPassword} className="mt-5 rounded-[1.5rem] border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-4">
-                <p className="text-sm font-semibold text-[var(--color-text)]">
-                  {canResetAdminPassword ? 'Reset admin password' : 'Request password reset'}
-                </p>
+                <p className="text-sm font-semibold text-[var(--color-text)]">Reset admin password</p>
                 <p className="mt-1 text-sm text-[var(--color-text-muted)]">
-                  {canResetAdminPassword
-                    ? 'Enter your admin email to receive a secure reset link.'
-                    : selectedModeKey === 'manager'
-                      ? 'Send a reset request to Admin. Your password will be reset manually.'
-                      : 'Send a reset request to Manager or Admin. Your password will be reset manually.'}
+                  Enter your admin email to receive a secure reset link.
                 </p>
+                
                 <div className="mt-4">
                   <Input
-                    label={canResetAdminPassword ? 'Admin Email' : 'Work Email'}
+                    label="Admin Email"
                     type="email"
                     name="forgot-email"
                     autoComplete="email"
                     value={forgotEmail}
                     onChange={(e) => setForgotEmail(e.target.value)}
-                    placeholder={canResetAdminPassword ? 'owner@restaurant.com' : 'staff@restaurant.com'}
+                    placeholder="owner@restaurant.com"
                   />
                 </div>
                 <div className="mt-4 flex flex-col-reverse gap-3 sm:flex-row">
@@ -347,14 +315,40 @@ export default function Login({ portal = 'admin', initialModeKey = '' }) {
                     disabled={forgotPasswordState.isLoading}
                   >
                     {forgotPasswordState.isLoading ? <Loader className="h-4 w-4 animate-spin" /> : null}
-                    {forgotPasswordState.isLoading
-                      ? 'Sending...'
-                      : canResetAdminPassword
-                        ? 'Send Reset Link'
-                        : 'Send Reset Request'}
+                    {forgotPasswordState.isLoading ? 'Sending...' : 'Send Reset Link'}
                   </Button>
                 </div>
               </form>
+            ) : portal === 'pos' && showForgotPassword ? (
+              <div className="mt-5 rounded-[1.5rem] border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-4">
+                <p className="text-sm font-semibold text-[var(--color-text)]">Reset your password</p>
+                <p className="mt-1 text-sm text-[var(--color-text-muted)]">
+                  You can reset your password using OTP sent to your email.
+                </p>
+                
+                <div className="mt-4 flex flex-col-reverse gap-3 sm:flex-row">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    className="w-full sm:flex-1"
+                    onClick={() => {
+                      setShowForgotPassword(false);
+                      setForgotPasswordState({
+                        isLoading: false,
+                        error: '',
+                        success: '',
+                      });
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                  <Link to="/pos/reset-password" className="w-full sm:flex-1">
+                    <Button type="button" className="w-full">
+                      Reset via OTP
+                    </Button>
+                  </Link>
+                </div>
+              </div>
             ) : null}
 
             {portal === 'admin' ? (

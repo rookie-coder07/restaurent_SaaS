@@ -816,6 +816,267 @@ export class AnalyticsService {
       throw error;
     }
   }
+
+  static async getPowerBIDashboard(restaurantId, filters = {}) {
+    const { startDate, endDate } = filters;
+
+    try {
+      const result = {};
+
+      // 1. KPI METRICS
+      const kpis = await this.getKPIMetrics(restaurantId, startDate, endDate);
+      Object.assign(result, kpis);
+
+      // 2. REVENUE TREND (7/30 days)
+      result.revenueTrend = await this.getRevenueTrend(restaurantId, startDate, endDate);
+
+      // 3. ORDERS VS REVENUE
+      result.ordersVsRevenue = await this.getOrdersVsRevenue(restaurantId, startDate, endDate);
+
+      // 4. CATEGORY PERFORMANCE
+      result.categoryPerformance = await this.getCategoryPerformance(restaurantId, startDate, endDate);
+
+      // 5. TOP 10 ITEMS
+      result.topItems = await this.getTopItems(restaurantId, startDate, endDate, 10);
+
+      // 6. PAYMENT METHODS
+      result.paymentMethods = await this.getPaymentMethods(restaurantId, startDate, endDate);
+
+      // 7. HOURLY DATA (Heatmap)
+      result.hourlyData = await this.getHourlyData(restaurantId, startDate, endDate);
+
+      // 8. INSIGHTS
+      result.insights = await this.generateInsights(restaurantId, result);
+
+      return result;
+    } catch (error) {
+      logger.error('[AnalyticsService] getPowerBIDashboard failed:', error);
+      throw error;
+    }
+  }
+
+  static async getKPIMetrics(restaurantId, startDate, endDate) {
+    const { data: orders, error } = await supabase
+      .from('orders')
+      .select('id, payment_status, total_amount, final_amount, created_at, notes')
+      .eq('restaurant_id', restaurantId)
+      .eq('payment_status', 'paid')
+      .gte('created_at', startDate.toISOString())
+      .lte('created_at', endDate.toISOString());
+
+    if (error) throw error;
+
+    const totalRevenue = (orders || []).reduce((sum, o) => sum + Number(o.final_amount || 0), 0);
+    const totalOrders = orders?.length || 0;
+    const aov = totalOrders > 0 ? totalRevenue / totalOrders : 0;
+
+    // Unique customers
+    const uniqueCustomers = new Set(
+      (orders || []).map((o) => {
+        try {
+          const notes = JSON.parse(o.notes || '{}');
+          return notes.online?.customerPhone || notes.loyalty?.customerPhone || o.id;
+        } catch {
+          return o.id;
+        }
+      })
+    ).size;
+
+    return {
+      totalRevenue,
+      totalOrders,
+      aov,
+      uniqueCustomers,
+    };
+  }
+
+  static async getRevenueTrend(restaurantId, startDate, endDate) {
+    const { data: orders, error } = await supabase
+      .from('orders')
+      .select('created_at, final_amount')
+      .eq('restaurant_id', restaurantId)
+      .eq('payment_status', 'paid')
+      .gte('created_at', startDate.toISOString())
+      .lte('created_at', endDate.toISOString());
+
+    if (error) throw error;
+
+    const grouped = {};
+    (orders || []).forEach((o) => {
+      const date = o.created_at.split('T')[0];
+      grouped[date] = (grouped[date] || 0) + Number(o.final_amount || 0);
+    });
+
+    return Object.entries(grouped).map(([date, revenue]) => ({
+      date,
+      revenue: Number(revenue.toFixed(2)),
+    }));
+  }
+
+  static async getOrdersVsRevenue(restaurantId, startDate, endDate) {
+    const { data: orders, error } = await supabase
+      .from('orders')
+      .select('created_at, final_amount, id')
+      .eq('restaurant_id', restaurantId)
+      .eq('payment_status', 'paid')
+      .gte('created_at', startDate.toISOString())
+      .lte('created_at', endDate.toISOString());
+
+    if (error) throw error;
+
+    const grouped = {};
+    (orders || []).forEach((o) => {
+      const date = o.created_at.split('T')[0];
+      if (!grouped[date]) grouped[date] = { orders: 0, revenue: 0 };
+      grouped[date].orders += 1;
+      grouped[date].revenue += Number(o.final_amount || 0);
+    });
+
+    return Object.entries(grouped).map(([date, data]) => ({
+      date,
+      orders: data.orders,
+      revenue: Number(data.revenue.toFixed(2)),
+    }));
+  }
+
+  static async getCategoryPerformance(restaurantId, startDate, endDate) {
+    const { data: orders, error } = await supabase
+      .from('orders')
+      .select('order_items')
+      .eq('restaurant_id', restaurantId)
+      .eq('payment_status', 'paid')
+      .gte('created_at', startDate.toISOString())
+      .lte('created_at', endDate.toISOString());
+
+    if (error) throw error;
+
+    const grouped = {};
+    (orders || []).forEach((o) => {
+      (o.order_items || []).forEach((item) => {
+        const cat = item.category || 'Uncategorized';
+        if (!grouped[cat]) grouped[cat] = 0;
+        grouped[cat] += Number(item.unit_price || 0) * Number(item.quantity || 0);
+      });
+    });
+
+    return Object.entries(grouped).map(([name, revenue]) => ({
+      name,
+      revenue: Number(revenue.toFixed(2)),
+    }));
+  }
+
+  static async getTopItems(restaurantId, startDate, endDate, limit = 10) {
+    const { data: orders, error } = await supabase
+      .from('orders')
+      .select('order_items')
+      .eq('restaurant_id', restaurantId)
+      .eq('payment_status', 'paid')
+      .gte('created_at', startDate.toISOString())
+      .lte('created_at', endDate.toISOString());
+
+    if (error) throw error;
+
+    const grouped = {};
+    (orders || []).forEach((o) => {
+      (o.order_items || []).forEach((item) => {
+        const name = item.name || 'Unknown';
+        if (!grouped[name]) grouped[name] = { quantity: 0, revenue: 0 };
+        grouped[name].quantity += Number(item.quantity || 0);
+        grouped[name].revenue += Number(item.unit_price || 0) * Number(item.quantity || 0);
+      });
+    });
+
+    return Object.entries(grouped)
+      .map(([name, data]) => ({
+        name,
+        quantity: data.quantity,
+        revenue: Number(data.revenue.toFixed(2)),
+      }))
+      .sort((a, b) => b.quantity - a.quantity)
+      .slice(0, limit);
+  }
+
+  static async getPaymentMethods(restaurantId, startDate, endDate) {
+    const { data: orders, error } = await supabase
+      .from('orders')
+      .select('payment_method, final_amount')
+      .eq('restaurant_id', restaurantId)
+      .eq('payment_status', 'paid')
+      .gte('created_at', startDate.toISOString())
+      .lte('created_at', endDate.toISOString());
+
+    if (error) throw error;
+
+    const grouped = {};
+    (orders || []).forEach((o) => {
+      const method = (o.payment_method || 'cash').toUpperCase();
+      grouped[method] = (grouped[method] || 0) + Number(o.final_amount || 0);
+    });
+
+    return Object.entries(grouped).map(([name, value]) => ({
+      name,
+      value: Number(value.toFixed(2)),
+    }));
+  }
+
+  static async getHourlyData(restaurantId, startDate, endDate) {
+    const { data: orders, error } = await supabase
+      .from('orders')
+      .select('created_at')
+      .eq('restaurant_id', restaurantId)
+      .eq('payment_status', 'paid')
+      .gte('created_at', startDate.toISOString())
+      .lte('created_at', endDate.toISOString());
+
+    if (error) throw error;
+
+    const hourly = {};
+    for (let h = 0; h < 24; h++) {
+      hourly[h] = 0;
+    }
+
+    (orders || []).forEach((o) => {
+      const hour = new Date(o.created_at).getHours();
+      hourly[hour]++;
+    });
+
+    return Object.entries(hourly).map(([hour, orders]) => ({
+      hour: Number(hour),
+      orders,
+    }));
+  }
+
+  static async generateInsights(restaurantId, dashboardData) {
+    const insights = [];
+
+    if (dashboardData.hourlyData?.length > 0) {
+      const maxHour = dashboardData.hourlyData.reduce((max, h) => (h.orders > max.orders ? h : max));
+      insights.push({
+        icon: '🔥',
+        title: 'Peak Hour',
+        description: `Highest traffic at ${maxHour.hour}:00 with ${maxHour.orders} orders`,
+      });
+    }
+
+    if (dashboardData.topItems?.length > 0) {
+      const topItem = dashboardData.topItems[0];
+      insights.push({
+        icon: '⭐',
+        title: 'Top Item',
+        description: `${topItem.name} is your best seller (${topItem.quantity} units)`,
+      });
+    }
+
+    if (dashboardData.aov > 0) {
+      insights.push({
+        icon: '💰',
+        title: 'Average Order Value',
+        description: `Your AOV is ₹${dashboardData.aov.toFixed(2)} - focus on upselling`,
+      });
+    }
+
+    return insights;
+  }
 }
 
 export default AnalyticsService;

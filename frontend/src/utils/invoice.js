@@ -4,8 +4,8 @@ const DEFAULT_SGST_RATE = 2.5;
 const roundCurrency = (value) => Number(Number(value || 0).toFixed(2));
 
 export const getRestaurantBillingSettings = (restaurant = {}) => {
-  const gstEnabled = restaurant?.enableGST !== false;
-  const fallbackTotalRate = Number(restaurant?.defaultGSTPercent ?? (DEFAULT_CGST_RATE + DEFAULT_SGST_RATE));
+  const gstEnabled = restaurant?.enableGST !== false && Number(restaurant?.defaultGSTPercent ?? 5) > 0;
+  const fallbackTotalRate = gstEnabled ? Number(restaurant?.defaultGSTPercent ?? (DEFAULT_CGST_RATE + DEFAULT_SGST_RATE)) : 0;
   const cgstRate = gstEnabled
     ? Number(restaurant?.defaultCGSTPercent ?? fallbackTotalRate / 2)
     : 0;
@@ -43,29 +43,30 @@ export const calculateInvoiceSummary = ({
   const normalizedGstPercent = gstPercent !== undefined && gstPercent !== null
     ? Number(gstPercent || 0)
     : null;
-  const normalizedCgstRate = roundCurrency(
+  const normalizedCgstRate = normalizedGstPercent === 0 ? 0 : roundCurrency(
     cgstRate !== null && cgstRate !== undefined
       ? cgstRate
       : normalizedGstPercent !== null
         ? normalizedGstPercent / 2
         : DEFAULT_CGST_RATE
   );
-  const normalizedSgstRate = roundCurrency(
+  const normalizedSgstRate = normalizedGstPercent === 0 ? 0 : roundCurrency(
     sgstRate !== null && sgstRate !== undefined
       ? sgstRate
       : normalizedGstPercent !== null
         ? normalizedGstPercent / 2
         : DEFAULT_SGST_RATE
   );
-  const cgstAmount = roundCurrency((taxableAmount * normalizedCgstRate) / 100);
-  const sgstAmount = roundCurrency((taxableAmount * normalizedSgstRate) / 100);
+  const cgstAmount = normalizedCgstRate > 0 ? roundCurrency((taxableAmount * normalizedCgstRate) / 100) : 0;
+  const sgstAmount = normalizedSgstRate > 0 ? roundCurrency((taxableAmount * normalizedSgstRate) / 100) : 0;
   const normalizedPackingCharge = roundCurrency(packingCharge);
   const normalizedServiceCharge = roundCurrency(serviceCharge);
   const normalizedDeliveryCharge = roundCurrency(deliveryCharge);
   const chargesTotal = roundCurrency(
     normalizedPackingCharge + normalizedServiceCharge + normalizedDeliveryCharge
   );
-  const grossTotal = roundCurrency(taxableAmount + cgstAmount + sgstAmount + chargesTotal);
+  const totalTax = normalizedCgstRate > 0 || normalizedSgstRate > 0 ? cgstAmount + sgstAmount : 0;
+  const grossTotal = roundCurrency(taxableAmount + totalTax + chargesTotal);
   const normalizedLoyaltyRedeemed = Math.min(roundCurrency(loyaltyRedeemedAmount), grossTotal);
   const payableBeforeRound = roundCurrency(grossTotal - normalizedLoyaltyRedeemed);
   const grandTotal = Math.round(payableBeforeRound);
@@ -77,7 +78,7 @@ export const calculateInvoiceSummary = ({
     managerDiscountPercent: normalizedManagerDiscountPercent,
     managerDiscountAmount,
     taxableAmount,
-    gstPercent: roundCurrency(normalizedCgstRate + normalizedSgstRate),
+    gstPercent: normalizedCgstRate + normalizedSgstRate > 0 ? roundCurrency(normalizedCgstRate + normalizedSgstRate) : 0,
     cgstRate: normalizedCgstRate,
     sgstRate: normalizedSgstRate,
     cgstAmount,
@@ -103,7 +104,7 @@ export const buildInvoiceData = ({
     return null;
   }
 
-  const items = Array.isArray(order.items) ? order.items : [];
+  const items = Array.isArray(order.items) ? order.items : Array.isArray(order.orderItems) ? order.orderItems : [];
   const subtotalFromItems = roundCurrency(
     items.reduce(
       (sum, item) => sum + Number(item.quantity || item.qty || 0) * Number(item.unitPrice ?? item.price ?? 0),
@@ -136,11 +137,13 @@ export const buildInvoiceData = ({
   const createdAt = order.updatedAt || order.createdAt || new Date().toISOString();
   const invoiceDate = billing.invoiceDate || createdAt;
   const paymentStatus = String(order.paymentStatus || billing.paymentStatus || '').toLowerCase();
+  const settlementAmount = Number(order.settlement?.amountReceived || 0);
+  const billingAmount = Number(billing?.paidAmount || 0);
   const paidAmount =
     paymentStatus === 'paid'
       ? (
-        billing.paidAmount ||
-        order.settlement?.amountReceived ||
+        settlementAmount > 0 ? settlementAmount :
+        billingAmount > 0 ? billingAmount :
         computedSummary.grandTotal
       )
       : 0;
@@ -150,8 +153,9 @@ export const buildInvoiceData = ({
     address: restaurant?.address || '',
     phone: restaurant?.phone || '',
     gstin: restaurant?.gstNumber || '',
+    gstAuthority: restaurant?.gstAuthority || '',
     fssai: restaurant?.fssai || '',
-    invoiceNumber: billing.invoiceNumber || '',
+    invoiceNumber: order.invoiceNumber || billing.invoiceNumber || '',
     invoiceDate,
     orderType: order.orderType || (order.tableId ? 'dine-in' : 'takeaway'),
     tableNumber: order.tableNumber || '',

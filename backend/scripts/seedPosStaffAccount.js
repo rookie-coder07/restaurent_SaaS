@@ -9,7 +9,7 @@ dotenv.config({ path: path.resolve(__dirname, '../.env') });
 
 const OWNER_EMAIL = process.env.POS_OWNER_EMAIL || 'test@example.com';
 const POS_EMAIL = process.env.POS_STAFF_EMAIL || 'posbilling@gmail.com';
-const POS_PASSWORD = process.env.POS_STAFF_PASSWORD || 'PosBilling123@456';
+const POS_PASSWORD = process.env.POS_STAFF_PASSWORD || 'staff123';
 const POS_NAME = process.env.POS_STAFF_NAME || 'POS Billing Waiter';
 const POS_PHONE = process.env.POS_STAFF_PHONE || '9876543212';
 

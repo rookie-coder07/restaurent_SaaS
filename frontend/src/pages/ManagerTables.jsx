@@ -1,5 +1,5 @@
 import { GitMerge, LockKeyhole, Loader, SplitSquareVertical, UserPlus2 } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useApi } from '../hooks/useApi';
 import useAutoRefresh from '../hooks/useAutoRefresh';
 import { useOrderSubscription } from '../hooks/useOrderSubscription';
@@ -34,10 +34,11 @@ export default function ManagerTables() {
   const [mergeSelection, setMergeSelection] = useState([]);
   const [showMergePicker, setShowMergePicker] = useState(false);
   const [mergePrimaryTableId, setMergePrimaryTableId] = useState('');
-
-  const tables = tablesData?.tables || [];
+  const refetchDebounceRef = useRef(null);
   const openBills = Array.isArray(ordersData) ? ordersData : [];
   const waiters = (staffData?.staff || []).filter((member) => member.role === 'staff');
+  const tables = tablesData?.tables || [];
+  
   const persistedTableAssignments = useMemo(
     () =>
       waiters.reduce((accumulator, waiter) => {
@@ -96,18 +97,27 @@ export default function ManagerTables() {
     setMergeSelection([]);
   }, [selectedTableId]);
 
+  const debouncedRefetch = () => {
+    if (refetchDebounceRef.current) {
+      window.clearTimeout(refetchDebounceRef.current);
+    }
+    refetchDebounceRef.current = window.setTimeout(() => {
+      Promise.allSettled([refetchTables(), refetchOrders()]);
+    }, 300);
+  };
+
   useAutoRefresh(() => Promise.allSettled([refetchTables(), refetchOrders(), refetchStaff()]), 12000);
 
   useEffect(() => {
     const cleanup = subscribeToOrderEvents(() => {
-      Promise.allSettled([refetchTables(), refetchOrders()]);
+      debouncedRefetch();
     });
 
     return cleanup;
-  }, [refetchOrders, refetchTables]);
+  }, []);
 
   useOrderSubscription(restaurantId, () => {
-    Promise.allSettled([refetchTables(), refetchOrders()]);
+    debouncedRefetch();
   });
 
   const closeMergePicker = () => {

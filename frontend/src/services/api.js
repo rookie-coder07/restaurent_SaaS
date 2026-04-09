@@ -123,11 +123,27 @@ const api = axios.create({
   // Keeping cookies off normal API calls prevents one stale cross-portal cookie
   // from overriding the active POS/KOT/Admin session.
   withCredentials: false,
-  timeout: 30000,
+  // Supabase free tier can be slow; allow generous time before failing requests.
+  timeout: 45000,
   headers: {
     'Content-Type': 'application/json',
   },
 });
+
+// Bootstrap defaults from stored tokens so the very first request is authorized
+(() => {
+  const bootstrapToken =
+    localStorage.getItem('accessToken') ||
+    sessionStorage.getItem('accessToken');
+  const bootstrapRestaurantId =
+    localStorage.getItem('restaurantId') ||
+    sessionStorage.getItem('restaurantId');
+
+  if (bootstrapToken && bootstrapRestaurantId) {
+    api.defaults.headers.common.Authorization = `Bearer ${bootstrapToken}`;
+    api.defaults.headers.common['X-Restaurant-Id'] = String(bootstrapRestaurantId);
+  }
+})();
 
 export { API_BASE_URL };
 
@@ -136,26 +152,68 @@ export function getCurrentPortalAccessToken() {
   return readPortalSession(portal)?.accessToken || '';
 }
 
+export function getCurrentRestaurantId() {
+  const portal = getPortalKeyFromPathname(window.location.pathname);
+  const session = readPortalSession(portal);
+  const tokenPayload = decodeTokenPayload(session?.accessToken);
+  return (
+    session?.user?.restaurantId ||
+    tokenPayload?.restaurantId ||
+    localStorage.getItem('restaurantId') ||
+    sessionStorage.getItem('restaurantId') ||
+    ''
+  );
+}
+
 api.interceptors.request.use(
   (config) => {
-    return (async () => {
-      const portal = getPortalKeyFromPathname(window.location.pathname);
-      let session = readPortalSession(portal);
-      let token = session?.accessToken;
-      let tokenPayload = decodeTokenPayload(token);
+  return (async () => {
+    const portal = getPortalKeyFromPathname(window.location.pathname);
+    let session = readPortalSession(portal);
+    let token = session?.accessToken;
+    let tokenPayload = decodeTokenPayload(token);
 
-      if (token && tokenPayload && isExpiredTokenPayload(tokenPayload) && session?.refreshToken) {
-        session = await refreshPortalAccessToken(portal, session);
-        token = session?.accessToken;
-        tokenPayload = decodeTokenPayload(token);
+   // Broader fallback: try any portal session or localStorage (POS)
+   if (!token) {
+     const portals = ['pos', 'admin', 'kot'];
+     for (const p of portals) {
+       const altSession = readPortalSession(p);
+       if (altSession?.accessToken) {
+         session = altSession;
+         token = altSession.accessToken;
+         tokenPayload = decodeTokenPayload(token);
+         break;
+       }
+     }
+   }
+
+   if (!token) {
+      const fallbackToken = localStorage.getItem('accessToken') || sessionStorage.getItem('accessToken');
+      const fallbackRestaurantId = localStorage.getItem('restaurantId') || sessionStorage.getItem('restaurantId');
+      if (fallbackToken && fallbackRestaurantId) {
+        token = fallbackToken;
+        tokenPayload = decodeTokenPayload(fallbackToken) || { restaurantId: fallbackRestaurantId };
+      }
+    }
+
+    if (token && tokenPayload && isExpiredTokenPayload(tokenPayload) && session?.refreshToken) {
+      session = await refreshPortalAccessToken(portal, session);
+      token = session?.accessToken;
+      tokenPayload = decodeTokenPayload(token);
       }
 
       if (token) {
         const tokenRole = normalizePortalRole(tokenPayload?.role);
 
         if (!tokenPayload?.restaurantId || !tokenRole) {
-          rejectMismatchedPortalSession(portal);
-          throw new Error('Your session has expired. Please sign in again.');
+          // fallback to stored restaurantId if present
+          const storedRestaurantId = localStorage.getItem('restaurantId') || sessionStorage.getItem('restaurantId');
+          if (storedRestaurantId) {
+            tokenPayload = { ...tokenPayload, restaurantId: storedRestaurantId };
+          } else {
+            rejectMismatchedPortalSession(portal);
+            throw new Error('Your session has expired. Please sign in again.');
+          }
         }
 
         if (tokenRole && !canAccessPortal(tokenRole, portal)) {

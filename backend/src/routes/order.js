@@ -1,6 +1,6 @@
 import express from 'express';
 import { authMiddleware, optionalAuth, streamAuthMiddleware } from '../middleware/auth.js';
-import { tenantIsolation, checkPermission, requireBillingRole } from '../middleware/tenantIsolation.js';
+import { tenantIsolation, checkPermission, requireBillingRole, requireOwnerRole } from '../middleware/tenantIsolation.js';
 import { validateRequest } from '../middleware/validation.js';
 import { orderLimiter } from '../middleware/rateLimit.js';
 import {
@@ -19,7 +19,15 @@ import * as orderController from '../controllers/orderController.js';
 const router = express.Router();
 
 // Create order (POS/customer)
-router.post('/', optionalAuth, orderLimiter, validateRequest(createOrderSchema), orderController.createOrder);
+router.post('/', optionalAuth, (req, res, next) => {
+  // ✅ Apply tenantIsolation for authenticated users
+  if (req.user) {
+    return tenantIsolation(req, res, next);
+  }
+  next();
+}, orderLimiter, validateRequest(createOrderSchema), orderController.createOrder);
+
+// SSE stream for real-time events (MUST be before router.use to support query param auth)
 router.get('/events/stream', streamAuthMiddleware, tenantIsolation, checkPermission(['manage_orders', 'view_orders']), orderController.streamEvents);
 
 // All other routes protected
@@ -32,7 +40,7 @@ router.get('/open', checkPermission(['manage_orders', 'view_orders']), orderCont
 router.get('/inbox/online', checkPermission(['manage_orders', 'view_orders']), orderController.getOnlineOrderInbox);
 router.get('/loyalty/profile', checkPermission(['manage_orders', 'view_orders']), orderController.getLoyaltyProfile);
 router.post('/cancel-pending', checkPermission(['manage_orders']), validateRequest(cancelPendingBillsSchema), orderController.cancelPendingBills);
-router.post('/:orderId/delete', checkPermission(['manage_orders']), validateRequest(softDeleteOrderSchema), orderController.softDeleteOrder);
+router.post('/:orderId/delete', requireOwnerRole(), validateRequest(softDeleteOrderSchema), orderController.softDeleteOrder);
 router.post('/:orderId/discount-approval', requireBillingRole(), checkPermission(['manage_orders']), validateRequest(approveDiscountSchema), orderController.approveDiscount);
 router.post('/:orderId/send-to-kitchen', checkPermission(['manage_orders']), orderController.sendOrderToKitchen);
 router.get('/', checkPermission(['manage_orders', 'view_orders']), orderController.getOrders);

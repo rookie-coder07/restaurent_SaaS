@@ -1,5 +1,5 @@
 import { Activity, Pencil, PlusCircle, ShieldCheck, Trash2, UserRound, Users } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useApi } from '../hooks/useApi';
 import useAutoRefresh from '../hooks/useAutoRefresh';
 import { orderAPI, restaurantAPI, tableAPI } from '../services/apiEndpoints';
@@ -32,8 +32,10 @@ export default function ManagerWaiters() {
   const [editingAllocation, setEditingAllocation] = useState(null);
   const [nextWaiterId, setNextWaiterId] = useState('');
   const [assignmentDrafts, setAssignmentDrafts] = useState({});
-
+  const refetchDebounceRef = useRef(null);
+  
   const waiters = useMemo(() => (staffData?.staff || []).filter((member) => member.role === 'staff'), [staffData]);
+  
   const persistedTableAssignments = useMemo(
     () =>
       waiters.reduce((accumulator, waiter) => {
@@ -73,13 +75,22 @@ export default function ManagerWaiters() {
 
   useAutoRefresh(() => Promise.allSettled([refetchStaff(), refetchTables(), refetchOrders()]), 12000);
 
+  const debouncedRefetch = () => {
+    if (refetchDebounceRef.current) {
+      window.clearTimeout(refetchDebounceRef.current);
+    }
+    refetchDebounceRef.current = window.setTimeout(() => {
+      Promise.allSettled([refetchTables(), refetchOrders()]);
+    }, 300);
+  };
+
   useEffect(() => {
     const cleanup = subscribeToOrderEvents(() => {
-      Promise.allSettled([refetchTables(), refetchOrders()]);
+      debouncedRefetch();
     });
 
     return cleanup;
-  }, [refetchOrders, refetchTables]);
+  }, []);
 
   const persistTableAssignment = async (tableId, waiterId) => {
     const targetWaiter = waiters.find((waiter) => waiter.id === waiterId);

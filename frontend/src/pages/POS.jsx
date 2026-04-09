@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, Loader, Receipt, Store, TableProperties } from 'lucide-react';
 import { authAPI, orderAPI, restaurantAPI } from '../services/apiEndpoints';
+import { getCurrentPortalAccessToken } from '../services/api';
 import MenuPanel from '../components/pos/MenuPanel';
 import CartPanel from '../components/pos/CartPanel';
 import OrderControls from '../components/pos/OrderControls';
@@ -185,7 +186,9 @@ export default function POS() {
     pinnedOrderId: incomingOrderId || currentWorkspace.pinnedOrderId || '',
   };
 
-  const [cartItems, setCartItems] = useState(initialWorkspace.cartItems || []);
+  // Initialize cartItems as empty to prevent stale items from showing when switching tables.
+  // The loadActiveOrder effect will restore the correct items from cache or API.
+  const [cartItems, setCartItems] = useState([]);
   const [orderType, setOrderType] = useState('dine-in');
   const [selectedTableId, setSelectedTableId] = useState(initialWorkspace.selectedTableId || '');
   const [discountType, setDiscountType] = useState(initialWorkspace.discountType || 'flat');
@@ -223,6 +226,7 @@ export default function POS() {
   const qrAlertedOrderIdsRef = useRef(new Set());
   const hasPrimedQrAlertsRef = useRef(false);
   const createRequestRef = useRef({ id: '', signature: '' });
+  const coreDataLoadingRef = useRef(false);
 
   const items = useMemo(
     () => (menuItemsData?.items || []).map(normalizeMenuItem).filter((item) => item.isAvailable),
@@ -316,6 +320,8 @@ export default function POS() {
   }, [canAccessSelectedTable, clearWorkspaceDraft, isWaiterAccount, selectedTableId]);
 
   useEffect(() => {
+    if (coreDataLoadingRef.current) return;
+    coreDataLoadingRef.current = true;
     preloadCoreData().catch(() => {
       // Individual store error states handle the UI.
     });
@@ -435,6 +441,13 @@ export default function POS() {
   }, [activeCategoryId, categories]);
 
   useEffect(() => {
+    const token = getCurrentPortalAccessToken();
+    if (!token) {
+      setIsLoadingTableOrder(false);
+      setIsSwitchingTable(false);
+      return undefined;
+    }
+
     if (!selectedTableId) {
       setCartItems([]);
       setDiscountType('flat');
@@ -460,6 +473,10 @@ export default function POS() {
       setIsSwitchingTable(true);
       setSubmitError(null);
       setSubmitSuccess(null);
+      
+      // Clear cart immediately when switching tables to prevent stale data from showing.
+      // It will be repopulated by applyWorkspaceSnapshot, applyOrderToWorkspace, or remain empty.
+      setCartItems([]);
 
       const { workspaceDrafts: latestWorkspaceDrafts, tableOrderCache: latestTableOrderCache } = usePosStore.getState();
       const cachedDraft = latestWorkspaceDrafts[getPosWorkspaceDraftKey('dine-in', selectedTableId)];
@@ -980,22 +997,6 @@ export default function POS() {
       return;
     }
 
-    const table = waiterTables.find((entry) => entry.id === tableId);
-    if (
-      isWaiterAccount &&
-      table &&
-      table.lockedByQr &&
-      table.assignedTo &&
-      table.assignedTo !== user?.id
-    ) {
-      setSubmitError(
-        table.assignedWaiterName
-          ? `This QR table is locked to ${table.assignedWaiterName}.`
-          : 'This QR table is locked to another waiter.'
-      );
-      return;
-    }
-
     if (isWaiterAccount) {
       try {
         await tableAPI.claimTable(tableId);
@@ -1025,22 +1026,11 @@ export default function POS() {
   };
 
   const handleChangeTable = () => {
-    setPinnedOrderId('');
-    setSelectedTableId('');
-    clearBillDraft();
-    syncBillingSearchParams();
-    setSubmitError(null);
-    setSubmitSuccess(null);
+    navigate('/pos/tables', { replace: true });
   };
 
   const handleChangeType = () => {
-    setPinnedOrderId('');
-    setOrderType('dine-in');
-    setSelectedTableId('');
-    clearBillDraft();
-    syncBillingSearchParams();
-    setSubmitError(null);
-    setSubmitSuccess(null);
+    navigate('/pos/tables', { replace: true });
   };
 
   const handleAddItem = (item) => {
@@ -1216,6 +1206,16 @@ export default function POS() {
 
       const savedOrder = response.data?.data;
       const responseMessage = response.data?.message || '';
+      
+      // ✅ Validate order was properly created/updated
+      if (!savedOrder?.id) {
+        throw new Error(
+          isEditingActiveBill 
+            ? 'Failed to update order: Server did not return order data'
+            : 'Failed to create order: Server did not return order data'
+        );
+      }
+      
       if (!isEditingActiveBill && savedOrder?.id) {
         clearCreateOrderRequestId();
       }
@@ -1231,9 +1231,12 @@ export default function POS() {
           orderId: savedOrder.id,
         });
       }
-      refreshTableOverview({ force: true }).catch(() => {
-        // Shared store state updates in the background.
+      
+      // ✅ Always refresh to sync across all portals
+      refreshTableOverview({ force: true }).catch((err) => {
+        logger.warn('Table overview refresh failed:', err.message);
       });
+      
       setSubmitSuccess(
         responseMessage.includes('existing bill')
           ? responseMessage
@@ -1270,6 +1273,12 @@ export default function POS() {
           requestId: getCreateOrderRequestId(createPayload),
         });
         orderForKitchen = createResponse.data?.data;
+        
+        // ✅ CRITICAL: Validate order was created with valid ID
+        if (!orderForKitchen || !orderForKitchen.id) {
+          throw new Error('Order creation failed: Server did not return a valid order ID');
+        }
+
         if (orderForKitchen?.id) {
           clearCreateOrderRequestId();
         }
@@ -1284,6 +1293,11 @@ export default function POS() {
       } else if (hasUnsavedChanges) {
         const updateResponse = await orderAPI.updateOrder(activeOrder.id, buildOrderPayload());
         orderForKitchen = updateResponse.data?.data;
+      }
+
+      // ✅ CRITICAL: Validate order exists before sending to kitchen
+      if (!orderForKitchen || !orderForKitchen.id) {
+        throw new Error('Cannot send to kitchen: Order ID is missing or invalid');
       }
 
       const sendResponse = await orderAPI.sendToKitchen(orderForKitchen.id);
@@ -1338,6 +1352,12 @@ export default function POS() {
   const handleSettle = async () => {
     setSubmitError(null);
     setSubmitSuccess(null);
+
+    // PREVENT DOUBLE SUBMISSION: Guard against concurrent settle attempts
+    if (isSettling) {
+      setSubmitError('Bill settlement is already in progress. Please wait...');
+      return;
+    }
 
     if (!canManageBilling) {
       setSubmitError('Billing will be handled by manager.');
@@ -1439,8 +1459,6 @@ export default function POS() {
     }
   };
 
-  const shouldChooseTableFirst = !selectedTableId;
-
   return (
     <div className="compact-page space-y-4">
       <Toast
@@ -1500,85 +1518,9 @@ export default function POS() {
         </div>
       </section>
 
-      {shouldChooseTableFirst ? (
-        <section className="rounded-[var(--radius-card)] border border-[var(--border-color)] bg-[var(--bg-card)] p-4 sm:p-5 shadow-[var(--shadow-card)]">
-          <div className="mb-5">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--text-secondary)]">Step 2</p>
-              <h2 className="mt-2 text-2xl font-bold text-[var(--text-primary)]">Select table for the waiter order</h2>
-              <p className="mt-2 text-sm text-[var(--text-secondary)]">
-                Pick a table first. After that, the menu opens so the waiter can take the order.
-              </p>
-            </div>
-          </div>
 
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            {isWaiterAccount && waiterTables.length === 0 ? (
-              <div className="rounded-[1.7rem] border border-dashed border-[var(--border-color)] bg-[var(--bg-card-muted)] p-6 text-left xl:col-span-3">
-                <p className="text-lg font-bold text-[var(--text-primary)]">No tables assigned yet</p>
-                <p className="mt-2 text-sm text-[var(--text-secondary)]">
-                  This waiter account does not have any table numbers assigned yet. Ask the owner to assign tables from the staff screen.
-                </p>
-              </div>
-            ) : null}
-            {pendingAssignedQrOrders.length > 0 ? (
-              <div className="rounded-[1.7rem] border border-amber-500/20 bg-amber-500/10 p-5 xl:col-span-3">
-                <p className="text-sm font-bold uppercase tracking-[0.16em] text-amber-300">New QR orders waiting</p>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {pendingAssignedQrOrders.slice(0, 6).map((order) => (
-                    <span key={order.id} className="rounded-full bg-[var(--bg-card)] px-3 py-1 text-sm font-semibold text-[var(--text-primary)]">
-                      Table {order.tableNumber || 'Walk-in'}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            ) : null}
-            {waiterTables.map((table) => {
-              const isOccupiedByAnotherWaiter =
-                isWaiterAccount &&
-                table.lockedByQr &&
-                table.assignedTo &&
-                table.assignedTo !== user?.id;
 
-              return (
-              <button
-                key={table.id}
-                type="button"
-                onClick={() => handleSelectTable(table.id)}
-                disabled={isOccupiedByAnotherWaiter}
-                className={`rounded-[1.7rem] border border-[var(--border-color)] p-5 text-left shadow-[var(--shadow-card)] transition ${
-                  isOccupiedByAnotherWaiter
-                    ? 'cursor-not-allowed bg-[var(--bg-card-muted)] opacity-70'
-                    : 'bg-[linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.02))] hover:-translate-y-0.5 hover:border-[var(--color-primary)] hover:bg-[var(--color-primary-soft)]'
-                }`}
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--text-secondary)]">Table</p>
-                    <h3 className="mt-2 text-3xl font-black text-[var(--text-primary)]">{table.tableNumber}</h3>
-                  </div>
-                  <span className="rounded-full bg-[var(--bg-card-muted)] px-3 py-1 text-xs font-bold uppercase tracking-[0.16em] text-[var(--color-primary)]">
-                    {table.lockedByQr ? 'QR Locked' : String(table.status || '').toLowerCase() === 'occupied' ? 'Manual' : 'Available'}
-                  </span>
-                </div>
-
-                <p className="mt-5 text-sm font-medium text-[var(--text-secondary)]">
-                  {isOccupiedByAnotherWaiter
-                    ? table.assignedWaiterName
-                      ? `QR locked to ${table.assignedWaiterName}`
-                      : 'QR locked to another waiter'
-                    : table.lockedByQr
-                      ? 'Open the QR order already assigned to you.'
-                      : String(table.status || '').toLowerCase() === 'occupied'
-                        ? 'Manual table is open for waiter billing.'
-                        : 'Tap to open menu for this table.'}
-                </p>
-              </button>
-              );
-            })}
-          </div>
-        </section>
-      ) : shouldShowBlockingTableLoader ? (
+      {shouldShowBlockingTableLoader ? (
         <section className="flex min-h-[20rem] items-center justify-center rounded-[var(--radius-card)] border border-[var(--border-color)] bg-[var(--bg-card)] p-5 shadow-[var(--shadow-card)]">
           <div className="text-center">
             <div className="mx-auto inline-flex h-16 w-16 items-center justify-center rounded-full bg-[var(--color-primary-soft)] text-[var(--color-primary)]">

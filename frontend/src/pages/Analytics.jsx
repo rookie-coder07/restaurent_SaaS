@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { AlertTriangle, BarChart3, Clock3, Download, Loader, Package, Receipt, ShoppingBag, TrendingUp, Wallet } from 'lucide-react';
+import { BarChart3, Clock3, Download, Loader, Package, Receipt, ShoppingBag, TrendingUp, Wallet } from 'lucide-react';
 import {
   Area,
   AreaChart,
@@ -155,13 +155,11 @@ export default function Analytics() {
   const [isEodOpen, setIsEodOpen] = useState(false);
 
   const { data: ordersData = {}, loading } = useApi(() => orderAPI.getOrders({ limit: 1000 }));
-  const { data: inventorySummary = {} } = useApi(inventoryAPI.getSummary);
   const { data: staffData = {} } = useApi(() => restaurantAPI.getStaff({ limit: 100, skip: 0, isActive: true }));
   const { data: eodData, loading: eodLoading } = useApi(() => analyticsAPI.getLatestEodSummary({ ensure: true }));
 
   const orders = ordersData?.items || [];
   const staff = staffData?.staff || [];
-  const lowStockItems = inventorySummary?.lowStockItems || [];
 
   const snapshot = useMemo(
     () => buildAnalyticsSnapshot(orders, dateRange, { orderType }),
@@ -294,7 +292,7 @@ export default function Analytics() {
                   key={option.key}
                   type="button"
                   onClick={() => handlePresetChange(option.key)}
-                  className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${
+                  className={`inline-flex min-w-0 items-center justify-center truncate rounded-xl px-3 py-2 text-xs font-semibold transition sm:px-4 sm:text-sm ${
                     activeFilter === option.key ? 'bg-[var(--color-primary)] text-white' : 'text-[var(--text-secondary)]'
                   }`}
                 >
@@ -516,40 +514,6 @@ export default function Analytics() {
             </AnalyticsSection>
 
             <div className="grid grid-cols-1 gap-4">
-              <AnalyticsSection title="Inventory Alerts">
-                {lowStockItems.length === 0 ? (
-                  <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-5 text-sm text-emerald-300">
-                    Stock levels look healthy right now.
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    {lowStockItems.slice(0, 5).map((item) => {
-                      const critical = Number(item?.quantity || 0) <= Math.max(1, Number(item?.threshold || 0) * 0.5);
-                      return (
-                        <div
-                          key={item.id || item.name}
-                          className={`rounded-2xl border px-4 py-3 ${
-                            critical
-                              ? 'border-red-500/25 bg-red-500/10'
-                              : 'border-amber-500/25 bg-amber-500/10'
-                          }`}
-                        >
-                          <div className="flex items-start justify-between gap-3">
-                            <div>
-                              <p className="text-sm font-semibold text-[var(--text-primary)]">{item.name}</p>
-                              <p className="mt-1 text-xs text-[var(--text-secondary)]">
-                                {item.quantity} {item.unit} left · threshold {item.threshold} {item.unit}
-                              </p>
-                            </div>
-                            <AlertTriangle className={`h-4 w-4 shrink-0 ${critical ? 'text-red-400' : 'text-amber-400'}`} />
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </AnalyticsSection>
-
               <AnalyticsSection title="Staff Performance" subtitle="Orders handled per staff">
                 {staffPerformance.length === 0 ? (
                   <div className="rounded-2xl bg-[var(--bg-card-muted)] px-4 py-5 text-sm text-[var(--text-secondary)]">
