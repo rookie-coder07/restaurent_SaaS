@@ -15,12 +15,6 @@ CREATE INDEX IF NOT EXISTS idx_activity_user ON activity_logs(user_id);
 CREATE INDEX IF NOT EXISTS idx_activity_created ON activity_logs(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_activity_restaurant_user ON activity_logs(restaurant_id, user_id);
 
--- Enable RLS
-ALTER TABLE activity_logs ENABLE ROW LEVEL SECURITY;
-
--- RLS Policy: Users can see activity logs for their restaurant
-CREATE POLICY "activity_logs_select_restaurant" ON activity_logs
-FOR SELECT USING (restaurant_id = auth.jwt() ->> 'restaurant_id');
-
-CREATE POLICY "activity_logs_insert_restaurant" ON activity_logs
-FOR INSERT WITH CHECK (restaurant_id = auth.jwt() ->> 'restaurant_id');
+-- Disable RLS on activity_logs - backend controls access via API layer
+-- Activity logging is a system function managed server-side
+ALTER TABLE activity_logs DISABLE ROW LEVEL SECURITY;

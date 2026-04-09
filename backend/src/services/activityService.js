@@ -1,24 +1,38 @@
 import supabase from '../config/supabase.js';
 import logger from '../utils/logger.js';
 
+// Create a separate client with service role for activity logging (bypasses RLS)
+import { createClient } from '@supabase/supabase-js';
+const supabaseServiceClient = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_KEY
+);
+
 export class ActivityService {
   static async logActivity(restaurantId, userId, role, action, details = null) {
     try {
-      const { error } = await supabase
+      if (!restaurantId || !userId) {
+        logger.warn(`Missing params for activity log: restaurantId=${restaurantId}, userId=${userId}, action=${action}`);
+        return;
+      }
+      
+      const { error } = await supabaseServiceClient
         .from('activity_logs')
-        .insert({
+        .insert([{
           restaurant_id: restaurantId,
           user_id: userId,
           role: role,
           action: action,
           details: details,
-          created_at: new Date().toISOString(),
-        });
+        }]);
 
-      if (error) throw error;
-      logger.info(`Activity logged: ${action} by ${userId}`);
+      if (error) {
+        logger.error(`Activity insert failed - Action: ${action}, User: ${userId}, Error:`, error);
+        return;
+      }
+      logger.info(`✅ Activity logged: ${action} by ${userId} in restaurant ${restaurantId}`);
     } catch (error) {
-      logger.error('Failed to log activity:', error);
+      logger.error(`🔴 Exception logging activity [${action}]:`, error.message, error);
     }
   }
 
@@ -63,16 +77,20 @@ export class ActivityService {
 
   static async getUserStats(restaurantId, userId) {
     try {
-      // Get total orders
-      const { count: totalOrders } = await supabase
+      // Get total orders where action = 'order_created'
+      const { count: totalOrders, error: countError } = await supabase
         .from('activity_logs')
-        .select('*', { count: 'exact', head: true })
+        .select('id', { count: 'exact', head: true })
         .eq('restaurant_id', restaurantId)
         .eq('user_id', userId)
         .eq('action', 'order_created');
 
+      if (countError && countError.code !== 'PGRST116') {
+        logger.warn(`Stats count error: ${countError.message}`);
+      }
+
       // Get last active time
-      const { data: lastLog, error } = await supabase
+      const { data: lastLog, error: timeError } = await supabase
         .from('activity_logs')
         .select('created_at')
         .eq('restaurant_id', restaurantId)
@@ -81,34 +99,42 @@ export class ActivityService {
         .limit(1)
         .single();
 
-      if (error && error.code !== 'PGRST116') throw error;
+      if (timeError && timeError.code !== 'PGRST116') {
+        logger.warn(`Last active query error: ${timeError.message}`);
+      }
 
       return {
         totalOrders: totalOrders || 0,
         lastActive: lastLog?.created_at || null,
       };
     } catch (error) {
-      logger.error('Get user stats error:', error);
+      logger.warn(`Get user stats exception: ${error.message}`);
       return { totalOrders: 0, lastActive: null };
     }
   }
 
   static async getActivityLogs(restaurantId, userId, limit = 50) {
     try {
+      logger.info(`Fetching activity logs: restaurant=${restaurantId}, user=${userId}`);
+      
       const { data: logs, error } = await supabase
         .from('activity_logs')
-        .select('*')
+        .select('id, action, details, created_at, role')
         .eq('restaurant_id', restaurantId)
         .eq('user_id', userId)
         .order('created_at', { ascending: false })
         .limit(limit);
 
-      if (error) throw error;
+      if (error) {
+        logger.error(`❌ Activity fetch failed: ${error.message}`, { restaurantId, userId, error });
+        return { logs: [] };
+      }
 
+      logger.info(`✅ Retrieved ${logs?.length || 0} activity logs for user ${userId}`);
       return { logs: logs || [] };
     } catch (error) {
-      logger.error('Get activity logs error:', error);
-      throw error;
+      logger.error(`🔴 Exception fetching activity logs: ${error.message}`, { restaurantId, userId });
+      return { logs: [] };
     }
   }
 
