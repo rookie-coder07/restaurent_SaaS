@@ -17,6 +17,7 @@ import {
   ACTIVE_ORDER_STATUSES,
   isUnpaidOrder,
 } from '../utils/adminMonitoring';
+import { isSettled } from '../utils/managerPortal';
 import Card from '../components/common/Card';
 import Button from '../components/common/Button';
 import StatCard from '../components/common/StatCard';
@@ -45,20 +46,33 @@ export default function Dashboard() {
   const tables = tablesData?.tables || [];
 
   const todayDate = new Date().toDateString();
-  const todayOrders = orders.filter((order) => new Date(order.createdAt).toDateString() === todayDate);
-  const todayRevenue = todayOrders.reduce((sum, order) => sum + (order.totalAmount || 0), 0);
+  const todayOrders = useMemo(
+    () => orders.filter((order) => new Date(order.createdAt).toDateString() === todayDate),
+    [orders, todayDate]
+  );
+  // Only count SETTLED (paid/completed) orders for today's revenue
+  const todayRevenue = useMemo(
+    () => todayOrders.filter(isSettled).reduce((sum, order) => sum + Number(order.totalAmount || order.total || 0), 0),
+    [todayOrders]
+  );
   const activeUsers = staff.filter((member) => member.status === 'active').length;
   const availableTables = tables.filter((table) => table.status === 'available').length;
   const lowStockCount = inventorySummary?.lowStockCount || 0;
   const lowStockItems = inventorySummary?.lowStockItems || [];
+  // Count unique tables with active orders (pending, preparing, ready, served, awaiting approval)
   const activeTables = useMemo(
-    () =>
-      new Set(
+    () => {
+      const activeTableIds = new Set(
         orders
           .filter((order) => ACTIVE_ORDER_STATUSES.has(order.status) && order.tableId)
           .map((order) => order.tableId)
-      ).size,
-    [orders]
+      );
+      // Also count tables that are marked as occupied/busy
+      const busyTables = tables.filter((table) => table.status === 'occupied' || table.status === 'busy');
+      busyTables.forEach((table) => activeTableIds.add(table.id));
+      return activeTableIds.size;
+    },
+    [orders, tables]
   );
   const totalOrders = orders.length;
   const pendingKot = orders.filter((order) => order.status === 'pending').length;
