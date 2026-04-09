@@ -8,6 +8,7 @@ import {
   detachRestaurantStream,
   writeSseEvent,
 } from '../utils/realtimeEvents.js';
+import { logOrderCreation, formatOrderResponse } from '../utils/orderDisplay.js';
 
 function getTableIdFromBody(body = {}) {
   if (Object.prototype.hasOwnProperty.call(body, 'tableId')) {
@@ -413,7 +414,10 @@ export const createOrder = asyncHandler(async (req, res) => {
     );
   }
 
-  return sendSuccess(res, 201, order, 'Order created successfully');
+  // Log order creation with friendly formatting
+  logOrderCreation(order, normalizedOrder.items || [], logger);
+
+  return sendSuccess(res, 201, formatOrderResponse(order), 'Order created successfully');
 });
 
 export const getActiveOrderByTable = asyncHandler(async (req, res) => {
