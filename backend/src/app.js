@@ -29,6 +29,7 @@ const config = getConfig();
 
 function isPublicApiPath(path = '') {
   return (
+    path === '/' ||
     path === '/health' ||
     path === '/api/v1/health' ||
     /^\/api\/v1\/auth\/(login|staff\/login|register|token-info|forgot-password|reset-password|verify-otp|refresh-token|request-password-reset-otp|set-password-with-otp)/.test(path) ||
@@ -102,6 +103,20 @@ app.options('*', cors(corsOptions));
 
 // Security headers middleware
 app.use(secureHeadersMiddleware);
+
+// Root endpoint (for Render health checks)
+app.get('/', asyncHandler(async (req, res) => {
+  res.status(200).json({
+    success: true,
+    service: 'restaurant-saas-api',
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+  });
+}));
+
+app.head('/', asyncHandler(async (req, res) => {
+  res.status(200).end();
+}));
 
 // Health check endpoint (before monitoring)
 app.get('/health', asyncHandler(async (req, res) => {
