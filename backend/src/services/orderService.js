@@ -3285,13 +3285,16 @@ export class OrderService {
       const orderIds = orders.map(o => o.id);
       const { data: items } = await supabase
         .from('order_items')
-        .select('id,order_id,menu_item_id,quantity,unit_price,sent_to_kitchen,kot_id')
+        .select('id,order_id,menu_item_id,quantity,unit_price,sent_to_kitchen,kot_id,menu_items(name)')
         .in('order_id', orderIds);
       
       const itemsByOrderId = {};
       items?.forEach(item => {
         if (!itemsByOrderId[item.order_id]) itemsByOrderId[item.order_id] = [];
-        itemsByOrderId[item.order_id].push(item);
+        itemsByOrderId[item.order_id].push({
+          ...item,
+          name: item.menu_items?.name || `Item ${String(item.menu_item_id || '').slice(0, 6)}`,
+        });
       });
       
       orders.forEach(order => {
@@ -3303,7 +3306,51 @@ export class OrderService {
         tableNumber: order.table_number,
       }));
       
-      return transformedOrders;
+      // Flatten kitchen tickets and add orderId reference for frontend
+      const flattenedTickets = [];
+      if (Array.isArray(transformedOrders)) {
+        transformedOrders.forEach(order => {
+          if (order && order.id && order.kitchenTickets && Array.isArray(order.kitchenTickets)) {
+            order.kitchenTickets.forEach(ticket => {
+              if (ticket && ticket.id) {
+                const flatTicket = {
+                  ...ticket,
+                  orderId: order.id,  // Add orderId reference - CRITICAL
+                  tableNumber: order.tableNumber,
+                  displayOrderNumber: order.displayOrderNumber,
+                  items: ticket.items || [],
+                };
+                
+                // Validate orderId is set before pushing
+                if (!flatTicket.orderId) {
+                  logger.warn(`⚠️ Ticket ${ticket.id} has no orderId! Order ID: ${order.id}`);
+                }
+                
+                flattenedTickets.push(flatTicket);
+              }
+            });
+          } else if (order && !order.id) {
+            logger.warn(`⚠️ Order has no ID: ${JSON.stringify(order).substring(0, 100)}`);
+          } else if (order && !order.kitchenTickets) {
+            logger.info(`Order ${order.id} has no kitchen tickets`);
+          }
+        });
+      }
+      
+      // DEBUG: Log the actual ticket structure to verify orderId is set correctly
+      if (flattenedTickets.length > 0) {
+        const sample = flattenedTickets[0];
+        logger.info('[Kitchen Debug] First ticket structure:', {
+          ticketId: sample.id,
+          orderId: sample.orderId,
+          isSameId: sample.id === sample.orderId,
+          ticketIdMatch: sample.id?.substring(0, 8),
+          orderIdMatch: sample.orderId?.substring(0, 8),
+        });
+      }
+      
+      logger.info(`Kitchen orders: returning ${flattenedTickets.length} flattened tickets from ${transformedOrders.length} orders`);
+      return flattenedTickets.length > 0 ? flattenedTickets : [];
     } catch (error) {
       logger.error('Get kitchen orders error:', error?.message);
       return [];
@@ -3539,21 +3586,35 @@ export class OrderService {
       const role = String(options.actorRole || '').toLowerCase();
       const currentPassword = String(options.currentPassword || '').trim();
 
+      console.log('[SERVICE_SOFT_DELETE] 🔍 Starting order deletion');
+      console.log('[SERVICE_SOFT_DELETE] Role:', options.actorRole, '→ normalized:', role);
+      console.log('[SERVICE_SOFT_DELETE] Password provided:', !!currentPassword);
+
       if (currentPassword && ['owner', 'admin', 'manager'].includes(role)) {
+        console.log('[SERVICE_SOFT_DELETE] 🔐 Verifying password');
         try {
           await AuthService.verifyCurrentPassword(
             options.actorUserId || restaurantId,
             currentPassword,
             role === 'owner' || role === 'admin'
           );
+          console.log('[SERVICE_SOFT_DELETE] ✅ Password verified');
         } catch (pwdError) {
+          console.log('[SERVICE_SOFT_DELETE] ❌ Password verification failed:', pwdError.message);
           throw new Error('Current password is incorrect');
         }
       }
 
+      console.log('[SERVICE_SOFT_DELETE] 🔐 Checking role authorization');
+      console.log('[SERVICE_SOFT_DELETE] Allowed roles: owner, admin, manager, developer');
+      console.log('[SERVICE_SOFT_DELETE] User role in allowed list:', ['owner', 'admin', 'manager', 'developer'].includes(role));
+      
       if (!['owner', 'admin', 'manager', 'developer'].includes(role)) {
+        console.log('[SERVICE_SOFT_DELETE] ❌ Role not authorized:', role);
         throw new Error('Access denied');
       }
+
+      console.log('[SERVICE_SOFT_DELETE] ✅ Role authorized');
 
       let query = supabase
         .from('orders')
@@ -3707,8 +3768,10 @@ export class OrderService {
       });
 
       logger.info(`Order deletion completed: ${orderId} :: ${auditNote}`);
+      console.log('[SERVICE_SOFT_DELETE] ✅ Order deletion completed successfully');
       return { id: orderId, deletedAt, restaurantId: effectiveRestaurantId };
     } catch (error) {
+      console.log('[SERVICE_SOFT_DELETE] ❌ Soft delete order error:', error.message);
       logger.error('Soft delete order error:', error);
       throw error;
     }

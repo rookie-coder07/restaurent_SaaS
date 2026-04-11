@@ -708,15 +708,50 @@ export const softDeleteOrder = asyncHandler(async (req, res) => {
   const role = String(req.user?.role || '').toLowerCase();
   const currentPassword = req.body.currentPassword || req.body.current_password || '';
 
-  console.log('User role:', req.user?.role);
-  console.log('Restaurant:', req.user?.restaurantId || req.restaurantId || null);
+  console.log('[ORDER_DELETE] 🔍 Endpoint called');
+  console.log('[ORDER_DELETE] User role:', req.user?.role, '→ normalized:', role);
+  console.log('[ORDER_DELETE] Restaurant ID:', req.restaurantId || req.user?.restaurantId);
+  console.log('[ORDER_DELETE] Order ID:', orderId);
+  console.log('[ORDER_DELETE] User:', req.user?.userId, req.user?.email);
 
-  const deletedOrder = await OrderService.softDeleteOrder(req.restaurantId || req.user?.restaurantId || null, orderId, req.body.reason, {
-    actorRole: role,
-    actorUserId: req.user?.userId,
-    actorName: req.user?.name || req.user?.email || 'Unknown user',
-    currentPassword,
-  });
+  try {
+    const deletedOrder = await OrderService.softDeleteOrder(req.restaurantId || req.user?.restaurantId || null, orderId, req.body.reason, {
+      actorRole: role,
+      actorUserId: req.user?.userId,
+      actorName: req.user?.name || req.user?.email || 'Unknown user',
+      currentPassword,
+    });
+
+    console.log('[ORDER_DELETE] ✅ Deletion successful');
+    
+    if (!deletedOrder || !deletedOrder.id) {
+      console.log('[ORDER_DELETE] ❌ No rows updated in database');
+      return sendError(res, 400, 'Order deletion failed - no rows were updated in database');
+    }
+
+    // Log activity for order deletion (fire-and-forget)
+    if (req.user?.userId) {
+      setImmediate(() => {
+        ActivityService.logActivity(
+          deletedOrder.restaurantId || req.restaurantId || req.user?.restaurantId || null,
+          req.user.userId,
+          req.user?.role,
+          'order_deleted',
+          {
+            orderId: orderId,
+            reason: req.body.reason || 'No reason provided',
+            deletedAt: new Date().toISOString(),
+          }
+        ).catch(error => logger.warn('Failed to log order deletion activity:', error.message));
+      });
+    }
+
+    return sendSuccess(res, 200, deletedOrder, 'Order deleted safely');
+
+  } catch (error) {
+    console.log('[ORDER_DELETE] ❌ Error caught:', error.message);
+    throw error;
+  }
 
   if (!deletedOrder || !deletedOrder.id) {
     return sendError(res, 400, 'Order deletion failed - no rows were updated in database');

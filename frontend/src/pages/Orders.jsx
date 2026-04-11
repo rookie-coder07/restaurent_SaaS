@@ -217,6 +217,23 @@ export default function Orders() {
 
   const finalizePendingDeletion = async (entry) => {
     try {
+      // GUARD: Role validation - only admin/owner can delete orders
+      if (!canDeleteOrders) {
+        const userRole = user?.role || 'unknown';
+        console.error('[OrderDelete] Authorization failed - user role:', userRole, 'required: admin/owner');
+        setError(`Order deletion requires admin privileges. Your role: ${userRole}`);
+        removePendingDeletionEntry(entry.id);
+        setRemovedOrderIds((ids) => ids.filter((id) => !entry.orderIds.includes(id)));
+        return;
+      }
+
+      // DEBUG: Log deletion attempt
+      console.log('[OrderDelete] User role validated - proceeding with deletion', {
+        userRole: user?.role,
+        orderCount: entry.orderIds.length,
+        orderIds: entry.orderIds,
+      });
+
       const responses = await Promise.all(
         entry.orderIds.map((orderId) =>
           orderAPI.softDeleteOrder(orderId, {
@@ -229,6 +246,7 @@ export default function Orders() {
       const allSuccessful = responses.every((response) => response?.status === 200 && response?.data?.data?.id);
       
       if (!allSuccessful) {
+        console.error('[OrderDelete] Deletion verification failed - not all orders deleted successfully');
         throw new Error('One or more orders failed to delete. No rows were affected.');
       }
 
@@ -244,6 +262,11 @@ export default function Orders() {
     } catch (err) {
       removePendingDeletionEntry(entry.id);
       setRemovedOrderIds((ids) => ids.filter((id) => !entry.orderIds.includes(id)));
+      console.error('[OrderDelete] Deletion failed:', {
+        status: err.response?.status,
+        message: err.response?.data?.message || err.message,
+        userRole: user?.role,
+      });
       setError(err.response?.data?.message || err.message || 'Failed to delete orders.');
       await Promise.allSettled([refetchOrders(), refetchTables()]);
     }
@@ -302,17 +325,33 @@ export default function Orders() {
       return;
     }
 
+    // GUARD: Role validation - only admin/owner can delete
+    if (!canDeleteOrders) {
+      const userRole = user?.role || 'unknown';
+      console.error('[OrderDelete] Delete attempt blocked - insufficient permissions. Role:', userRole);
+      setError(`You don't have permission to delete orders. Required: admin role`);
+      setPendingDeleteOrder(null);
+      return;
+    }
+
     try {
       setIsDeletingOrder(true);
       setError(null);
+      
+      // GUARD: Password required
       if (requiresDeletePassword && !deletePassword.trim()) {
         setError('Enter admin password to delete previous orders.');
         return;
       }
+
+      // DEBUG: Log deletion initiation
+      console.log('[OrderDelete] Initiating deletion for order:', pendingDeleteOrder.id, 'User role:', user?.role);
+
       queueDeletion([pendingDeleteOrder]);
       setPendingDeleteOrder(null);
       setDeletePassword('');
     } catch (err) {
+      console.error('[OrderDelete] Queue error:', err);
       setError(err.response?.data?.message || 'Failed to queue this order for deletion.');
     } finally {
       setIsDeletingOrder(false);

@@ -74,7 +74,31 @@ export const orderAPI = {
   sendToKitchen: (orderId) => api.post(`/v1/orders/${orderId}/send-to-kitchen`),
   settleOrder: (orderId, data) => api.post(`/v1/orders/${orderId}/settle`, data),
   markOrderPaid: (orderId, data) => api.post(`/v1/orders/${orderId}/mark-paid`, data),
-  softDeleteOrder: (orderId, data) => api.post(`/v1/orders/${orderId}/delete`, data),
+  softDeleteOrder: (orderId, data) => {
+    // GUARD: Validate orderId exists
+    if (!orderId || typeof orderId !== 'string' || orderId.trim().length === 0) {
+      console.error('[OrderDelete] Invalid orderId:', orderId);
+      return Promise.reject(new Error('Order ID is required for deletion'));
+    }
+
+    // GUARD: Get token and validate it exists
+    const token = getCurrentPortalAccessToken();
+    if (!token) {
+      console.error('[OrderDelete] Missing authorization token - cannot delete order');
+      return Promise.reject(new Error('Authentication token required for order deletion'));
+    }
+
+    // DEBUG: Log deletion attempt
+    console.log('[OrderDelete] Initiating delete for orderId:', orderId, 'with token:', token.substring(0, 20) + '...[REDACTED]');
+
+    // IMPORTANT: Explicitly include Authorization header to ensure 403 is not due to missing token
+    return api.post(`/v1/orders/${orderId}/delete`, data, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+    });
+  },
   getLoyaltyProfile: (phone) => api.get('/v1/orders/loyalty/profile', { params: { phone } }),
   updateStatus: (orderId, data) => api.put(`/v1/orders/${orderId}/status`, data),
   updateKitchenStatus: (orderId, data) => api.patch(`/v1/orders/${orderId}/status`, data),

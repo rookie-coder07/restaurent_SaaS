@@ -38,11 +38,22 @@ export function subscribeToOrderEvents(onEvent, options = {}) {
   const accessToken = getCurrentPortalAccessToken();
   if (!accessToken) {
     logger.debug('No access token available for stream connection');
+    reportClientError(null, 'No authentication token: log in again');
+    return () => {};
+  }
+
+  // GUARD: Validate token format (basic JWT check)
+  if (typeof accessToken !== 'string' || !accessToken.includes('.')) {
+    logger.error('Invalid token format for stream connection');
+    reportClientError(null, 'Invalid authentication token');
     return () => {};
   }
 
   const streamUrl = new URL(`${API_BASE_URL}/orders/events/stream`);
   streamUrl.searchParams.set('accessToken', accessToken);
+  
+  // DEBUG: Log connection attempt (for troubleshooting 403)
+  logger.info(`[Stream] Attempting connection to: ${API_BASE_URL}/orders/events/stream`);
 
   const eventName = options.eventName || 'order';
   let isClosed = false;
@@ -65,21 +76,50 @@ export function subscribeToOrderEvents(onEvent, options = {}) {
         return;
       }
 
+      // DEBUG: Log successful connection start
+      logger.info('[Stream] Opening EventSource connection');
       eventSource = new window.EventSource(streamUrl.toString());
       eventSource.addEventListener(eventName, handleOrderEvent);
+      eventSource.addEventListener('open', () => {
+        logger.info('[Stream] Connection established, readyState:', eventSource.readyState);
+      });
       eventSource.addEventListener('error', (error) => {
         if (eventSource) {
           eventSource.close();
           eventSource = null;
         }
         
+        // IMPROVED: Log error details for 403 debugging
+        const statusCode = error?.status || 'unknown';
+        const readyState = eventSource?.readyState;
+        const url = streamUrl.toString();
+        
+        logger.error(`[Stream] Connection error:`, {
+          status: statusCode,
+          readyState,
+          url: url.split('?')[0] + '?accessToken=[REDACTED]',
+          hasToken: url.includes('accessToken='),
+        });
+        
+        if (statusCode === 403) {
+          console.error('[Stream] 403 Forbidden - Check:', {
+            tokenPresent: !!accessToken,
+            tokenFormat: accessToken ? `${accessToken.split('.')[0]}...[REDACTED]` : 'none',
+            url: url.substring(0, 80) + '...',
+          });
+        }
+        
         if (!isClosed && reconnectAttempts < maxReconnectAttempts) {
           reconnectAttempts++;
           const delayMs = Math.min(1000 * Math.pow(2, reconnectAttempts - 1), 10000);
-          logger.debug(`Stream reconnect attempt ${reconnectAttempts}/${maxReconnectAttempts} after ${delayMs}ms`);
+          logger.debug(`[Stream] Reconnect attempt ${reconnectAttempts}/${maxReconnectAttempts} after ${delayMs}ms`);
           setTimeout(openStream, delayMs);
         } else if (reconnectAttempts >= maxReconnectAttempts) {
-          reportClientError(null, 'Stream connection failed - max reconnect attempts reached');
+          const errorMsg = statusCode === 403 
+            ? 'Stream authentication failed (403) - check token'
+            : 'Stream connection failed - max reconnect attempts reached';
+          logger.error(`[Stream] ${errorMsg}`);
+          reportClientError(null, errorMsg);
         }
       });
     });

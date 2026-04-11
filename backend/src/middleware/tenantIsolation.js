@@ -50,25 +50,37 @@ export const checkPermission = (requiredPermissions = []) => {
       const userRole = req.user?.role;
       const normalizedRole = normalizeRole(userRole);
 
+      console.log('[CHECK_PERMISSION] 🔍 User role:', userRole, '→ normalized:', normalizedRole);
+      console.log('[CHECK_PERMISSION] Required permissions:', requiredPermissions);
+
       if (!normalizedRole) {
+        console.log('[CHECK_PERMISSION] ❌ No normalized role found');
         return sendError(res, 401, 'User role not found');
       }
 
       const userPermissions = ROLE_PERMISSIONS[normalizedRole] || [];
+      console.log('[CHECK_PERMISSION] User permissions:', userPermissions);
+
       const hasPermission =
         requiredPermissions.length === 0 ||
         requiredPermissions.some((perm) => userPermissions.includes(perm));
 
+      console.log('[CHECK_PERMISSION] Permission check result:', hasPermission);
+
       if (!hasPermission) {
+        console.log('[CHECK_PERMISSION] ❌ Permission denied for', req.user?.email, 'with role', normalizedRole);
         logger.warn(`Permission denied for user ${req.user.email} with role ${normalizedRole}`);
         return sendError(res, 403, 'Insufficient permissions for this action', {
           requiredPermissions,
           userRole: normalizedRole,
+          userPermissions,
         });
       }
 
+      console.log('[CHECK_PERMISSION] ✅ Permission granted');
       next();
     } catch (error) {
+      console.log('[CHECK_PERMISSION] ❌ Error:', error.message);
       logger.error('Permission check error:', error);
       return sendError(res, 500, 'Permission check failed');
     }

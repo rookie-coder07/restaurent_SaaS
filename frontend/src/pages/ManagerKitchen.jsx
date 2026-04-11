@@ -138,7 +138,45 @@ export default function ManagerKitchen() {
 
     try {
       const response = await kitchenAPI.getActiveOrders();
-      const activeTickets = (response.data?.data || []).map(normalizeTicket);
+      
+      // DEBUG: Log full response structure
+      console.log('[Kitchen API] Full response:', {
+        hasData: !!response.data,
+        dataType: typeof response.data,
+        dataIsArray: Array.isArray(response.data),
+        dataKeys: response.data ? Object.keys(response.data).slice(0, 5) : 'no data',
+      });
+      
+      // The API response structure: { statusCode, data: [...], message, success }
+      // So response.data is the ApiResponse object, and response.data.data is the array
+      const tickets = response.data?.data || response.data || [];
+      
+      // DEBUG: Log raw API response to see orderId field
+      if (Array.isArray(tickets) && tickets.length > 0) {
+        const first = tickets[0];
+        console.log('[Kitchen API Response] First ticket from server:', {
+          ticketId: first.id,
+          orderId: first.orderId,
+          isSameId: first.id === first.orderId,
+          hasOrderIdField: 'orderId' in first,
+          rawKeys: Object.keys(first).slice(0, 10),
+        });
+      } else {
+        console.warn('[Kitchen API] No tickets in response');
+      }
+      
+      const activeTickets = (tickets || []).map(normalizeTicket);
+      
+      // DEBUG: Log normalized tickets to verify orderId is preserved
+      if (activeTickets.length > 0) {
+        const normalized = activeTickets[0];
+        console.log('[Kitchen Normalized] First ticket after normalization:', {
+          ticketId: normalized.id,
+          orderId: normalized.orderId,
+          isSameId: normalized.id === normalized.orderId,
+        });
+      }
+      
       const incomingIds = new Set(activeTickets.map((ticket) => ticket.id));
       const freshIds = activeTickets
         .filter((ticket) => !knownTicketIdsRef.current.has(ticket.id))
@@ -163,7 +201,13 @@ export default function ManagerKitchen() {
       setLastUpdatedAt(new Date());
       return activeTickets;
     } catch (requestError) {
-      setError(requestError.response?.data?.message || 'Failed to load active kitchen tickets.');
+      const errorMsg = requestError.response?.data?.message || requestError.message || 'Failed to load active kitchen tickets.';
+      console.error('[Kitchen] Fetch error:', {
+        message: errorMsg,
+        status: requestError.response?.status,
+        data: requestError.response?.data,
+      });
+      setError(errorMsg);
       throw requestError;
     } finally {
       fetchInFlightRef.current = false;
@@ -255,6 +299,21 @@ export default function ManagerKitchen() {
       return;
     }
 
+    // GUARD: Validate orderId exists before making API call
+    const orderId = ticket.orderId || ticket.order_id;
+    if (!orderId || orderId === 'undefined') {
+      console.error('[Kitchen] Missing orderId:', ticket);
+      setError('Order ID missing. Please reload kitchen page.');
+      return;
+    }
+
+    // SAFETY: Validate orderId is not same as ticketId (indicator of wrong ID)
+    if (orderId === ticket.id) {
+      console.error('[Kitchen] orderId same as ticketId - data structure error', { orderId, ticketId: ticket.id });
+      setError('Order data corrupted. Please reload.');
+      return;
+    }
+
     setUpdatingTicketId(ticket.id);
     setError('');
 
@@ -268,11 +327,14 @@ export default function ManagerKitchen() {
       );
       setNewTicketIds((current) => current.filter((id) => id !== ticket.id));
 
-      await kitchenAPI.updateStatus(ticket.orderId, ticket.id, { status: nextStatus });
+      console.debug('[Kitchen] Updating ticket:', { ticketId: ticket.id, orderId, status: nextStatus });
+      await kitchenAPI.updateStatus(orderId, ticket.id, { status: nextStatus });
       setSuccess(`KOT moved to ${nextStatus}.`);
       fetchOrders(false, { force: true }).catch(() => {});
     } catch (requestError) {
-      setError(requestError.response?.data?.message || 'Failed to update KOT status.');
+      const errorMsg = requestError.response?.data?.message || 'Failed to update KOT status.';
+      console.error('[Kitchen] API Error:', { status: requestError.response?.status, message: errorMsg, orderId, ticketId: ticket.id });
+      setError(errorMsg);
       fetchOrders(false, { force: true }).catch(() => {});
     } finally {
       setUpdatingTicketId(null);
@@ -519,18 +581,25 @@ export default function ManagerKitchen() {
           {itemViewGroups.map((item) => (
             <article
               key={item.key}
-              className="rounded-[1.4rem] border border-[var(--border-color)] bg-[var(--color-surface)] p-4 shadow-[var(--shadow-card)] sm:rounded-[1.9rem] sm:p-5"
+              className="rounded-[1.4rem] border border-[var(--border-color)] bg-[var(--color-surface)] p-4 shadow-[var(--shadow-card)] sm:rounded-[1.9rem] sm:p-5 hover:shadow-lg transition-shadow cursor-pointer"
+              onClick={() => {
+                const firstTicketId = Array.from(item.ticketIds)[0];
+                handleSelectTicket(tickets.find(t => t.id === firstTicketId));
+              }}
             >
-              <p className="text-xs font-bold uppercase tracking-[0.22em] text-[var(--text-tertiary)]">Combined Item</p>
+              <p className="text-xs font-bold uppercase tracking-[0.22em] text-[var(--text-tertiary)]">🍽️ Kitchen Item</p>
               <h2 className="mt-3 text-xl font-black text-[var(--text-primary)] sm:text-2xl">{item.name}</h2>
-              <p className="mt-4 text-4xl font-black text-[var(--color-primary)] sm:mt-5 sm:text-5xl">{item.quantity}x</p>
-              <p className="mt-4 text-sm font-semibold text-[var(--text-primary)]">{item.ticketIds.size} tickets</p>
+              <div className="mt-4 flex items-baseline gap-2">
+                <p className="text-4xl font-black text-[var(--color-primary)] sm:text-5xl">{item.quantity}</p>
+                <p className="text-sm font-semibold text-[var(--text-secondary)]">items pending</p>
+              </div>
+              <p className="mt-4 text-sm font-semibold text-[var(--text-primary)]">📋 {item.ticketIds.size} {item.ticketIds.size === 1 ? 'ticket' : 'tickets'}</p>
               <p className="mt-2 text-sm text-[var(--text-secondary)]">
                 {item.tableNumbers.size > 0
-                  ? `Tables: ${Array.from(item.tableNumbers).sort((a, b) => a - b).join(', ')}`
-                  : 'No table assigned'}
+                  ? `🪑 Tables: ${Array.from(item.tableNumbers).sort((a, b) => a - b).join(', ')}`
+                  : '❌ No table assigned'}
               </p>
-              <p className="mt-2 text-sm text-[var(--text-secondary)]">Station: {item.station}</p>
+              <p className="mt-2 text-sm text-[var(--text-secondary)]">🔪 {item.station}</p>
             </article>
           ))}
         </div>
@@ -585,11 +654,21 @@ export default function ManagerKitchen() {
                     {(selectedTicket.items || []).map((item, index) => (
                       <div key={`${selectedTicket.id}-detail-item-${index}`} className="rounded-2xl bg-[var(--color-surface-muted)] p-3">
                         <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
+                          <div className="min-w-0 flex-1">
                             <p className="break-words font-semibold text-[var(--text-primary)]">{item.quantity}x {item.name}</p>
-                            <p className="mt-1 text-xs font-semibold uppercase tracking-[0.14em] text-[var(--text-secondary)]">{item.station || 'Main Kitchen'}</p>
+                            {item.modifiers && item.modifiers.length > 0 && (
+                              <p className="mt-1 text-xs text-[var(--text-secondary)]">
+                                ➕ {item.modifiers.join(', ')}
+                              </p>
+                            )}
+                            {item.itemNote && (
+                              <p className="mt-1 text-xs italic text-[var(--color-warning)]">
+                                💬 {item.itemNote}
+                              </p>
+                            )}
+                            <p className="mt-2 text-xs font-semibold uppercase tracking-[0.14em] text-[var(--text-secondary)]">🔪 {item.station || 'Main Kitchen'}</p>
                           </div>
-                          <span className="rounded-full border border-[var(--border-color)] px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--text-secondary)]">
+                          <span className="rounded-full border border-[var(--border-color)] px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--text-secondary)] flex-shrink-0">
                             {item.action || 'add'}
                           </span>
                         </div>

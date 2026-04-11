@@ -9,11 +9,34 @@ export const getKitchenOrders = asyncHandler(async (req, res) => {
   try {
     logger.info(`API HIT: GET /kitchen/orders - Restaurant: ${req.restaurantId}`);
     // Include ready orders so the kitchen can complete the full workflow.
-    const orders = await OrderService.getKitchenOrders(req.restaurantId, {
+    let tickets = await OrderService.getKitchenOrders(req.restaurantId, {
       statuses: ['pending', 'preparing', 'ready'],
     });
 
-    return sendSuccess(res, 200, orders, 'Kitchen orders fetched successfully');
+    // Safety: Ensure every ticket has orderId
+    if (Array.isArray(tickets)) {
+      tickets = tickets.filter(t => t && typeof t === 'object'); // Remove nulls/invalid data
+      
+      const missingOrderId = tickets.filter(t => !t.orderId);
+      if (missingOrderId.length > 0) {
+        logger.warn(`⚠️ Found ${missingOrderId.length} tickets missing orderId`, {
+          examples: missingOrderId.slice(0, 2).map(t => ({ id: t.id, keys: Object.keys(t) }))
+        });
+      }
+
+      // DEBUG: Log first ticket to verify orderId is set and different from ticketId
+      if (tickets.length > 0) {
+        const first = tickets[0];
+        logger.info('[Kitchen Response] First ticket in response:', {
+          ticketId: first.id,
+          orderId: first.orderId,
+          isSameId: first.id === first.orderId,
+          hasOrderIdField: 'orderId' in first,
+        });
+      }
+    }
+
+    return sendSuccess(res, 200, tickets, 'Kitchen orders fetched successfully');
   } catch (error) {
     logError(error, {
       message: 'Failed to fetch kitchen orders',
@@ -46,6 +69,15 @@ export const updateKitchenTicketStatus = asyncHandler(async (req, res) => {
   const { orderId, ticketId } = req.params;
   
   try {
+    // DEBUG: Log incoming request for troubleshooting
+    logger.info('[Kitchen] updateKitchenTicketStatus', {
+      orderId,
+      ticketId,
+      status: req.body.status,
+      restaurantId: req.user.restaurantId,
+      sameId: orderId === ticketId,
+    });
+
     if (!orderId || !ticketId) {
       logFailedRequest(new Error('Missing ticket or order ID'), {
         message: 'Update ticket status validation failed',

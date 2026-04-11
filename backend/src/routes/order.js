@@ -1,4 +1,5 @@
 import express from 'express';
+import jwt from 'jsonwebtoken';
 import { authMiddleware, optionalAuth, streamAuthMiddleware } from '../middleware/auth.js';
 import { tenantIsolation, checkPermission, requireBillingRole } from '../middleware/tenantIsolation.js';
 import { validateRequest } from '../middleware/validation.js';
@@ -29,7 +30,33 @@ router.post('/', optionalAuth, (req, res, next) => {
 }, orderLimiter, validateRequest(createOrderSchema), orderController.createOrder);
 
 // SSE stream for real-time events (MUST be before router.use to support query param auth)
-router.get('/events/stream', streamAuthMiddleware, tenantIsolation, checkPermission(['manage_orders', 'view_orders']), orderController.streamEvents);
+router.get('/events/stream', (req, res, next) => {
+  try {
+    const token = req.query.accessToken || req.headers.authorization?.substring(7);
+    if (!token) {
+      return res.status(401).json({ success: false, message: 'No token provided' });
+    }
+    
+    // Set user from token (streamAuthMiddleware already did this at app level)
+    if (req.user && req.user.restaurantId) {
+      req.restaurantId = req.user.restaurantId;
+      return next();
+    }
+    
+    // Fallback: extract from token manually
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    req.user = {
+      userId: decoded.userId,
+      restaurantId: decoded.restaurantId,
+      email: decoded.email,
+      role: decoded.role,
+    };
+    req.restaurantId = decoded.restaurantId;
+    next();
+  } catch (error) {
+    return res.status(401).json({ success: false, message: 'Invalid token', error: error.message });
+  }
+}, orderController.streamEvents);
 
 // All other routes protected
 router.use(authMiddleware, tenantIsolation);
@@ -41,7 +68,7 @@ router.get('/open', checkPermission(['manage_orders', 'view_orders']), orderCont
 router.get('/inbox/online', checkPermission(['manage_orders', 'view_orders']), orderController.getOnlineOrderInbox);
 router.get('/loyalty/profile', checkPermission(['manage_orders', 'view_orders']), orderController.getLoyaltyProfile);
 router.post('/cancel-pending', checkPermission(['manage_orders']), validateRequest(cancelPendingBillsSchema), orderController.cancelPendingBills);
-router.post('/:orderId/delete', validateRequest(softDeleteOrderSchema), async (req, res, next) => {
+router.post('/:orderId/delete', validateRequest(softDeleteOrderSchema), checkPermission(['manage_orders']), async (req, res, next) => {
   try {
     // ✅ Call controller
     await orderController.softDeleteOrder(req, res, next);

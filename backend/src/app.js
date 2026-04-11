@@ -21,7 +21,7 @@ import healthRoutes from './routes/health.js';
 import { secureHeadersMiddleware, corsConfiguration } from './middleware/securityHeaders.js';
 import { preventSQLInjection, preventXSS } from './utils/sqlInjectionPrevention.js';
 import { securityEnforcementStack } from './middleware/securityEnforcement.js';
-import { authMiddleware } from './middleware/auth.js';
+import { authMiddleware, streamAuthMiddleware } from './middleware/auth.js';
 import { dataIsolationMiddleware } from './middleware/dataIsolation.js';
 
 const app = express();
@@ -32,7 +32,6 @@ function isPublicApiPath(path = '') {
     path === '/' ||
     path === '/health' ||
     path === '/api/v1/health' ||
-    path === '/api/v1/orders/events/stream' ||
     /^\/api\/v1\/auth\/(login|staff\/login|register|token-info|forgot-password|reset-password|verify-otp|refresh-token|request-password-reset-otp|set-password-with-otp)/.test(path) ||
     /^\/api\/v1\/customer\//.test(path)
   );
@@ -158,12 +157,22 @@ app.use((req, res, next) => {
     return next();
   }
   
+  // Special handling: stream endpoint needs query token support
+  if (req.path === '/api/v1/orders/events/stream') {
+    return streamAuthMiddleware(req, res, next);
+  }
+  
   authMiddleware(req, res, next);
 });
 
-// 2. Data Isolation (restaurant context) - skip for public endpoints
+// 2. Data Isolation (restaurant context) - skip for public endpoints and stream
 app.use((req, res, next) => {
   if (isPublicApiPath(req.path)) {
+    return next();
+  }
+  
+  // Skip data isolation for stream endpoint - already handled by streamAuthMiddleware
+  if (req.path === '/api/v1/orders/events/stream') {
     return next();
   }
   
@@ -174,6 +183,11 @@ app.use((req, res, next) => {
 securityEnforcementStack.forEach(middleware => {
   app.use((req, res, next) => {
     if (isPublicApiPath(req.path)) {
+      return next();
+    }
+    
+    // Skip security enforcement stack for stream endpoint - uses route-level middleware
+    if (req.path === '/api/v1/orders/events/stream') {
       return next();
     }
     
