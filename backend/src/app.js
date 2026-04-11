@@ -56,50 +56,12 @@ app.use(cookieParser());
 // Timeout middleware
 app.use(timeoutMiddleware(30000)); // 30 second timeout
 
-const localhostOrigins = [
-  'http://localhost:3000',
-  'http://localhost:5173',
-  'http://localhost:5174',
-  'http://localhost:5175',
-  'http://localhost:5176',
-  'http://127.0.0.1:5173',
-  'http://127.0.0.1:5174',
-  'http://127.0.0.1:5175',
-  'http://127.0.0.1:5176',
-];
-
-const productionOrigins = config.corsOrigins.length
-  ? config.corsOrigins
-  : ['https://restaurentsaas-seven.vercel.app'];
-
-const allowedOrigins = config.nodeEnv === 'production'
-  ? productionOrigins
-  : [...productionOrigins, ...localhostOrigins];
-
-const isAllowedOrigin = (origin) => {
-  if (!origin) {
-    return true;
-  }
-
-  if (allowedOrigins.includes(origin) || localhostOrigins.includes(origin)) {
-    return true;
-  }
-
-  try {
-    const parsedOrigin = new URL(origin);
-    const isVercelDeployment = parsedOrigin.protocol === 'https:' && parsedOrigin.hostname.endsWith('.vercel.app');
-
-    return isVercelDeployment;
-  } catch {
-    return false;
-  }
-};
-
-// CORS configuration - Configured for development and production
-const corsOptions = corsConfiguration();
-
-app.use(cors(corsOptions));
-app.options('*', cors(corsOptions));
+// CORS configuration - Open for all origins with credentials
+app.use(cors({
+  origin: true,
+  credentials: true
+}));
+app.options('*', cors());
 
 // Security headers middleware
 app.use(secureHeadersMiddleware);

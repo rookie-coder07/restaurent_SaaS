@@ -46,67 +46,9 @@ export const secureHeadersMiddleware = (req, res, next) => {
 };
 
 export const corsConfiguration = () => {
-  const isProduction = process.env.NODE_ENV === 'production';
-  
-  // For production: use environment variable or default to correct Vercel production URL
-  let allowedOrigins;
-  if (isProduction) {
-    const envOrigins = process.env.ALLOWED_ORIGINS?.trim();
-    if (envOrigins) {
-      allowedOrigins = envOrigins.split(',').map(o => o.trim()).filter(Boolean);
-    } else {
-      // Default production Vercel deployment URL
-      allowedOrigins = ['https://restaurentsaas-seven.vercel.app'];
-    }
-  } else {
-    // Development: localhost and common dev ports
-    allowedOrigins = [
-      'http://localhost:3000',
-      'http://localhost:5173',
-      'http://localhost:5174',
-      'http://127.0.0.1:5173',
-      'http://127.0.0.1:5174',
-    ];
-  }
-
+  // CORS completely open - all origins allowed
   return {
-    origin: function(origin, callback) {
-      // Allow requests without origin (e.g., curl, mobile, same-site)
-      if (!origin) {
-        return callback(null, true);
-      }
-
-      // Validate origin against whitelist
-      const isAllowed = allowedOrigins.some(allowed => {
-        // Exact match
-        if (allowed === origin) return true;
-        
-        // Wildcard domain match (e.g., *.vercel.app)
-        if (allowed.startsWith('*.')) {
-          const domain = allowed.substring(2);
-          return origin.endsWith(domain) || origin === `https://${domain}`;
-        }
-        
-        return false;
-      });
-
-      if (isAllowed) {
-        callback(null, true);
-      } else {
-        // Log the blocked request
-        console.warn('Blocked CORS:', origin);
-        logWarn('CORS request blocked from non-whitelisted origin', {
-          origin,
-          allowedOrigins,
-          timestamp: new Date().toISOString(),
-        });
-
-        SecurityAuditLogger.logCrossOriginRequest(origin, 'unknown', false, 'CORS');
-        
-        // Soft CORS handling - log but allow preflight
-        callback(null, false);
-      }
-    },
+    origin: true,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-Request-Id', 'X-XSRF-Token', 'X-Restaurant-Id'],
@@ -116,21 +58,4 @@ export const corsConfiguration = () => {
   };
 };
 
-export const validateOrigin = (origin, allowedOrigins) => {
-  if (!origin) {
-    return true; // Allow requests without origin (e.g., curl, mobile)
-  }
-
-  if (allowedOrigins.includes(origin)) {
-    return true;
-  }
-
-  // Check for wildcard domains
-  for (const allowed of allowedOrigins) {
-    if (allowed.startsWith('*.') && origin.endsWith(allowed.substring(1))) {
-      return true;
-    }
-  }
-
-  return false;
-};
+// CORS validation removed - all origins now allowed
