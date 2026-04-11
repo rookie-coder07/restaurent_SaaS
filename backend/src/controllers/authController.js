@@ -184,39 +184,59 @@ export const refreshToken = asyncHandler(async (req, res) => {
   const refreshToken = req.body.refreshToken || req.cookies?.refreshToken;
 
   if (!refreshToken) {
+    logger.warn('Refresh token missing', { path: req.path });
     return sendError(res, 401, 'Refresh token is required');
   }
 
-  const result = await AuthService.refreshAccessToken(refreshToken);
+  try {
+    const result = await AuthService.refreshAccessToken(refreshToken);
 
-  res.cookie('accessToken', result.accessToken, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'strict',
-    maxAge: TOKEN_CONFIG.ACCESS_TOKEN_SECONDS * 1000, // 1 hour
-  });
-
-  // Issue rotated refresh token to the client when available
-  if (result.refreshToken) {
-    res.cookie('refreshToken', result.refreshToken, {
+    res.cookie('accessToken', result.accessToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'strict',
-      maxAge: TOKEN_CONFIG.REFRESH_TOKEN_SECONDS * 1000,
+      maxAge: TOKEN_CONFIG.ACCESS_TOKEN_SECONDS * 1000, // 1 hour
     });
-  }
 
-  return sendSuccess(
-    res,
-    200,
-    {
-      accessToken: result.accessToken,
-      refreshToken: result.refreshToken || refreshToken,
-      expiresIn: TOKEN_CONFIG.ACCESS_TOKEN_SECONDS,
-      refreshExpiresIn: result.refreshExpiresIn || TOKEN_CONFIG.REFRESH_TOKEN_SECONDS,
-    },
-    'Token refreshed'
-  );
+    // Issue rotated refresh token to the client when available
+    if (result.refreshToken) {
+      res.cookie('refreshToken', result.refreshToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'strict',
+        maxAge: TOKEN_CONFIG.REFRESH_TOKEN_SECONDS * 1000,
+      });
+    }
+
+    return sendSuccess(
+      res,
+      200,
+      {
+        accessToken: result.accessToken,
+        refreshToken: result.refreshToken || refreshToken,
+        expiresIn: TOKEN_CONFIG.ACCESS_TOKEN_SECONDS,
+        refreshExpiresIn: result.refreshExpiresIn || TOKEN_CONFIG.REFRESH_TOKEN_SECONDS,
+      },
+      'Token refreshed'
+    );
+  } catch (error) {
+    logger.error('Token refresh failed:', {
+      error: error.message,
+      errorName: error.name,
+      path: req.path,
+    });
+
+    // Return specific error for expired/invalid tokens
+    if (error.message && error.message.includes('expired')) {
+      return sendError(res, 401, 'Session expired. Please log in again');
+    }
+
+    if (error.message && error.message.includes('invalid')) {
+      return sendError(res, 401, 'Invalid token. Please log in again');
+    }
+
+    return sendError(res, 401, 'Failed to refresh token. Please log in again');
+  }
 });
 
 export const logout = asyncHandler(async (req, res) => {

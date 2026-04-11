@@ -1,0 +1,12 @@
+file:///D:/Projects/restaurent_SaaS/backend/src/config/supabase.js:36
+    throw new Error('Supabase not initialized - missing SUPABASE_URL or SUPABASE_SERVICE_KEY');
+          ^
+
+Error: Supabase not initialized - missing SUPABASE_URL or SUPABASE_SERVICE_KEY
+    at getSupabase (file:///D:/Projects/restaurent_SaaS/backend/src/config/supabase.js:36:11)
+    at file:///D:/Projects/restaurent_SaaS/backend/src/config/supabase.js:81:30
+    at ModuleJob.run (node:internal/modules/esm/module_job:413:25)
+    at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:660:26)
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+
+Node.js v24.13.0

@@ -2,7 +2,8 @@ import express from 'express';
 import { validateRequest } from '../middleware/validation.js';
 import { authLimiter } from '../middleware/rateLimit.js';
 import {
-  registerSchema,
+  restaurantRegisterSchema,
+  staffRegisterSchema,
   loginSchema,
   refreshTokenSchema,
   changePasswordSchema,
@@ -18,7 +19,7 @@ import { getTokenExpiryInfo } from '../utils/tokenManager.js';
 const router = express.Router();
 
 // Public routes
-router.post('/register', authLimiter, validateRequest(registerSchema), async (req, res, next) => {
+router.post('/register', authLimiter, validateRequest(restaurantRegisterSchema), async (req, res, next) => {
   try {
     // ✅ Validate password strength
     const passwordValidation = validatePasswordStrength(req.body.password);
@@ -61,7 +62,7 @@ router.post('/login', authLimiter, validateRequest(loginSchema), async (req, res
   }
 }, authController.login);
 
-router.post('/staff/register', authLimiter, validateRequest(registerSchema), async (req, res, next) => {
+router.post('/staff/register', authLimiter, validateRequest(staffRegisterSchema), async (req, res, next) => {
   try {
     // ✅ Validate password strength
     const passwordValidation = validatePasswordStrength(req.body.password);
