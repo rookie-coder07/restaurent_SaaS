@@ -82,11 +82,7 @@ app.head('/', asyncHandler(async (req, res) => {
 
 // Health check endpoint (before monitoring)
 app.get('/health', asyncHandler(async (req, res) => {
-  res.status(200).json({
-    success: true,
-    status: 'ok',
-    timestamp: new Date().toISOString(),
-  });
+  res.status(200).json({ status: 'ok' });
 }));
 
 // Monitoring middleware (after health check)

@@ -8,7 +8,7 @@ document.body.innerHTML = `
   <div id="result"></div>
 `;
 
-const apiUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000/api';
+const apiUrl = 'https://restaurent-backend-448t.onrender.com/api/v1';
 document.getElementById('api-url').textContent = apiUrl;
 document.getElementById('env').textContent = JSON.stringify(import.meta.env, null, 2);
 
@@ -23,7 +23,7 @@ for (let i = 0; i < localStorage.length; i++) {
 async function testLogin() {
   const resultDiv = document.getElementById('result');
   try {
-    const response = await fetch(`${apiUrl}/v1/auth/login`, {
+    const response = await fetch(`${apiUrl}/auth/login`, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       credentials: 'include',

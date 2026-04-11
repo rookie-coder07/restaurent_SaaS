@@ -73,7 +73,7 @@ export const useAuth = () => {
           throw error;
         }
 
-        authStore.setError('Backend is waking up. Retrying login...');
+        authStore.setError('Retrying login...');
         await delay(2000);
         response = await authAPI.login(email, password, portal);
       }
@@ -126,7 +126,7 @@ export const useAuth = () => {
 
       let errorMessage = 'Login failed';
       if (!error.response && AUTH_RETRYABLE_ERROR_CODES.has(error.code)) {
-        errorMessage = 'Backend is taking too long to respond. Please try again in a few seconds.';
+        errorMessage = 'Unable to reach the server right now. Please try again.';
       } else if (error.response?.status === 401) {
         errorMessage = serverMessage || 'Invalid email or password';
       } else if (error.response?.status === 403) {

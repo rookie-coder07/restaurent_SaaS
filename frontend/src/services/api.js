@@ -1,20 +1,19 @@
 import axios from 'axios';
+import { API_BASE_URL, API_ROOT_URL, IS_LOCALHOST_API, RUNTIME_ENVIRONMENT } from '../config/api.js';
 import { clearPortalSession, readPortalSession, savePortalSession } from '../utils/authStorage';
 import { PORTAL_LOGIN, canAccessPortal, getPortalKeyFromPathname, normalizePortalRole } from '../utils/portalRouting';
 import logger from '../utils/logger';
 import { getUserErrorMessage, isDeveloperConsoleContext, showToast } from '../utils/errorHandling';
 
-const PRODUCTION_API_BASE_URL = 'https://restaurent-backend-448t.onrender.com/api';
-const DEVELOPMENT_API_BASE_URL = 'http://localhost:3000/api';
-
-const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL ||
-  import.meta.env.NEXT_PUBLIC_API_URL ||
-  (import.meta.env.PROD ? PRODUCTION_API_BASE_URL : DEVELOPMENT_API_BASE_URL);
-
 const isDevelopmentHost =
   window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
 const shouldDebugApi = import.meta.env.DEV && import.meta.env.VITE_DEBUG_API === 'true';
+const RETRYABLE_ERROR_CODES = new Set(['ECONNABORTED', 'ERR_NETWORK']);
+const RETRYABLE_AUTH_ENDPOINTS = ['/auth/login', '/auth/register', '/auth/refresh-token'];
+
+const wait = (ms) => new Promise((resolve) => {
+  window.setTimeout(resolve, ms);
+});
 
 function persistPrimaryToken(token, restaurantId = '') {
   if (!token) {
@@ -121,18 +120,22 @@ async function refreshPortalAccessToken(portal, existingSession) {
   return refreshPromise;
 }
 
-if (!isDevelopmentHost && API_BASE_URL.includes('localhost')) {
+console.info(`✔ Environment: ${RUNTIME_ENVIRONMENT}`);
+console.info(`✔ API base: ${API_BASE_URL}`);
+console.info(`✔ No localhost usage: ${String(!IS_LOCALHOST_API)}`);
+
+if (!isDevelopmentHost && IS_LOCALHOST_API) {
   logger.error('Production is using localhost API URL');
 }
 
 const api = axios.create({
-  baseURL: API_BASE_URL,
+  baseURL: API_ROOT_URL,
   // Portal auth is driven by bearer tokens from local storage.
   // Keeping cookies off normal API calls prevents one stale cross-portal cookie
   // from overriding the active POS/KOT/Admin session.
   withCredentials: false,
   // Supabase free tier can be slow; allow generous time before failing requests.
-  timeout: 45000,
+  timeout: 30000,
   headers: {
     'Content-Type': 'application/json',
   },
@@ -320,6 +323,21 @@ api.interceptors.response.use(
       const portal = getPortalKeyFromPathname(window.location.pathname);
       rejectMismatchedPortalSession(portal);
       return Promise.reject(refreshError);
+    }
+
+    const requestUrl = String(originalRequest?.url || '');
+    const requestMethod = String(originalRequest?.method || 'get').toLowerCase();
+    const canRetryAuthRequest = RETRYABLE_AUTH_ENDPOINTS.some((endpoint) => requestUrl.includes(endpoint));
+    const canRetryRequest =
+      !originalRequest._retryAfterWake &&
+      !error.response &&
+      RETRYABLE_ERROR_CODES.has(error.code) &&
+      (requestMethod === 'get' || canRetryAuthRequest);
+
+    if (canRetryRequest) {
+      originalRequest._retryAfterWake = true;
+      await wait(1500);
+      return api(originalRequest);
     }
 
     const safeMessage = getUserErrorMessage(error);

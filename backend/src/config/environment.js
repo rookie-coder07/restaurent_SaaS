@@ -42,7 +42,9 @@ export const validateEnvironment = () => {
 
 export const getConfig = () => ({
   nodeEnv: process.env.NODE_ENV || 'development',
+  isProd: process.env.NODE_ENV === 'production',
   port: parseNumber(process.env.PORT || process.env.APP_PORT, 5000),
+  baseUrl: (process.env.BASE_URL || 'https://restaurent-backend-448t.onrender.com').replace(/\/+$/, ''),
   supabase: {
     url: process.env.SUPABASE_URL,
     anonKey: process.env.SUPABASE_ANON_KEY,

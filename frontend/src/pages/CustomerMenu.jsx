@@ -15,6 +15,7 @@ import {
   X,
 } from 'lucide-react';
 import { useApi } from '../hooks/useApi';
+import { API_BASE_URL } from '../config/api';
 import { customerAPI } from '../services/apiEndpoints';
 import { formatCurrency } from '../utils/formatters';
 import { playLoudBuzzer } from '../utils/alerts';
@@ -22,9 +23,6 @@ import { getMenuItemImageUrl } from '../utils/menuItemImage';
 import CartDrawer from '../components/customer/CartDrawer';
 import FloatingCartButton from '../components/customer/FloatingCartButton';
 import { useCustomerCartStore } from '../context/customerCartStore';
-
-const PRODUCTION_API_BASE_URL = 'https://restaurent-backend-448t.onrender.com/api';
-const DEVELOPMENT_API_BASE_URL = 'http://localhost:3000/api';
 
 function buildStableRequestId() {
   if (typeof globalThis !== 'undefined' && globalThis.crypto?.randomUUID) {
@@ -334,11 +332,7 @@ export default function CustomerMenu() {
   }
 
   if (apiError) {
-    const apiBaseUrl =
-      import.meta.env.VITE_API_BASE_URL ||
-      import.meta.env.NEXT_PUBLIC_API_URL ||
-      (import.meta.env.PROD ? PRODUCTION_API_BASE_URL : DEVELOPMENT_API_BASE_URL);
-    const apiUrl = `${apiBaseUrl}/v1/customer/menu/items?table=${tableNumber || ''}${tableId ? `&tableId=${tableId}` : ''}`;
+    const apiUrl = `${API_BASE_URL}/customer/menu/items?table=${tableNumber || ''}${tableId ? `&tableId=${tableId}` : ''}`;
     const isBusyTableError = /currently busy|running bill|blocked until that bill is cleared/i.test(apiError) || apiError?.includes?.('409');
 
     if (isBusyTableError) {

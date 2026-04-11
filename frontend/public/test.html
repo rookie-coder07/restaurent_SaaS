@@ -52,7 +52,7 @@
 
     <script>
         // Display API URL
-        const apiUrl = 'http://localhost:3000/api';
+        const apiUrl = 'https://restaurent-backend-448t.onrender.com/api/v1';
         document.getElementById('api-url-status').innerHTML = `<strong>API Base URL:</strong> <span class="success">${apiUrl}</span>`;
         document.getElementById('env-details').innerHTML = `
             <strong>Frontend Server:</strong> ${window.location.origin}<br>
@@ -89,7 +89,7 @@
             const status = document.getElementById('connection-status');
             status.innerHTML = '⏳ Testing...';
             try {
-                const response = await fetch(`${apiUrl}/v1/auth/login`, {
+                const response = await fetch(`${apiUrl}/auth/login`, {
                     method: 'OPTIONS',
                     headers: {'Content-Type': 'application/json'},
                     credentials: 'include'
@@ -111,10 +111,10 @@
             resultDiv.innerHTML = '';
 
             try {
-                console.log('Sending login request to:', `${apiUrl}/v1/auth/login`);
+                console.log('Sending login request to:', `${apiUrl}/auth/login`);
                 console.log('Credentials:', {email, password});
 
-                const response = await fetch(`${apiUrl}/v1/auth/login`, {
+                const response = await fetch(`${apiUrl}/auth/login`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -157,7 +157,7 @@
                     <h3>🔴 Network Error</h3>
                     <p><strong>Error Type:</strong> ${e.name}</p>
                     <p><strong>Message:</strong> ${e.message}</p>
-                    <p><strong>API URL:</strong> ${apiUrl}/v1/auth/login</p>
+                    <p><strong>API URL:</strong> ${apiUrl}/auth/login</p>
                     <p><strong>Solution:</strong> Check browser console for more details (F12)</p>
                     <p>This often means CORS, network, or backend connectivity issues.</p>
                     <button onclick="testDirectAPI()">Test API with Alternative Method</button>
@@ -174,7 +174,7 @@
             statusDiv.innerHTML = '⏳ Testing with XMLHttpRequest...';
             
             const xhr = new XMLHttpRequest();
-            xhr.open('POST', `${apiUrl}/v1/auth/login`, true);
+            xhr.open('POST', `${apiUrl}/auth/login`, true);
             xhr.setRequestHeader('Content-Type', 'application/json');
             
             xhr.onload = function() {
@@ -203,7 +203,7 @@
         }
 
         function redirectToDashboard() {
-            window.location.href = 'http://localhost:5173/';
+            window.location.href = '/';
         }
 
         // Auto-test connection on load
