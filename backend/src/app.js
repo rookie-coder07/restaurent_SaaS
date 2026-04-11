@@ -70,7 +70,7 @@ const localhostOrigins = [
 
 const productionOrigins = config.corsOrigins.length
   ? config.corsOrigins
-  : ['https://restaurent-saas.vercel.app'];
+  : ['https://restaurentsaas-seven.vercel.app'];
 
 const allowedOrigins = config.nodeEnv === 'production'
   ? productionOrigins

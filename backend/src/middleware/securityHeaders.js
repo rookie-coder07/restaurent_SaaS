@@ -47,9 +47,27 @@ export const secureHeadersMiddleware = (req, res, next) => {
 
 export const corsConfiguration = () => {
   const isProduction = process.env.NODE_ENV === 'production';
-  const allowedOrigins = isProduction
-    ? (process.env.ALLOWED_ORIGINS || 'https://restaurentsaas-seven.vercel.app').split(',')
-    : ['http://localhost:3000', 'http://localhost:5173', 'http://localhost:5174', 'http://127.0.0.1:5173', 'http://127.0.0.1:5174'];
+  
+  // For production: use environment variable or default to correct Vercel production URL
+  let allowedOrigins;
+  if (isProduction) {
+    const envOrigins = process.env.ALLOWED_ORIGINS?.trim();
+    if (envOrigins) {
+      allowedOrigins = envOrigins.split(',').map(o => o.trim()).filter(Boolean);
+    } else {
+      // Default production Vercel deployment URL
+      allowedOrigins = ['https://restaurentsaas-seven.vercel.app'];
+    }
+  } else {
+    // Development: localhost and common dev ports
+    allowedOrigins = [
+      'http://localhost:3000',
+      'http://localhost:5173',
+      'http://localhost:5174',
+      'http://127.0.0.1:5173',
+      'http://127.0.0.1:5174',
+    ];
+  }
 
   return {
     origin: function(origin, callback) {
@@ -75,13 +93,16 @@ export const corsConfiguration = () => {
       if (isAllowed) {
         callback(null, true);
       } else {
-        logWarn('CORS request blocked', {
+        // Log the blocked request
+        logWarn('CORS request blocked from non-whitelisted origin', {
           origin,
           allowedOrigins,
           timestamp: new Date().toISOString(),
         });
 
         SecurityAuditLogger.logCrossOriginRequest(origin, 'unknown', false, 'CORS');
+        
+        // Strict CORS enforcement
         callback(new Error('Not allowed by CORS policy'));
       }
     },
