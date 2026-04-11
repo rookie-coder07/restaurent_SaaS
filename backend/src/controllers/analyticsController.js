@@ -4,7 +4,7 @@ import { asyncHandler } from '../middleware/errorHandler.js';
 import AnalyticsService from '../services/analyticsService.js';
 
 export const getDailySalesReport = asyncHandler(async (req, res) => {
-  logger.info('API HIT: GET /analytics/daily - Restaurant: ${req.restaurantId}, Date: ${req.query.date}');
+  logger.info(`API HIT: GET /analytics/daily - Restaurant: ${req.restaurantId}, Date: ${req.query.date}`);
   const { date } = req.query;
 
   const report = await AnalyticsService.getDailySalesReport(req.restaurantId, date || new Date());
@@ -33,7 +33,7 @@ export const getMonthlySalesReport = asyncHandler(async (req, res) => {
 });
 
 export const getTopItems = asyncHandler(async (req, res) => {
-  logger.info('API HIT: GET /analytics/top-items - Restaurant: ${req.user.restaurantId}, Days: ${req.query.days || 30}');
+  logger.info(`API HIT: GET /analytics/top-items - Restaurant: ${req.user.restaurantId}, Days: ${req.query.days || 30}`);
   const { days } = req.query;
 
   const items = await AnalyticsService.getTopItems(req.user.restaurantId, parseInt(days) || 30);

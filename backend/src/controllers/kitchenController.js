@@ -30,7 +30,7 @@ export const getKitchenOrders = asyncHandler(async (req, res) => {
 
 // Get all orders for kitchen (with pagination)
 export const getKitchenAllOrders = asyncHandler(async (req, res) => {
-  logger.info('API HIT: GET /kitchen/all-orders - Restaurant: ${req.user.restaurantId}, Limit: ${req.query.limit || 50}');
+  logger.info(`API HIT: GET /kitchen/all-orders - Restaurant: ${req.user.restaurantId}, Limit: ${req.query.limit || 50}`);
   const filters = {
     status: req.query.status, // Can filter by specific status
     limit: parseInt(req.query.limit) || 50,

@@ -303,7 +303,7 @@ export const resetUserPassword = asyncHandler(async (req, res) => {
 });
 
 export const getCurrentUser = asyncHandler(async (req, res) => {
-  logger.info('API HIT: GET /auth/me - User: ${req.user.id}');
+  logger.info(`API HIT: GET /auth/me - User: ${req.user.id}`);
   const currentUser = await AuthService.getCurrentUserProfile(req.user);
 
   return sendSuccess(res, 200, {

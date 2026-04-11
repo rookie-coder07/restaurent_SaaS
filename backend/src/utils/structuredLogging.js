@@ -4,6 +4,15 @@ import logger from './logger.js';
  * Structured logging utility for standardized error and action tracking
  */
 
+const SENSITIVE_QUERY_KEYS = new Set(['accessToken', 'token', 'refreshToken', 'password', 'currentPassword']);
+
+const sanitizeQuery = (query = {}) => Object.fromEntries(
+  Object.entries(query || {}).map(([key, value]) => [
+    key,
+    SENSITIVE_QUERY_KEYS.has(key) ? '[REDACTED]' : value,
+  ])
+);
+
 export const logError = (error, context = {}) => {
   const {
     message = 'An error occurred',
@@ -127,7 +136,7 @@ export const createRequestLogger = (req, res, next) => {
         timestamp: new Date().toISOString(),
         method: req.method,
         endpoint: req.path,
-        query: req.query,
+        query: sanitizeQuery(req.query),
         statusCode,
         duration: `${duration}ms`,
         userId: req.user?.id || req.user?.userId || null,

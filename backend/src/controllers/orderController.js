@@ -705,11 +705,17 @@ export const cancelPendingBills = asyncHandler(async (req, res) => {
 
 export const softDeleteOrder = asyncHandler(async (req, res) => {
   const { orderId } = req.params;
-  const deletedOrder = await OrderService.softDeleteOrder(req.user.restaurantId, orderId, req.body.reason, {
-    actorRole: req.user?.role,
+  const role = String(req.user?.role || '').toLowerCase();
+  const currentPassword = req.body.currentPassword || req.body.current_password || '';
+
+  console.log('User role:', req.user?.role);
+  console.log('Restaurant:', req.user?.restaurantId || req.restaurantId || null);
+
+  const deletedOrder = await OrderService.softDeleteOrder(req.restaurantId || req.user?.restaurantId || null, orderId, req.body.reason, {
+    actorRole: role,
     actorUserId: req.user?.userId,
     actorName: req.user?.name || req.user?.email || 'Unknown user',
-    currentPassword: req.body.currentPassword || req.body.current_password || '',
+    currentPassword,
   });
 
   if (!deletedOrder || !deletedOrder.id) {
@@ -720,7 +726,7 @@ export const softDeleteOrder = asyncHandler(async (req, res) => {
   if (req.user?.userId) {
     setImmediate(() => {
       ActivityService.logActivity(
-        req.user.restaurantId,
+        deletedOrder.restaurantId || req.restaurantId || req.user?.restaurantId || null,
         req.user.userId,
         req.user?.role,
         'order_deleted',

@@ -32,6 +32,7 @@ function isPublicApiPath(path = '') {
     path === '/' ||
     path === '/health' ||
     path === '/api/v1/health' ||
+    path === '/api/v1/orders/events/stream' ||
     /^\/api\/v1\/auth\/(login|staff\/login|register|token-info|forgot-password|reset-password|verify-otp|refresh-token|request-password-reset-otp|set-password-with-otp)/.test(path) ||
     /^\/api\/v1\/customer\//.test(path)
   );

@@ -3536,25 +3536,54 @@ export class OrderService {
 
   static async softDeleteOrder(restaurantId, orderId, reason, options = {}) {
     try {
-      // Only enforce password verification for owner role AND if password is provided
-      if (options.actorRole === 'owner') {
-        const currentPassword = String(options.currentPassword || '').trim();
-        // Password is optional unless explicitly required - only verify if provided
-        if (currentPassword) {
-          try {
-            await AuthService.verifyCurrentPassword(restaurantId, currentPassword, true);
-          } catch (pwdError) {
-            throw new Error('Current password is incorrect');
-          }
+      const role = String(options.actorRole || '').toLowerCase();
+      const currentPassword = String(options.currentPassword || '').trim();
+
+      if (currentPassword && ['owner', 'admin', 'manager'].includes(role)) {
+        try {
+          await AuthService.verifyCurrentPassword(
+            options.actorUserId || restaurantId,
+            currentPassword,
+            role === 'owner' || role === 'admin'
+          );
+        } catch (pwdError) {
+          throw new Error('Current password is incorrect');
         }
       }
 
-      const existingOrder = await this.fetchOrderRecord(restaurantId, orderId);
+      if (!['owner', 'admin', 'manager', 'developer'].includes(role)) {
+        throw new Error('Access denied');
+      }
+
+      let query = supabase
+        .from('orders')
+        .select('*')
+        .eq('id', orderId);
+
+      if (role !== 'developer') {
+        query = query.eq('restaurant_id', restaurantId);
+      }
+
+      const { data: existingOrder, error: existingOrderError } = await query.single();
+
+      console.log('User role:', options.actorRole);
+      console.log('Order:', existingOrder);
+      console.log('Restaurant:', restaurantId);
+
+      if (existingOrderError && existingOrderError.code !== 'PGRST116') {
+        throw existingOrderError;
+      }
+
+      if (!existingOrder) {
+        throw new Error('Order not found');
+      }
+
+      const effectiveRestaurantId = existingOrder.restaurant_id || existingOrder.restaurantId || restaurantId;
       const trimmedReason = String(reason || '').trim();
       const tableId = existingOrder?.table_id || existingOrder?.tableId || null;
 
       const deletedAt = new Date().toISOString();
-      const auditNote = `[order-delete] ${trimmedReason || 'no reason provided'} | actor=${options.actorRole || 'unknown'}:${options.actorName || 'Unknown user'} | at=${deletedAt}`;
+      const auditNote = `[order-delete] ${trimmedReason || 'no reason provided'} | actor=${role || 'unknown'}:${options.actorName || 'Unknown user'} | at=${deletedAt}`;
 
       // Collect ALL orders tied to this table so it can never stay busy
       const orphanOrders = new Set([orderId]);
@@ -3562,7 +3591,7 @@ export class OrderService {
         const { data: allTableOrders, error: tableOrdersError } = await supabase
           .from('orders')
           .select('id')
-          .eq('restaurant_id', restaurantId)
+          .eq('restaurant_id', effectiveRestaurantId)
           .eq('table_id', tableId)
           .eq('is_deleted', false);
 
@@ -3622,7 +3651,7 @@ export class OrderService {
             notes: this.appendOrderNote(existingOrder.notes, auditNote),
           })
           .eq('id', id)
-          .eq('restaurant_id', restaurantId)
+          .eq('restaurant_id', effectiveRestaurantId)
           .select('id');
 
         if (softDeleteError) {
@@ -3651,7 +3680,7 @@ export class OrderService {
           .from('tables')
           .update(tableUpdatePayload)
           .eq('id', tableId)
-          .eq('restaurant_id', restaurantId);
+          .eq('restaurant_id', effectiveRestaurantId);
 
         if (tableUpdateError) {
           logger.warn(`Failed to update table status for ${tableId}:`, tableUpdateError);
@@ -3661,24 +3690,24 @@ export class OrderService {
         const { error: assignmentError } = await supabase
           .from('table_assignments')
           .update({ is_active: false, updated_at: deletedAt })
-          .eq('restaurant_id', restaurantId)
+          .eq('restaurant_id', effectiveRestaurantId)
           .eq('table_id', tableId);
 
         if (assignmentError) {
           logger.warn(`Failed to deactivate table assignment for ${tableId}:`, assignmentError);
         }
 
-        await TableService.syncTableLifecycle(restaurantId, tableId);
+        await TableService.syncTableLifecycle(effectiveRestaurantId, tableId);
       }
 
-      this.emitOrderEvent(restaurantId, 'order.deleted', {
+      this.emitOrderEvent(effectiveRestaurantId, 'order.deleted', {
         id: orderId,
         tableId: tableId || '',
         orderType: existingOrder.order_type || existingOrder.orderType || '',
       });
 
       logger.info(`Order deletion completed: ${orderId} :: ${auditNote}`);
-      return { id: orderId, deletedAt };
+      return { id: orderId, deletedAt, restaurantId: effectiveRestaurantId };
     } catch (error) {
       logger.error('Soft delete order error:', error);
       throw error;

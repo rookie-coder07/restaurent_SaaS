@@ -42,6 +42,14 @@ function normalizeMenuItem(item) {
     name: item.name || 'Untitled item',
     description: item.description || '',
     price: Number(item.price || 0),
+    imageUrl:
+      item.imageUrl ||
+      item.image_url ||
+      item.image ||
+      item.photo ||
+      item.photoUrl ||
+      item.photo_url ||
+      '',
     categoryId: item.categoryId || item.category_id || item.category?.id || item.category?._id || '',
     isAvailable: item.isAvailable !== false && item.status !== 'inactive',
   };
@@ -1581,7 +1589,7 @@ export default function POS() {
             </div>
           ) : null}
         <div className={`grid gap-4 transition-opacity duration-200 xl:grid-cols-[minmax(0,1.55fr)_minmax(23rem,0.95fr)] ${isSwitchingTable ? 'opacity-80' : 'opacity-100'}`}>
-          <div className="space-y-4">
+          <div className="space-y-4 pb-24 xl:pb-0">
             {orderType === 'dine-in' && selectedTable ? (
               <div className="flex flex-col gap-4 rounded-[var(--radius-card)] border border-[var(--border-color)] bg-[var(--bg-card)] px-4 py-4 shadow-[var(--shadow-card)] lg:flex-row lg:items-center lg:justify-between">
                 <div className="space-y-3">
@@ -1744,7 +1752,6 @@ export default function POS() {
                         : 'SEND TO KITCHEN'
                       : 'CREATE & SEND TO KITCHEN'
                 }
-                isSendToKitchenDisabled={!selectedTable || cartItems.length === 0 || isLoadingTableOrder}
                 settleLabel={
                   isEditingActiveBill
                     ? hasUnsavedChanges
@@ -1755,11 +1762,21 @@ export default function POS() {
                 billingMessage={!canManageBilling ? 'Billing will be handled by manager.' : ''}
                 kitchenMessage={kitchenMessage}
                 isSubmitDisabled={isLoadingTableOrder}
-                isSendToKitchenDisabled={isLoadingTableOrder || !hasPendingKitchenItems}
+                isSendToKitchenDisabled={!selectedTable || cartItems.length === 0 || isLoadingTableOrder || !hasPendingKitchenItems}
                 isSettleDisabled={isLoadingTableOrder || (paymentMethod === 'cash' && shortfallAmount > 0)}
               />
             </div>
           </div>
+        </div>
+        <div className="fixed inset-x-0 bottom-0 z-30 border-t border-[var(--border-color)] bg-[rgba(255,255,255,0.96)] p-3 shadow-[0_-12px_30px_rgba(15,23,42,0.16)] backdrop-blur xl:hidden">
+          <button
+            type="button"
+            onClick={handleSendToKitchen}
+            disabled={!selectedTable || cartItems.length === 0 || isLoadingTableOrder || !hasPendingKitchenItems || isSubmitting || isSendingToKitchen || isSettling}
+            className="w-full rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-bold uppercase tracking-[0.12em] text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {isSendingToKitchen ? 'Placing...' : 'Place KOT'}
+          </button>
         </div>
         </div>
       )}

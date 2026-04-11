@@ -109,7 +109,7 @@ export const requireBillingRole = () => {
     try {
       const normalizedRole = normalizeRole(req.user?.role);
 
-      if (normalizedRole !== 'owner' && normalizedRole !== 'manager') {
+      if (normalizedRole !== 'owner' && normalizedRole !== 'admin' && normalizedRole !== 'manager') {
         logger.warn(`Billing action denied for user ${req.user?.email} with role ${normalizedRole}`);
         return sendError(res, 403, 'Unauthorized: Only manager can perform billing actions');
       }
@@ -127,7 +127,7 @@ export const requireOwnerRole = () => {
     try {
       const normalizedRole = normalizeRole(req.user?.role);
 
-      if (normalizedRole !== 'owner') {
+      if (normalizedRole !== 'owner' && normalizedRole !== 'admin') {
         logger.warn(`Owner action denied for user ${req.user?.email} with role ${normalizedRole}`);
         return sendError(res, 403, 'Unauthorized: Only admin can perform this action');
       }

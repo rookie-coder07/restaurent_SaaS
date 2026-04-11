@@ -5,7 +5,7 @@ import RestaurantService from '../services/restaurantService.js';
 import PasswordResetService from '../services/passwordResetService.js';
 
 export const getProfile = asyncHandler(async (req, res) => {
-  logger.info('API HIT: GET /profile - Restaurant: ${req.restaurantId}');
+  logger.info(`API HIT: GET /profile - Restaurant: ${req.restaurantId}`);
   const restaurant = await RestaurantService.getRestaurantProfile(req.restaurantId);
 
   return sendSuccess(res, 200, restaurant, 'Profile fetched successfully');
@@ -50,7 +50,7 @@ export const createStaff = asyncHandler(async (req, res) => {
 });
 
 export const getStaffUsers = asyncHandler(async (req, res) => {
-  logger.info('API HIT: GET /staff - Restaurant: ${req.restaurantId}, Limit: ${req.query.limit || 50}');
+  logger.info(`API HIT: GET /staff - Restaurant: ${req.restaurantId}, Limit: ${req.query.limit || 50}`);
   const filters = {
     role: req.query.role,
     isActive: req.query.isActive !== undefined ? req.query.isActive === 'true' : undefined,

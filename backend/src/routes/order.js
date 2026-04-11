@@ -1,6 +1,6 @@
 import express from 'express';
 import { authMiddleware, optionalAuth, streamAuthMiddleware } from '../middleware/auth.js';
-import { tenantIsolation, checkPermission, requireBillingRole, requireOwnerRole } from '../middleware/tenantIsolation.js';
+import { tenantIsolation, checkPermission, requireBillingRole } from '../middleware/tenantIsolation.js';
 import { validateRequest } from '../middleware/validation.js';
 import { orderLimiter } from '../middleware/rateLimit.js';
 import {
@@ -41,7 +41,7 @@ router.get('/open', checkPermission(['manage_orders', 'view_orders']), orderCont
 router.get('/inbox/online', checkPermission(['manage_orders', 'view_orders']), orderController.getOnlineOrderInbox);
 router.get('/loyalty/profile', checkPermission(['manage_orders', 'view_orders']), orderController.getLoyaltyProfile);
 router.post('/cancel-pending', checkPermission(['manage_orders']), validateRequest(cancelPendingBillsSchema), orderController.cancelPendingBills);
-router.post('/:orderId/delete', requireOwnerRole(), validateRequest(softDeleteOrderSchema), async (req, res, next) => {
+router.post('/:orderId/delete', validateRequest(softDeleteOrderSchema), async (req, res, next) => {
   try {
     // ✅ Call controller
     await orderController.softDeleteOrder(req, res, next);
