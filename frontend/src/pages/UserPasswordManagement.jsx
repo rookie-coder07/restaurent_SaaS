@@ -84,6 +84,36 @@ export default function UserPasswordManagement() {
   };
 
 
+  const handleResetPasswordViaOTP = async (userEmail) => {
+    if (!userEmail) return;
+    
+    try {
+      setResetting(true);
+      // Request OTP for password reset
+      const response = await api.post('/v1/auth/request-password-reset-otp', {
+        email: userEmail.toLowerCase().trim(),
+        role: 'staff',
+      });
+      
+      setMessage({
+        type: 'success',
+        text: 'Password reset OTP sent to email. Please check your inbox.',
+      });
+      
+      // TODO: Navigate to OTP verification page or show OTP modal
+      setTimeout(() => {
+        window.location.href = '/staff/reset-password';
+      }, 2000);
+    } catch (error) {
+      setMessage({
+        type: 'error',
+        text: error.response?.data?.message || 'Failed to send reset OTP',
+      });
+    } finally {
+      setResetting(false);
+    }
+  };
+
   const handleResetPassword = async (e) => {
     e.preventDefault();
     setError('');
