@@ -48,7 +48,7 @@ export const secureHeadersMiddleware = (req, res, next) => {
 export const corsConfiguration = () => {
   const isProduction = process.env.NODE_ENV === 'production';
   const allowedOrigins = isProduction
-    ? (process.env.ALLOWED_ORIGINS || 'https://restaurent-saas.vercel.app').split(',')
+    ? (process.env.ALLOWED_ORIGINS || 'https://restaurentsaas-seven.vercel.app').split(',')
     : ['http://localhost:3000', 'http://localhost:5173', 'http://localhost:5174', 'http://127.0.0.1:5173', 'http://127.0.0.1:5174'];
 
   return {
