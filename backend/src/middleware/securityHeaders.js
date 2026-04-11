@@ -94,6 +94,7 @@ export const corsConfiguration = () => {
         callback(null, true);
       } else {
         // Log the blocked request
+        console.warn('Blocked CORS:', origin);
         logWarn('CORS request blocked from non-whitelisted origin', {
           origin,
           allowedOrigins,
@@ -102,8 +103,8 @@ export const corsConfiguration = () => {
 
         SecurityAuditLogger.logCrossOriginRequest(origin, 'unknown', false, 'CORS');
         
-        // Strict CORS enforcement
-        callback(new Error('Not allowed by CORS policy'));
+        // Soft CORS handling - log but allow preflight
+        callback(null, false);
       }
     },
     credentials: true,
