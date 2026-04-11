@@ -220,7 +220,13 @@ class PasswordResetService {
       logger.error('❌ Set password with OTP error:', error.message);
       const errorMsg = error.message || 'Password reset failed';
       if (errorMsg.includes('not found')) {
-        throw new Error('User not found');\n      }\n      if (errorMsg.includes('password')) {\n        throw new Error('Password must be at least 8 characters');\n      }\n      throw error;\n    }
+        throw new Error('User not found');
+      }
+      if (errorMsg.includes('password')) {
+        throw new Error('Password must be at least 8 characters');
+      }
+      throw error;
+    }
   }
 
   /**
