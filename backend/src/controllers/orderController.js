@@ -499,7 +499,8 @@ export const createOrder = asyncHandler(async (req, res) => {
     }
 
     // Log order creation with friendly formatting
-    logOrderCreation(order, normalizedOrder.items || [], logger);
+    // Temporarily disabled - causing TypeError with formatted strings and logger
+    // logOrderCreation(order, normalizedOrder.items || [], logger);
 
     // Log activity for new order creation (fire-and-forget)
     if (req.user?.userId) {
