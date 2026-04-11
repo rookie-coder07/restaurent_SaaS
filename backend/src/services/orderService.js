@@ -2000,8 +2000,8 @@ export class OrderService {
     return transformedOrder;
   }
 
-  static async fetchOrderRecord(restaurantId, orderId) {
-    const { data: order, error } = await supabase
+  static async fetchOrderRecord(restaurantId, orderId, isDeveloper = false) {
+    let query = supabase
       .from('orders')
       .select(`
         id,
@@ -2036,25 +2036,36 @@ export class OrderService {
           table_number
         )
       `)
-      .eq('id', orderId)
-      .eq('restaurant_id', restaurantId)
-      .single();
+      .eq('id', orderId);
+
+    // Apply restaurant filter for non-developers
+    if (!isDeveloper) {
+      query = query.eq('restaurant_id', restaurantId);
+    }
+
+    const { data: order, error } = await query.single();
 
     if (error || !order) throw error || new Error('Order not found');
 
     return order;
   }
 
-  static async getOrderById(restaurantId, orderId) {
+  static async getOrderById(restaurantId, orderId, user = null) {
     try {
-      let order = await this.fetchOrderRecord(restaurantId, orderId);
+      const normalizedRole = String(user?.role || '').toLowerCase();
+      const isDeveloper = normalizedRole === 'developer';
+
+      let order = await this.fetchOrderRecord(restaurantId, orderId, isDeveloper);
+      const effectiveRestaurantId = restaurantId || order.restaurant_id;
 
       // BACKFILL: Ensure paid orders have bill numbers
-      order = await this.ensureOrderHasBillNumber(restaurantId, order);
+      order = await this.ensureOrderHasBillNumber(effectiveRestaurantId, order);
 
       // SECURITY: Validate order belongs to restaurant before returning
       // Prevents cross-restaurant data leaks for GST, invoice data, etc.
-      validateOrderBelongsToRestaurant(restaurantId, order);
+      if (!isDeveloper) {
+        validateOrderBelongsToRestaurant(restaurantId, order);
+      }
 
       // Transform and include table information
       const transformedOrder = {
@@ -2062,7 +2073,7 @@ export class OrderService {
         tableNumber: order.tables?.table_number || null,
         table: order.tables,
       };
-      const [orderWithDisplayNumber] = await this.attachDisplayNumbers(restaurantId, [transformedOrder]);
+      const [orderWithDisplayNumber] = await this.attachDisplayNumbers(effectiveRestaurantId, [transformedOrder]);
       return orderWithDisplayNumber;
     } catch (error) {
       logger.error('❌ Get order error:', error);

@@ -76,6 +76,7 @@ ${formatOrderItems(items)}
  */
 export const formatOrderResponse = (order) => {
   return {
+    id: order.id || order.orderId,
     orderId: order.id || order.orderId,
     tableId: order.tableId,
     restaurantId: order.restaurantId,

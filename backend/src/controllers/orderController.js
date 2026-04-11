@@ -597,7 +597,11 @@ export const getActiveOrderByTable = asyncHandler(async (req, res) => {
 export const getOrderById = asyncHandler(async (req, res) => {
   const { orderId } = req.params;
 
-  const order = await OrderService.getOrderById(req.restaurantId, orderId);
+  if (!orderId) {
+    return sendError(res, 400, 'Order ID is required');
+  }
+
+  const order = await OrderService.getOrderById(req.restaurantId, orderId, req.user);
 
   return sendSuccess(res, 200, order, 'Order fetched successfully');
 });

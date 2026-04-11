@@ -1,5 +1,5 @@
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useApi } from '../hooks/useApi';
 import { customerAPI } from '../services/apiEndpoints';
 import { Clock, Check, AlertCircle, ChefHat, Loader, UserCheck } from 'lucide-react';
@@ -28,12 +28,20 @@ function formatStatusLabel(status) {
 export default function OrderStatus() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const orderId = searchParams.get('order');
+  const orderId = searchParams.get('order') || searchParams.get('orderId');
   const tableNumber = searchParams.get('table');
+
+  // Memoize the API function to prevent infinite re-renders
+  const fetchOrder = useCallback(() => {
+    if (!orderId) {
+      return Promise.resolve(null);
+    }
+    return customerAPI.getOrder(orderId, tableNumber);
+  }, [orderId, tableNumber]);
 
   const [pollingInterval, setPollingInterval] = useState(2000); // Poll every 2 seconds
   const { data: order = {}, loading, error, execute: refetchOrder } = useApi(
-    () => (orderId ? customerAPI.getOrder(orderId, tableNumber) : Promise.resolve(null)),
+    fetchOrder,
     [orderId, tableNumber]
   );
 

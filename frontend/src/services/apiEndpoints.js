@@ -131,9 +131,14 @@ export const customerAPI = {
   getMenuByQR: (qrCodeData) => api.get(`/v1/customer/menu/${qrCodeData}/items`),
   createOrder: (data) => api.post('/v1/customer/orders', data),
   placeOrder: (data) => api.post('/v1/customer/orders', data),
-  getOrder: (orderId, tableNumber) => api.get(`/v1/customer/orders/${orderId}`, {
-    params: tableNumber ? { table: tableNumber } : {},
-  }),
+  getOrder: (orderId, tableNumber) => {
+    if (!orderId) {
+      return Promise.reject(new Error('Order ID is required'));
+    }
+    return api.get(`/v1/customer/orders/${orderId}`, {
+      params: tableNumber ? { table: tableNumber } : {},
+    });
+  },
   getOrderByTable: (tableNumber) => api.get(`/v1/customer/orders/table/${tableNumber}`),
 };
 
