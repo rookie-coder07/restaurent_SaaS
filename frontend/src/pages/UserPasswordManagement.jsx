@@ -5,6 +5,7 @@ import Button from '../components/common/Button';
 import Toast from '../components/common/Toast';
 import { restaurantAPI, authAPI } from '../services/apiEndpoints';
 import { useAuthStore } from '../context/authStore';
+import { getUserErrorMessage, reportClientError, showToast } from '../utils/errorHandling';
 
 export default function UserPasswordManagement() {
   const currentUser = useAuthStore((state) => state.user);
@@ -72,8 +73,10 @@ export default function UserPasswordManagement() {
       const staffData = response?.data?.data?.staff || response?.staff || [];
       setUsers(staffData);
     } catch (err) {
-      console.error('Failed to fetch users:', err);
-      setError('Failed to load users. Please try again.');
+      reportClientError(err, 'Failed to fetch users');
+      const message = getUserErrorMessage(err, 'Failed to load users. Please try again.');
+      setError(message);
+      showToast(message);
       setUsers([]);
     } finally {
       setLoading(false);
@@ -126,7 +129,9 @@ export default function UserPasswordManagement() {
       // Refresh users list
       await fetchAllUsers();
     } catch (err) {
-      setError(err.response?.data?.message || 'Failed to change password');
+      const message = getUserErrorMessage(err, 'Failed to change password');
+      setError(message);
+      showToast(message);
     } finally {
       setResetting(false);
     }

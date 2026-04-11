@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto';
 import logger from '../utils/logger.js';
-import supabase from '../config/supabase.js';
+import supabaseImport from '../config/supabase.js';
 import TableService from './tableService.js';
 // Inventory dependency intentionally disabled to avoid blocking orders/KOTs
 // import InventoryService from './inventoryService.js';
@@ -15,8 +15,17 @@ import {
 } from '../utils/kotMetadata.js';
 import { broadcastRestaurantEvent } from '../utils/realtimeEvents.js';
 
+// Allow supabase to be injected for testing
+let injectedSupabase = null;
+const getSupabase = () => injectedSupabase || supabaseImport;
+const supabase = getSupabase();
+
 export class OrderService {
   static ACTIVE_ORDER_STATUSES = ['awaiting_waiter_approval', 'pending', 'preparing', 'ready'];
+
+  static setSupabase(supabaseInstance) {
+    injectedSupabase = supabaseInstance;
+  }
 
   static OPEN_BILL_STATUSES = ['awaiting_waiter_approval', 'pending', 'preparing', 'ready', 'accepted'];
 
@@ -1729,14 +1738,14 @@ export class OrderService {
         error = insertResult.error;
 
         if (error) {
-          console.log('ERROR:', { 
+          logger.error('Order validation failed', { 
             code: error.code,
             message: error.message,
             details: error.details,
             attempt: attempt + 1,
           });
         } else {
-          console.log('ORDER:', { 
+          logger.debug('Order data prepared', { 
             id: order?.id,
             restaurant_id: order?.restaurant_id,
             table_id: order?.table_id,
@@ -1754,11 +1763,8 @@ export class OrderService {
         });
 
         if (!error) {
-          console.log(`✅ Order Insert Success (Attempt ${attempt + 1}):`, { order, restaurantId: finalRestaurantId, tableId: resolvedTableId, waiterId: options.userId });
           break;
         }
-
-        console.log(`❌ Order Insert Fail (Attempt ${attempt + 1}):`, { order, error, restaurantId: finalRestaurantId, tableId: resolvedTableId, waiterId: options.userId, payload: insertPayload });
 
         if (!this.isUniqueConstraintError(error)) {
           logger.error(`❌ Order creation failed (attempt ${attempt + 1}):`, {
@@ -1794,40 +1800,22 @@ export class OrderService {
           code: error.code,
           details: error.details,
         };
-        console.log('ERROR:', fullError);
-        logger.error(`❌ Order insert failed after 5 attempts:`, fullError);
+        logger.error('Order insert failed', fullError);
         throw error;
       }
 
       if (!order || !order.id) {
-        console.log('ERROR:', { message: 'Order response missing ID - RLS or schema issue' });
         const schemaError = {
-          message: 'Order was not created properly - missing ID in response (check RLS policies)',
+          message: 'Order response missing ID',
           restaurantId: finalRestaurantId,
           tableId: resolvedTableId,
           response: order,
         };
-        console.log('❌ Order Missing ID:', schemaError); // 🎯 Direct logging
-        logger.error('❌ Order created but response missing ID - RLS or schema issue detected', schemaError);
-        throw new Error('Order was not created properly - missing ID in response (check RLS policies)');
+        logger.error('Order created but response missing ID', schemaError);
+        throw new Error('Order was not created properly - missing ID in response');
       }
 
-      logger.info(`✅ Order created successfully: ${order.id}`, {
-        restaurantId: order.restaurant_id,
-        tableId: order.table_id,
-        waiterId: order.waiter_id,
-        status: order.status,
-        totalAmount: order.total_amount,
-      });
-
-      console.log('ORDER:', {
-        id: order.id,
-        restaurant_id: order.restaurant_id,
-        table_id: order.table_id,
-        waiter_id: order.waiter_id,
-        status: order.status,
-        total_amount: order.total_amount,
-      });
+      logger.info(`Order created: ${order.id}`);
 
       // Log activity
       ActivityService.logActivity(
@@ -1848,16 +1836,10 @@ export class OrderService {
       let successfullyAddedItems = [];
       if (order?.id && normalizedItems.length > 0) {
         try {
-          logger.info(`📦 Adding ${normalizedItems.length} items to order ${order.id}...`);
-          logger.debug(`Item details:`, normalizedItems.map(item => ({
-            menuItemId: item.menuItemId,
-            quantity: item.quantity,
-            unitPrice: item.unitPrice,
-            name: item.name,
-          })));
+          logger.debug(`Adding ${normalizedItems.length} items to order ${order.id}`);
           await this.addOrderItems(order.id, normalizedItems);
           successfullyAddedItems = normalizedItems;
-          logger.info(`✅ Successfully added ${normalizedItems.length} items to order ${order.id}`);
+          logger.info(`Items added to order ${order.id}`);
 
           // Log activity for items added
           ActivityService.logActivity(
@@ -1876,21 +1858,9 @@ export class OrderService {
             }
           ).catch(err => logger.error('Failed to log item_added activity:', err));
         } catch (orderItemsError) {
-          console.log('ERROR:', {
-            orderId: order.id,
+          logger.error(`Failed to add items to order ${order.id}`, {
             message: orderItemsError.message,
-            code: orderItemsError.code,
-            phase: 'add_items',
-          });
-          logger.error(`❌ CRITICAL: Failed to add items to order ${order.id}:`, {
-            error: {
-              message: orderItemsError.message,
-              code: orderItemsError.code,
-              details: orderItemsError.details,
-            },
             items: normalizedItems.length,
-            restaurantId: finalRestaurantId,
-            tableId: resolvedTableId,
           });
           successfullyAddedItems = [];
           
@@ -1900,7 +1870,7 @@ export class OrderService {
           );
         }
       } else if (order?.id && normalizedItems.length === 0) {
-        logger.warn(`⚠️ Order ${order.id} created with 0 items (empty cart)`);
+        logger.warn(`Order created with 0 items`);
         throw new Error('Cannot create order: Cart is empty, add at least one item');
       }
 
@@ -1915,10 +1885,9 @@ export class OrderService {
           await TableService.syncTableLifecycle(finalRestaurantId, resolvedTableId);
           logger.info(`✅ Table ${resolvedTableId} status updated to occupied for order ${order.id}`);
         } catch (tableError) {
-          logger.warn(`⚠️ Failed to update table status (order was still created):`, {
-            error: tableError.message,
+          logger.warn(`Failed to update table status`, {
             orderId: order.id,
-            tableId: resolvedTableId,
+            message: tableError.message,
           });
           // Don't throw - order was successfully created, just the table update failed
         }
@@ -2465,7 +2434,7 @@ export class OrderService {
 
       // STEP 1: ATOMIC - Generate bill number using database function
       // This function atomically updates invoice_number and returns the generated bill number
-      const { data: billNumber, error: billError } = await supabase.rpc('generate_bill_number', {
+      const { data: billNumber, error: billError } = await getSupabase().rpc('generate_bill_number', {
         p_order_id: orderId,
         p_restaurant_id: restaurantId,
       });
@@ -3141,18 +3110,29 @@ export class OrderService {
 
   // ============ ADDITIONAL METHODS FOR UNIFIED API ============
 
-  static async getOrders(restaurantId, filters = {}) {
+  static async getOrders(restaurantId, filters = {}, user = null) {
     try {
       const limit = Math.min(parseInt(filters.limit) || 20, 50);
       const skip = Math.max(parseInt(filters.skip) || 0, 0);
+      const normalizedRole = String(user?.role || '').toLowerCase();
+      const isDeveloper = normalizedRole === 'developer';
       
       let query = supabase
         .from('orders')
         .select('id,restaurant_id,table_id,status,total_amount,final_amount,payment_method,payment_status,order_type,created_at,updated_at,display_order_number,notes,is_deleted,invoice_number', { count: 'exact' })
-        .eq('restaurant_id', restaurantId)
         .eq('is_deleted', false)
         .order('created_at', { ascending: false })
         .limit(skip + limit);
+
+      if (!isDeveloper) {
+        query = query.eq('restaurant_id', restaurantId);
+      }
+
+      logger.info('getOrders filter scope', {
+        role: normalizedRole || 'unknown',
+        appliedRestaurantFilter: !isDeveloper,
+        restaurantId: restaurantId || null,
+      });
 
       if (filters.status && String(filters.status).toLowerCase() !== 'all') {
         const statusValues = this.getStatusFilterValues(filters.status);
@@ -3161,12 +3141,17 @@ export class OrderService {
 
       if (filters.tableNumber && String(filters.tableNumber).toLowerCase() !== 'all') {
         try {
-          const { data: tables } = await supabase
+          let tableQuery = supabase
             .from('tables')
             .select('id')
-            .eq('restaurant_id', restaurantId)
             .eq('table_number', String(filters.tableNumber).trim())
             .limit(1);
+
+          if (!isDeveloper) {
+            tableQuery = tableQuery.eq('restaurant_id', restaurantId);
+          }
+
+          const { data: tables } = await tableQuery;
           
           if (tables?.length > 0) {
             query = query.eq('table_id', tables[0].id);
@@ -3189,6 +3174,12 @@ export class OrderService {
 
       const { data: orders, error, count } = await query;
       if (error) throw error;
+
+      logger.info('getOrders query result', {
+        role: normalizedRole || 'unknown',
+        appliedRestaurantFilter: !isDeveloper,
+        returnedCount: Array.isArray(orders) ? orders.length : 0,
+      });
       
       const items = orders || [];
       const total = count || 0;

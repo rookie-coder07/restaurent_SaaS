@@ -23,7 +23,7 @@ test.describe('Portal Access Smoke', () => {
     await page.reload();
     await expect(page).toHaveURL(/\/pos\/login$/);
 
-    await page.goto('/staff/login');
+    await page.goto('/admin/login');
     await expect(page.getByRole('link', { name: /POS Login/i })).toBeVisible();
     await expect(page.getByRole('link', { name: /KOT Login/i })).toHaveCount(0);
 

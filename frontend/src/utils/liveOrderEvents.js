@@ -1,4 +1,6 @@
 import { API_BASE_URL, getCurrentPortalAccessToken } from '../services/api';
+import logger from './logger';
+import { reportClientError } from './errorHandling';
 
 async function canOpenOrderEventStream(streamUrl) {
   if (typeof window === 'undefined' || typeof window.fetch !== 'function') {
@@ -35,7 +37,7 @@ export function subscribeToOrderEvents(onEvent, options = {}) {
 
   const accessToken = getCurrentPortalAccessToken();
   if (!accessToken) {
-    console.debug('No access token available for stream connection');
+    logger.debug('No access token available for stream connection');
     return () => {};
   }
 
@@ -52,7 +54,7 @@ export function subscribeToOrderEvents(onEvent, options = {}) {
     try {
       onEvent(JSON.parse(event.data || '{}'));
     } catch (error) {
-      console.error('Error: failed to parse live order event', error);
+      reportClientError(error, 'Error: failed to parse live order event');
       onEvent({});
     }
   };
@@ -74,10 +76,10 @@ export function subscribeToOrderEvents(onEvent, options = {}) {
         if (!isClosed && reconnectAttempts < maxReconnectAttempts) {
           reconnectAttempts++;
           const delayMs = Math.min(1000 * Math.pow(2, reconnectAttempts - 1), 10000);
-          console.debug(`Stream reconnect attempt ${reconnectAttempts}/${maxReconnectAttempts} after ${delayMs}ms`);
+          logger.debug(`Stream reconnect attempt ${reconnectAttempts}/${maxReconnectAttempts} after ${delayMs}ms`);
           setTimeout(openStream, delayMs);
         } else if (reconnectAttempts >= maxReconnectAttempts) {
-          console.error('Stream connection failed - max reconnect attempts reached. User may need to refresh page.');
+          reportClientError(null, 'Stream connection failed - max reconnect attempts reached');
         }
       });
     });

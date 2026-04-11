@@ -32,7 +32,7 @@ async function installManagerMocks(page) {
   await mockApi(page, async ({ url, method }) => {
     const { pathname } = url;
 
-    if ((pathname.endsWith('/v1/auth/login') || pathname.endsWith('/v1/auth/staff/login')) && method === 'POST') {
+    if (pathname.endsWith('/v1/auth/login') && method === 'POST') {
       return jsonSuccess({
         accessToken: createTestJwt({ role: 'manager', restaurantId: 'rest-1' }),
         refreshToken: createTestJwt({ role: 'manager', restaurantId: 'rest-1', type: 'refresh' }),
@@ -142,7 +142,7 @@ async function installManagerMocks(page) {
 test.describe('Route Crawl Smoke', () => {
   test('public entry routes render without client-side failures', async ({ page }) => {
     const { pageErrors, requestFailures, consoleErrors } = createFailureCollectors(page);
-    const publicRoutes = ['/', '/admin/login', '/manager/login', '/pos/login', '/staff/login', '/register'];
+    const publicRoutes = ['/', '/admin/login', '/manager/login', '/register'];
 
     for (const route of publicRoutes) {
       await page.goto(route);

@@ -297,10 +297,26 @@ export default function CustomerMenu() {
         navigate(`/order-status?order=${createdOrder?.id}&table=${tableNumber || ''}`);
       }, 2200);
     } catch (error) {
-      setOrderStatus('error');
-      setOrderMessage(
-        error.response?.data?.message || error.message || 'Failed to place order. Please try again.'
-      );
+      const statusCode = error.response?.status;
+      const backendMessage = error.response?.data?.message;
+      
+      console.error('Order placement error:', {
+        status: statusCode,
+        message: backendMessage,
+        details: error.response?.data?.details,
+        stack: error.stack,
+      });
+
+      // Check for running bill conflict (409)
+      const isBusyTableError = statusCode === 409 || /currently busy|running bill|blocked until that bill is cleared/i.test(backendMessage);
+      
+      if (isBusyTableError) {
+        setOrderStatus('error');
+        setOrderMessage(backendMessage || 'This table already has a running bill. New QR orders are blocked until that bill is cleared.');
+      } else {
+        setOrderStatus('error');
+        setOrderMessage(backendMessage || error.message || 'Failed to place order. Please try again.');
+      }
     } finally {
       setIsPlacingOrder(false);
     }
@@ -323,7 +339,7 @@ export default function CustomerMenu() {
       import.meta.env.NEXT_PUBLIC_API_URL ||
       (import.meta.env.PROD ? PRODUCTION_API_BASE_URL : DEVELOPMENT_API_BASE_URL);
     const apiUrl = `${apiBaseUrl}/v1/customer/menu/items?table=${tableNumber || ''}${tableId ? `&tableId=${tableId}` : ''}`;
-    const isBusyTableError = /currently busy|running bill|blocked until that bill is cleared/i.test(apiError);
+    const isBusyTableError = /currently busy|running bill|blocked until that bill is cleared/i.test(apiError) || apiError?.includes?.('409');
 
     if (isBusyTableError) {
       return (

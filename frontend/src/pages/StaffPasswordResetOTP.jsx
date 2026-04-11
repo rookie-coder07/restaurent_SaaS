@@ -131,7 +131,7 @@ export default function StaffPasswordResetOTP() {
 
   const handleBackClick = () => {
     if (step === 'email') {
-      navigate('/login/pos');
+      navigate('/pos/login');
     } else if (step === 'otp') {
       setStep('email');
       setFormData({ ...formData, otp: '' });
@@ -311,7 +311,7 @@ export default function StaffPasswordResetOTP() {
                 </div>
 
                 <Button
-                  onClick={() => navigate('/login/pos')}
+                  onClick={() => navigate('/pos/login')}
                   fullWidth
                 >
                   Back to Login

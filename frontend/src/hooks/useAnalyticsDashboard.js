@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { analyticsApi } from '../services/analyticsApi';
+import { getUserErrorMessage, reportClientError, showToast } from '../utils/errorHandling';
 
 export default function useAnalyticsDashboard({ period = 'today' } = {}) {
   const [data, setData] = useState({
@@ -60,8 +61,10 @@ export default function useAnalyticsDashboard({ period = 'today' } = {}) {
         }),
       });
     } catch (err) {
-      console.error('Failed to fetch dashboard data:', err);
-      setError(err.message || 'Failed to load analytics data');
+      reportClientError(err, 'Failed to fetch dashboard data');
+      const message = getUserErrorMessage(err, 'Failed to load analytics data');
+      setError(message);
+      showToast(message);
     } finally {
       setLoading(false);
     }
@@ -144,8 +147,10 @@ export const useAnalyticsChart = (chartType, period = 'today') => {
 
         setData(chartData || []);
       } catch (err) {
-        console.error(`Failed to fetch ${chartType} data:`, err);
-        setError(err.message || `Failed to load ${chartType}`);
+        reportClientError(err, `Failed to fetch ${chartType} data`);
+        const message = getUserErrorMessage(err, `Failed to load ${chartType}`);
+        setError(message);
+        showToast(message);
       } finally {
         setLoading(false);
       }

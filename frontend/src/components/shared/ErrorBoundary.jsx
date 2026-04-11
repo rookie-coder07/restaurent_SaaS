@@ -1,5 +1,6 @@
 import React from 'react';
 import { AlertCircle } from 'lucide-react';
+import { DEFAULT_UI_ERROR, reportClientError } from '../../utils/errorHandling';
 
 class ErrorBoundary extends React.Component {
   constructor(props) {
@@ -12,7 +13,7 @@ class ErrorBoundary extends React.Component {
   }
 
   componentDidCatch(error, errorInfo) {
-    console.error('Error caught by boundary:', error, errorInfo);
+    reportClientError({ error, errorInfo }, 'Error caught by boundary');
   }
 
   render() {
@@ -27,7 +28,7 @@ class ErrorBoundary extends React.Component {
               Something went wrong
             </h1>
             <p className="text-gray-600 text-center mb-6">
-              {this.state.error?.message || 'An unexpected error occurred'}
+              {DEFAULT_UI_ERROR}
             </p>
             <button
               onClick={() => this.setState({ hasError: false, error: null })}

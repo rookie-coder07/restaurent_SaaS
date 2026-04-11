@@ -71,6 +71,9 @@ export class AnalyticsService {
   }
 
   static async fetchOrdersForDay(restaurantId, date) {
+    if (!restaurantId) return [];
+    if (!date) return [];
+    
     const { start, end } = this.getDayBounds(date);
     const { data: orders, error } = await supabase
       .from('orders')
@@ -96,7 +99,7 @@ export class AnalyticsService {
       .order('created_at', { ascending: true });
 
     if (error) {
-      throw error;
+      return [];
     }
 
     return orders || [];

@@ -50,7 +50,9 @@ export function isUnpaid(order) {
 }
 
 export function isSettled(order) {
-  return order?.status === 'completed' || String(order?.paymentStatus).toLowerCase() === 'paid';
+  const status = String(order?.status || '').toLowerCase();
+  const paymentStatus = String(order?.paymentStatus || '').toLowerCase();
+  return status === 'completed' || status === 'served' || paymentStatus === 'paid';
 }
 
 function buildMergeGroups(allTables = [], tableMerges = []) {

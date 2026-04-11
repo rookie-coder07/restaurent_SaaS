@@ -22,7 +22,7 @@ test.describe('Phase 0 Smoke', () => {
     await mockApi(page, async ({ url, method, body }) => {
       const { pathname } = url;
 
-      if (pathname.endsWith('/v1/auth/staff/login') && method === 'POST') {
+      if (pathname.endsWith('/v1/auth/login') && method === 'POST') {
         return jsonSuccess({
           accessToken: createTestJwt({ role: 'kitchen_staff', restaurantId: 'rest-1' }),
           refreshToken: createTestJwt({ role: 'kitchen_staff', restaurantId: 'rest-1', type: 'refresh' }),

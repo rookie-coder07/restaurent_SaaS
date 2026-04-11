@@ -3,8 +3,7 @@ import { getCurrentPortalAccessToken, getCurrentRestaurantId } from './api.js';
 
 export const authAPI = {
   register: (data) => api.post('/v1/auth/register', data),
-  login: (email, password) => api.post('/v1/auth/login', { email, password }),
-  staffLogin: (email, password) => api.post('/v1/auth/staff/login', { email, password }),
+  login: (email, password, portal = 'admin') => api.post('/v1/auth/login', { email, password, portal }),
   logout: () => api.post('/v1/auth/logout'),
   getCurrentUser: () => api.get('/v1/auth/me'),
   changePassword: (data) => api.post('/v1/auth/change-password', data),
@@ -16,6 +15,7 @@ export const restaurantAPI = {
   updateProfile: (data) => api.put('/v1/restaurants/profile', data),
   updateSettings: (data) => api.put('/v1/restaurants/settings', data),
   updateInvoiceSettings: (data) => api.put('/v1/restaurants/settings/invoice', data),
+  getBroadcasts: (params) => api.get('/v1/restaurants/broadcasts', { params }),
   createStaff: (data) => api.post('/v1/restaurants/staff', data),
   updateStaff: (staffId, data) => api.put(`/v1/restaurants/staff/${staffId}`, data),
   getStaff: (filtersOrLimit = {}, skip) => {
@@ -139,12 +139,23 @@ export const customerAPI = {
 
 export const developerAPI = {
   getDashboard: () => api.get('/v1/developer/dashboard'),
-  getRestaurants: () => api.get('/v1/developer/restaurants'),
+  getOverview: () => api.get('/v1/developer/control-center/overview'),
+  getLiveMonitor: () => api.get('/v1/developer/control-center/live'),
+  getSecurityOverview: () => api.get('/v1/developer/control-center/security'),
+  getErrorTracking: (params) => api.get('/v1/developer/control-center/errors', { params }),
+  exportData: (resource) => api.get(`/v1/developer/control-center/exports/${resource}`),
+  getRestaurants: (params) => api.get('/v1/developer/restaurants', { params }),
   updateRestaurantAccess: (restaurantId, data) => api.patch(`/v1/developer/restaurants/${restaurantId}/access`, data),
+  forceLogoutRestaurantUsers: (restaurantId) => api.post(`/v1/developer/restaurants/${restaurantId}/force-logout`),
   getUsers: (params) => api.get('/v1/developer/users', { params }),
   updateUserStatus: (userId, data) => api.patch(`/v1/developer/users/${userId}/status`, data),
+  updateUserRole: (userId, data) => api.patch(`/v1/developer/users/${userId}/role`, data),
   resetUserPassword: (userId, data) => api.post(`/v1/developer/users/${userId}/reset-password`, data),
+  forceLogoutUser: (userId) => api.post(`/v1/developer/users/${userId}/force-logout`),
+  getUserLoginHistory: (userId, params) => api.get(`/v1/developer/users/${userId}/login-history`, { params }),
   getSystemSettings: () => api.get('/v1/developer/settings'),
+  updateSystemSettings: (data) => api.put('/v1/developer/settings', data),
+  getFeatureFlags: () => api.get('/v1/developer/feature-flags'),
   updateMaintenance: (data) => api.put('/v1/developer/settings/maintenance', data),
   updateFeatureFlag: (data) => api.put('/v1/developer/feature-flags', data),
   getAuditLogs: (params) => api.get('/v1/developer/audit-logs', { params }),

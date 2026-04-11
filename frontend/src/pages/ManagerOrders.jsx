@@ -306,7 +306,28 @@ export default function ManagerOrders() {
 
       setSuccess(`${formatDisplayOrderNumber(saved)} sent to kitchen.${printMessage}`);
     } catch (e) {
-      setError(e.response?.data?.message || e.message || 'Failed to send to kitchen');
+      const backendMessage = e.response?.data?.message;
+      const statusCode = e.response?.status;
+      
+      console.error('Order creation error:', {
+        status: statusCode,
+        message: backendMessage,
+        details: e.response?.data?.details,
+        stack: e.stack,
+      });
+      
+      let errorMessage = e.message || 'Failed to send to kitchen';
+      if (backendMessage) {
+        errorMessage = backendMessage;
+      } else if (statusCode === 400) {
+        errorMessage = 'Invalid order data. Check items and quantities.';
+      } else if (statusCode === 409) {
+        errorMessage = 'Order already exists. Refresh and try again.';
+      } else if (statusCode === 500) {
+        errorMessage = 'Server error. Check console for details.';
+      }
+      
+      setError(errorMessage);
     } finally {
       setLoadingAction(false);
     }
@@ -327,7 +348,10 @@ export default function ManagerOrders() {
       if (!orderId) throw new Error('Save the order before settling.');
       const hasEnteredAmount = String(amountReceived || '').trim() !== '';
       const receivedAmount = hasEnteredAmount ? Number(amountReceived) : null;
-      if (paymentMethod === 'cash' && (!Number.isFinite(receivedAmount) || receivedAmount + 0.001 < Number(draftInvoicePreview.grandTotal || 0))) {
+      if (!hasEnteredAmount || !Number.isFinite(receivedAmount) || receivedAmount < 0) {
+        throw new Error('Enter a valid amount received.');
+      }
+      if (paymentMethod === 'cash' && receivedAmount + 0.001 < Number(draftInvoicePreview.grandTotal || 0)) {
         throw new Error('Cash received must be at least the bill total.');
       }
       const settleResponse = await orderAPI.settleOrder(orderId, {
@@ -361,7 +385,28 @@ export default function ManagerOrders() {
         },
       });
     } catch (e) {
-      setError(e.response?.data?.message || e.message || 'Failed to settle bill');
+      const backendMessage = e.response?.data?.message;
+      const statusCode = e.response?.status;
+      
+      console.error('Bill settlement error:', {
+        status: statusCode,
+        message: backendMessage,
+        details: e.response?.data?.details,
+        stack: e.stack,
+      });
+      
+      let errorMessage = e.message || 'Failed to settle bill';
+      if (backendMessage) {
+        errorMessage = backendMessage;
+      } else if (statusCode === 400) {
+        errorMessage = 'Invalid settlement data. Check payment details.';
+      } else if (statusCode === 409) {
+        errorMessage = 'Bill already settled. Refresh and try again.';
+      } else if (statusCode === 500) {
+        errorMessage = 'Server error settling bill. Check console for details.';
+      }
+      
+      setError(errorMessage);
     } finally {
       setLoadingAction(false);
     }

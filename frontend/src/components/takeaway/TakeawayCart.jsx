@@ -63,7 +63,12 @@ export default function TakeawayCart({ recentBills = [], onRefresh = () => {} })
       setLoading(true);
       setError('');
       const order = await takeawayApi.createOrder(payloadBase());
-      await takeawayApi.settleOrder(order.id, { paymentMode, amountReceived: total });
+      const numericTotal = Number(total);
+      if (!Number.isFinite(numericTotal) || numericTotal < 0) {
+        throw new Error('Enter a valid settlement amount.');
+      }
+
+      await takeawayApi.settleOrder(order.id, { paymentMode, amountReceived: numericTotal });
       clearCart();
       onRefresh();
     } catch (e) {

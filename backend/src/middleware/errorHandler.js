@@ -1,209 +1,132 @@
+import supabaseImport from '../config/supabase.js';
 import logger from '../utils/logger.js';
-import { sendError } from '../utils/apiResponse.js';
+import { getDefaultErrorMessage, sendError } from '../utils/apiResponse.js';
 
-export const errorHandler = (err, req, res, next) => {
-  // Log error
+let injectedSupabase = null;
+const getSupabase = () => injectedSupabase || supabaseImport;
+
+const TECHNICAL_ERROR_PATTERN =
+  /(sql|stack|supabase|postgres|database|jwt|tokenexpired|jsonwebtoken|column|constraint|relation|syntax error|cannot read|undefined|null)/i;
+
+const normalizeStatusCode = (err) => {
+  const statusCode = Number(err?.statusCode || err?.status || 500);
+  if ([400, 401, 403, 404, 409, 408, 429].includes(statusCode)) {
+    return statusCode;
+  }
+  return 500;
+};
+
+const buildSafeMessage = (err, statusCode) => {
+  const candidate = String(err?.publicMessage || err?.message || '').trim();
+
+  if (!candidate) {
+    return getDefaultErrorMessage(statusCode);
+  }
+
+  if (statusCode >= 500 || TECHNICAL_ERROR_PATTERN.test(candidate)) {
+    return getDefaultErrorMessage(statusCode);
+  }
+
+  return candidate;
+};
+
+const serializeDeveloperDetails = (err) => ({
+  name: err?.name || 'Error',
+  code: err?.code || null,
+  statusCode: err?.statusCode || err?.status || 500,
+  details: err?.details || null,
+  hint: err?.hint || null,
+});
+
+const persistErrorLog = async (req, err, statusCode, safeMessage) => {
+  const payload = {
+    user_id: req?.user?.userId || null,
+    endpoint: req?.originalUrl || req?.path || '',
+    error_message: String(err?.message || safeMessage || getDefaultErrorMessage(statusCode)).slice(0, 2000),
+    timestamp: new Date().toISOString(),
+    status_code: statusCode,
+    method: req?.method || '',
+    role: req?.user?.role || '',
+  };
+
+  try {
+    const { error } = await getSupabase().from('error_logs').insert([payload]);
+    if (!error) {
+      return;
+    }
+  } catch {
+    // Fall through to activity_logs.
+  }
+
+  try {
+    const activityPayload = {
+      restaurant_id: req?.restaurantId || req?.user?.restaurantId || null,
+      user_id: req?.user?.userId || null,
+      role: req?.user?.role || 'system',
+      action: 'api_error',
+      details: {
+        endpoint: payload.endpoint,
+        error_message: payload.error_message,
+        status_code: statusCode,
+        method: payload.method,
+        safe_message: safeMessage,
+      },
+      created_at: payload.timestamp,
+    };
+
+    await getSupabase().from('activity_logs').insert([activityPayload]);
+  } catch (logError) {
+    logger.warn('Error log persistence failed', {
+      endpoint: payload.endpoint,
+      message: logError?.message || 'Unknown persistence error',
+    });
+  }
+};
+
+export const errorHandler = async (err, req, res, next) => {
+  if (!res || !res.status || !res.json) {
+    return;
+  }
+
+  const error = err || new Error('Unknown error');
+  const statusCode = normalizeStatusCode(error);
+  const safeMessage = buildSafeMessage(error, statusCode);
+  const isDeveloper = req?.user?.role === 'developer';
+
+  console.error('🔥 INTERNAL ERROR:', error);
+
   logger.error('Unhandled Error:', {
-    message: err.message,
-    stack: err.stack,
-    path: req.path,
-    method: req.method,
-    user: req.user?.email,
-    restaurantId: req.restaurantId,
+    message: error?.message || 'Unknown error',
+    stack: error?.stack || 'No stack trace',
+    endpoint: req?.originalUrl || req?.path || 'unknown',
+    method: req?.method || 'unknown',
+    userId: req?.user?.userId || null,
+    restaurantId: req?.restaurantId || req?.user?.restaurantId || null,
+    role: req?.user?.role || '',
+    statusCode,
+    timestamp: new Date().toISOString(),
   });
 
-  // Handle Joi validation errors
-  if (err.isJoi) {
-    const message = err.details.map(d => d.message).join(', ');
-    return sendError(res, 400, 'Validation error', {
-      details: err.details,
+  await persistErrorLog(req, error, statusCode, safeMessage);
+
+  if (isDeveloper) {
+    return res.status(statusCode).json({
+      success: false,
+      statusCode,
+      message: error?.message || safeMessage,
+      stack: error?.stack || null,
+      details: serializeDeveloperDetails(error),
     });
   }
 
-  // Handle MongoDB validation errors
-  if (err.name === 'ValidationError') {
-    const messages = Object.values(err.errors)
-      .map(e => e.message);
-    return sendError(res, 400, 'Validation error', {
-      details: messages,
-    });
-  }
-
-  // Handle MongoDB duplicate key errors
-  if (err.code === 11000) {
-    const field = Object.keys(err.keyValue)[0];
-    return sendError(res, 409, `${field} already exists`);
-  }
-
-  // Handle Postgres/Supabase invalid type errors from stale schemas
-  if (
-    err?.code === '22P02' &&
-    String(err?.message || '').includes('invalid input syntax for type integer') &&
-    String(err?.message || '').includes('A1')
-  ) {
-    return sendError(
-      res,
-      400,
-      'Your tables schema is still numeric-only. Apply the table label migration to allow values like A1 or C9.'
-    );
-  }
-
-  if (
-    err?.code === '22P02' &&
-    String(err?.message || '').includes('invalid input syntax for type integer') &&
-    String(err?.message || '').includes('table_number')
-  ) {
-    return sendError(
-      res,
-      400,
-      'Your tables schema is still numeric-only. Apply the table label migration to allow alphanumeric table labels.'
-    );
-  }
-
-  if (
-    String(err?.message || '').includes('users.assigned_tables') ||
-    String(err?.message || '').includes("Could not find the 'assigned_tables' column of 'users' in the schema cache")
-  ) {
-    return sendError(
-      res,
-      500,
-      'Your database is missing users.assigned_tables. Apply the staff table-assignment migration and restart the backend.'
-    );
-  }
-
-  if (
-    String(err?.message || '').includes('tables.locked_by_qr') ||
-    String(err?.message || '').includes('orders.order_source')
-  ) {
-    return sendError(
-      res,
-      500,
-      'Your database is missing the QR/manual table lock migration. Apply backend/src/config/migrations/2026-04-06-add-order-source-and-qr-lock.sql and restart the backend.'
-    );
-  }
-
-  if (
-    String(err?.message || '').includes('tables.assigned_to') ||
-    String(err?.message || '').includes("Could not find the 'assigned_to' column of 'tables' in the schema cache")
-  ) {
-    return sendError(
-      res,
-      500,
-      'Your database is missing tables.assigned_to. Apply the table assignment lock migration and restart the backend.'
-    );
-  }
-
-  if (
-    String(err?.message || '').includes("Could not find the 'menu_item_recipes'") ||
-    String(err?.message || '').includes('menu_item_recipes') ||
-    String(err?.message || '').includes('inventory_items!inventory_item_id')
-  ) {
-    return sendError(
-      res,
-      500,
-      'Your database is missing the menu recipe tables/relations needed by menu management. Apply the inventory/menu recipe migrations and restart the backend.'
-    );
-  }
-
-  if (
-    String(err?.message || '').includes('password_reset_requests') ||
-    String(err?.message || '').includes("Could not find the 'password_reset_requests'")
-  ) {
-    return sendError(
-      res,
-      500,
-      'Your database is missing password_reset_requests. Apply the password reset request migration and restart the backend.'
-    );
-  }
-
-  if (
-    String(err?.message || '').includes('system_settings') ||
-    String(err?.message || '').includes('feature_flags') ||
-    String(err?.message || '').includes('audit_logs') ||
-    String(err?.message || '').includes('broadcast_notifications')
-  ) {
-    return sendError(
-      res,
-      500,
-      'Your database is missing the developer console tables. Apply backend/src/config/migrations/2026-04-07-add-developer-console.sql and restart the backend.'
-    );
-  }
-
-  if (
-    String(err?.message || '').includes('orders.request_id') ||
-    String(err?.message || '').includes("Could not find the 'request_id' column of 'orders' in the schema cache")
-  ) {
-    return sendError(
-      res,
-      500,
-      'Your database is missing orders.request_id. Apply backend/src/config/migrations/2026-04-06-add-order-request-id.sql and restart the backend.'
-    );
-  }
-
-  if (
-    String(err?.message || '').includes('order_items.sent_to_kitchen') ||
-    String(err?.message || '').includes('order_items.kot_id') ||
-    String(err?.message || '').includes('kitchen_tickets') ||
-    String(err?.message || '').includes("Could not find the 'sent_to_kitchen' column of 'order_items' in the schema cache")
-  ) {
-    return sendError(
-      res,
-      500,
-      'Your database is missing the incremental KOT migration. Apply backend/src/config/migrations/2026-04-06-add-incremental-kot-columns.sql and restart the backend.'
-    );
-  }
-
-  const businessMessage = String(err?.message || '');
-  const isBusinessRuleError =
-    businessMessage.includes('Cash received must be at least the bill total') ||
-    businessMessage.includes('Cash received amount is required for cash settlement') ||
-    businessMessage.includes('Unsupported payment method') ||
-    businessMessage.includes('Order is already settled') ||
-    businessMessage.includes('Cancelled orders cannot be settled') ||
-    businessMessage.includes('Order total must be greater than zero before settlement') ||
-    businessMessage.includes('Add at least one item before sending to kitchen') ||
-    businessMessage.includes('No new kitchen changes to send for this bill') ||
-    businessMessage.includes('Not enough stock for') ||
-    businessMessage.includes('No matching account found for this reset request') ||
-    businessMessage.includes('More than one matching account was found') ||
-    businessMessage.includes('A password reset request is already pending for this account') ||
-    businessMessage.includes('Only manager or admin can view reset requests') ||
-    businessMessage.includes('Only manager or admin can reset passwords from requests') ||
-    businessMessage.includes('This reset request has already been handled') ||
-    businessMessage.includes('You are not allowed to process this reset request') ||
-    businessMessage.includes('Requested user account not found') ||
-    businessMessage.includes('Reset request role does not match the target account') ||
-    businessMessage.includes('You cannot reset your own password through reset requests') ||
-    businessMessage.includes('Password reset requests are available only for manager and POS accounts') ||
-    businessMessage.includes('This table is already occupied by another waiter') ||
-    businessMessage.includes('This QR table is locked to another waiter') ||
-    businessMessage.includes('Only ') && businessMessage.includes('loyalty points are available');
-
-  if (isBusinessRuleError) {
-    return sendError(res, 400, businessMessage);
-  }
-
-  // Handle custom AppError
-  if (err.statusCode) {
-    return sendError(res, err.statusCode, err.message);
-  }
-
-  // Default error response
-  const statusCode = err.statusCode || 500;
-  const message = process.env.NODE_ENV === 'production'
-    ? 'Internal server error'
-    : err.message;
-
-  return sendError(res, statusCode, message);
+  return sendError(res, statusCode, safeMessage);
 };
 
-// Catch 404 errors
 export const notFoundHandler = (req, res, next) => {
   logger.warn(`404 Not Found: ${req.method} ${req.path}`);
-  return sendError(res, 404, `Route not found: ${req.method} ${req.path}`);
+  return sendError(res, 404, getDefaultErrorMessage(404));
 };
 
-// Async error wrapper
 export const asyncHandler = (fn) => {
   return (req, res, next) => {
     Promise.resolve(fn(req, res, next)).catch(next);

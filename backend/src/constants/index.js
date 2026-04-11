@@ -1,22 +1,20 @@
 export const ROLES = {
-  OWNER: 'owner',
-  DEVELOPER: 'developer',
+  ADMIN: 'admin',
+  OWNER: 'admin',
   MANAGER: 'manager',
   STAFF: 'staff',
-  KITCHEN_STAFF: 'kitchen_staff',
+  DEVELOPER: 'developer',
 };
 
 const ROLE_ALIASES = {
-  admin: ROLES.OWNER,
-  owner: ROLES.OWNER,
-  developer: ROLES.DEVELOPER,
-  super_admin: ROLES.DEVELOPER,
+  admin: ROLES.ADMIN,
+  owner: ROLES.ADMIN,
+  super_admin: ROLES.ADMIN,
   manager: ROLES.MANAGER,
+  staff: ROLES.STAFF,
   waiter: ROLES.STAFF,
   cashier: ROLES.STAFF,
-  staff: ROLES.STAFF,
-  kitchen: ROLES.KITCHEN_STAFF,
-  kitchen_staff: ROLES.KITCHEN_STAFF,
+  developer: ROLES.DEVELOPER,
 };
 
 export const VALID_ROLES = Object.values(ROLES);
@@ -27,6 +25,7 @@ export function normalizeRole(role) {
 }
 
 export const ROLE_PERMISSIONS = {
+  admin: ['create_menu', 'manage_menu', 'manage_orders', 'manage_staff', 'view_staff', 'view_analytics', 'manage_restaurant', 'view_orders', 'update_order_status'],
   developer: [
     'developer_console',
     'manage_restaurants',
@@ -36,6 +35,12 @@ export const ROLE_PERMISSIONS = {
     'manage_broadcasts',
     'view_audit_logs',
     'view_system_health',
+    'manage_orders',
+    'view_orders',
+    'manage_tables',
+    'manage_menu',
+    'view_analytics',
+    'update_order_status',
   ],
   owner: ['create_menu', 'manage_menu', 'manage_orders', 'manage_staff', 'view_staff', 'view_analytics', 'manage_restaurant', 'view_orders', 'update_order_status'],
   manager: ['manage_orders', 'manage_tables', 'manage_staff', 'view_staff', 'view_analytics', 'view_orders', 'update_order_status'],

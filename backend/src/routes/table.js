@@ -8,6 +8,7 @@ import {
   reserveTableSchema,
 } from '../schemas/order.schema.js';
 import * as tableController from '../controllers/tableController.js';
+import SecurityAuditLogger from '../utils/securityAudit.js';
 
 const router = express.Router();
 
@@ -23,7 +24,27 @@ router.get('/', checkPermission(['manage_tables', 'manage_menu', 'view_orders'])
 
 // Update/delete table
 router.put('/:tableId', checkPermission(['manage_tables', 'manage_menu']), tableController.updateTable);
-router.delete('/:tableId', checkPermission(['manage_menu']), tableController.deleteTable);
+router.delete('/:tableId', checkPermission(['manage_menu']), async (req, res, next) => {
+  try {
+    // ✅ Call controller
+    await tableController.deleteTable(req, res, next);
+    
+    // ✅ Log critical operation if successful
+    if (res.statusCode === 200) {
+      SecurityAuditLogger.logCriticalOperation(
+        req.user?.id || 'unknown',
+        'table_deletion',
+        {
+          tableId: req.params.tableId,
+          restaurantId: req.restaurantId
+        },
+        req.ip
+      );
+    }
+  } catch (error) {
+    next(error);
+  }
+});
 router.post('/:tableId/reserve', checkPermission(['manage_tables', 'manage_menu', 'manage_orders']), validateRequest(reserveTableSchema), tableController.reserveTable);
 router.post('/:tableId/release', checkPermission(['manage_tables', 'manage_menu', 'manage_orders']), tableController.releaseTable);
 router.post('/:tableId/claim', checkPermission(['manage_orders']), tableController.claimTable);

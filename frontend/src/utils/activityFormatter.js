@@ -2,6 +2,7 @@
  * Activity Details Formatter - Display staff activity in user-friendly format
  * Frontend utility for formatting activity log details
  */
+import { reportClientError } from './errorHandling';
 
 /**
  * Map of action types to display labels with emojis
@@ -271,7 +272,7 @@ export const formatActivityDetails = (action, details) => {
     try {
       return formatter(details);
     } catch (error) {
-      console.error(`Error formatting ${action}:`, error);
+      reportClientError(error, `Error formatting ${action}`);
       return null;
     }
   }

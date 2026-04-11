@@ -11,6 +11,14 @@ export const getProfile = asyncHandler(async (req, res) => {
   return sendSuccess(res, 200, restaurant, 'Profile fetched successfully');
 });
 
+export const getBroadcastNotifications = asyncHandler(async (req, res) => {
+  const items = await RestaurantService.getBroadcastNotifications(req.restaurantId, {
+    limit: parseInt(req.query.limit, 10) || 20,
+  });
+
+  return sendSuccess(res, 200, { items }, 'Broadcast notifications fetched successfully');
+});
+
 export const updateProfile = asyncHandler(async (req, res) => {
   const restaurant = await RestaurantService.updateRestaurantProfile(req.restaurantId, req.body);
 
@@ -30,9 +38,15 @@ export const updateInvoiceSettings = asyncHandler(async (req, res) => {
 });
 
 export const createStaff = asyncHandler(async (req, res) => {
-  const staff = await RestaurantService.createStaffUser(req.restaurantId, req.body);
-
-  return sendSuccess(res, 201, staff, 'Staff user created successfully');
+  try {
+    const staff = await RestaurantService.createStaffUser(req.restaurantId, req.body);
+    return sendSuccess(res, 201, staff, 'Staff user created successfully');
+  } catch (error) {
+    if (error.message && error.message.includes('already assigned')) {
+      return sendError(res, 409, error.message);
+    }
+    throw error;
+  }
 });
 
 export const getStaffUsers = asyncHandler(async (req, res) => {
@@ -58,33 +72,40 @@ export const deactivateStaff = asyncHandler(async (req, res) => {
 });
 
 export const updateStaff = asyncHandler(async (req, res) => {
-  const { staffId } = req.params;
-  const normalizedRole = String(req.user?.role || '').toLowerCase();
+  try {
+    const { staffId } = req.params;
+    const normalizedRole = String(req.user?.role || '').toLowerCase();
 
-  if (normalizedRole !== 'owner' && normalizedRole !== 'manager') {
-    return sendError(res, 403, 'Insufficient permissions for this action');
-  }
-
-  if (normalizedRole === 'manager') {
-    const providedFields = Object.entries(req.body || {})
-      .filter(([, value]) => value !== undefined)
-      .map(([key]) => key);
-    const onlyAssignmentUpdate =
-      providedFields.length > 0 && providedFields.every((field) => field === 'assignedTables');
-
-    if (!onlyAssignmentUpdate) {
-      return sendError(res, 403, 'Managers can only update waiter table assignments');
+    if (normalizedRole !== 'owner' && normalizedRole !== 'manager') {
+      return sendError(res, 403, 'Insufficient permissions for this action');
     }
 
-    const targetUser = await RestaurantService.getStaffUserById(req.restaurantId, staffId);
-    if (targetUser?.role !== 'staff') {
-      return sendError(res, 403, 'Managers can only assign tables to POS staff');
+    if (normalizedRole === 'manager') {
+      const providedFields = Object.entries(req.body || {})
+        .filter(([, value]) => value !== undefined)
+        .map(([key]) => key);
+      const onlyAssignmentUpdate =
+        providedFields.length > 0 && providedFields.every((field) => field === 'assignedTables');
+
+      if (!onlyAssignmentUpdate) {
+        return sendError(res, 403, 'Managers can only update waiter table assignments');
+      }
+
+      const targetUser = await RestaurantService.getStaffUserById(req.restaurantId, staffId);
+      if (targetUser?.role !== 'staff') {
+        return sendError(res, 403, 'Managers can only assign tables to POS staff');
+      }
     }
+
+    const user = await RestaurantService.updateStaffUser(req.restaurantId, staffId, req.body);
+
+    return sendSuccess(res, 200, user, 'Staff user updated successfully');
+  } catch (error) {
+    if (error.message && error.message.includes('already assigned')) {
+      return sendError(res, 409, error.message);
+    }
+    throw error;
   }
-
-  const user = await RestaurantService.updateStaffUser(req.restaurantId, staffId, req.body);
-
-  return sendSuccess(res, 200, user, 'Staff user updated successfully');
 });
 
 export const resetStaffPassword = asyncHandler(async (req, res) => {

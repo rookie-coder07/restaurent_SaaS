@@ -20,9 +20,14 @@ const takeawayService = {
   },
 
   async settleOrder(restaurantId, orderId, payload, context = {}) {
+    const numericAmount = Number(payload.amountReceived);
+    if (!Number.isFinite(numericAmount) || numericAmount < 0) {
+      throw new Error('Invalid settlement amount');
+    }
+
     return OrderService.settleOrder(restaurantId, orderId, {
       method: payload.paymentMode || 'cash',
-      amountReceived: payload.amountReceived,
+      amountReceived: numericAmount,
       paymentNote: payload.paymentNote || '',
     });
   },

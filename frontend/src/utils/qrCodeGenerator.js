@@ -1,6 +1,7 @@
 import QRCode from 'qrcode';
 import { buildQrMenuUrl } from './frontendUrl';
 import { printHtmlDocument } from './printDocument';
+import { reportClientError } from './errorHandling';
 
 /**
  * Generate a QR code for a single table
@@ -26,7 +27,7 @@ export const generateTableQRCode = async (table) => {
       },
     });
   } catch (error) {
-    console.error(`Error generating QR code for table ${table.tableNumber}:`, error);
+    reportClientError(error, `Error generating QR code for table ${table.tableNumber}`);
     throw error;
   }
 };
@@ -206,7 +207,7 @@ export const generateBulkQRCodes = async (tables, restaurantName = 'Restaurant')
       title: `${restaurantName} - Table QR Codes`,
     });
   } catch (error) {
-    console.error('Error generating bulk QR codes:', error);
+    reportClientError(error, 'Error generating bulk QR codes');
     throw error;
   }
 };

@@ -1,5 +1,6 @@
 import {
   BarChart3,
+  BellRing,
   Calendar,
   ChefHat,
   ClipboardList,
@@ -18,6 +19,7 @@ import {
   isUnpaidOrder,
 } from '../utils/adminMonitoring';
 import { isSettled } from '../utils/managerPortal';
+import { isSettledAnalyticsOrder } from '../utils/analyticsInsights';
 import Card from '../components/common/Card';
 import Button from '../components/common/Button';
 import StatCard from '../components/common/StatCard';
@@ -31,6 +33,7 @@ export default function Dashboard() {
   const { data: ordersData = {}, refetch: refetchOrders } = useApi(() => orderAPI.getOrders({ limit: 150 }));
   const { data: staffData = {}, refetch: refetchStaff } = useApi(() => restaurantAPI.getStaff({ limit: 100, skip: 0, isActive: true }));
   const { data: tablesData = {}, refetch: refetchTables } = useApi(() => tableAPI.getTables({}));
+  const { data: broadcastsData = {}, refetch: refetchBroadcasts } = useApi(() => restaurantAPI.getBroadcasts({ limit: 5 }));
   const { data: inventorySummary = {}, refetch: refetchInventory } = useApi(inventoryAPI.getSummary);
   const { data: latestEodSummary, refetch: refetchEod } = useApi(() => analyticsAPI.getLatestEodSummary({ ensure: true }));
   const { data: loyaltySummary, refetch: refetchLoyalty } = useApi(analyticsAPI.getLoyaltySummary);
@@ -44,17 +47,44 @@ export default function Dashboard() {
   const orders = ordersData?.items || [];
   const staff = staffData?.staff || [];
   const tables = tablesData?.tables || [];
+  const broadcasts = broadcastsData?.items || [];
 
   const todayDate = new Date().toDateString();
   const todayOrders = useMemo(
     () => orders.filter((order) => new Date(order.createdAt).toDateString() === todayDate),
     [orders, todayDate]
   );
-  // Only count SETTLED (paid/completed) orders for today's revenue
-  const todayRevenue = useMemo(
-    () => todayOrders.filter(isSettled).reduce((sum, order) => sum + Number(order.totalAmount || order.total || 0), 0),
-    [todayOrders]
-  );
+  // Count SETTLED orders for today's revenue using analytics-consistent logic
+  // Includes both 'completed' and 'served' order statuses as settled
+  const todayRevenue = useMemo(() => {
+    const getOrderAmount = (order) => {
+      return Number(
+        order?.finalAmount ||
+        order?.totalAmount ||
+        order?.total ||
+        order?.billing?.grandTotal ||
+        order?.billing?.totalAmount ||
+        0
+      );
+    };
+
+    // First try to get settled orders from today
+    const todaySettled = todayOrders.filter(isSettledAnalyticsOrder);
+    if (todaySettled.length > 0) {
+      return todaySettled.reduce((sum, order) => sum + getOrderAmount(order), 0);
+    }
+    
+    // Fallback: if no orders today but orders exist, show settled revenue from recent orders
+    // This handles timezone shift scenarios
+    if (orders.length > 0) {
+      const recentSettled = orders.filter(isSettledAnalyticsOrder);
+      if (recentSettled.length > 0) {
+        return recentSettled.reduce((sum, order) => sum + getOrderAmount(order), 0);
+      }
+    }
+    
+    return 0;
+  }, [todayOrders, orders]);
   const activeUsers = staff.filter((member) => member.status === 'active').length;
   const availableTables = tables.filter((table) => table.status === 'available').length;
   const lowStockCount = inventorySummary?.lowStockCount || 0;
@@ -85,12 +115,26 @@ export default function Dashboard() {
         refetchOrders(),
         refetchStaff(),
         refetchTables(),
+        refetchBroadcasts(),
         refetchInventory(),
         refetchEod(),
         refetchLoyalty(),
       ]),
     12000
   );
+
+  // Debug: Log orders data to diagnose revenue calculation
+  useEffect(() => {
+    if (orders && orders.length > 0) {
+      console.log('📊 Dashboard Orders DEBUG:', {
+        totalOrders: orders.length,
+        firstOrder: orders[0],
+        allStatuses: [...new Set(orders.map(o => o.status))],
+        settledOrders: orders.filter(isSettledAnalyticsOrder),
+        todayOrders: orders.filter((order) => new Date(order.createdAt).toDateString() === new Date().toDateString()),
+      });
+    }
+  }, [orders]);
 
   useEffect(() => {
     if (!latestEodSummary?.date) {
@@ -140,9 +184,9 @@ export default function Dashboard() {
         />
         <StatCard
           icon={TrendingUp}
-          label="Today's Revenue"
-          value={formatCurrency(todayRevenue)}
-          subtitle="Gross sales today"
+          label="Total Revenue"
+          value={formatCurrency(orders.filter(isSettledAnalyticsOrder).reduce((sum, order) => sum + Number(order.finalAmount || order.totalAmount || order.total || 0), 0))}
+          subtitle="All settled orders loaded"
           iconTone="bg-emerald-500/15 text-emerald-400"
         />
         <StatCard
@@ -253,6 +297,44 @@ export default function Dashboard() {
           </div>
         </Card>
       </div>
+
+      <Card>
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-sm text-[var(--text-secondary)]">Platform Updates</p>
+            <h3 className="mt-1 text-xl font-semibold text-[var(--text-primary)]">Broadcast Notifications</h3>
+          </div>
+          <BellRing className="h-5 w-5 text-[var(--color-primary)]" />
+        </div>
+
+        <div className="mt-5 space-y-3">
+          {broadcasts.length === 0 ? (
+            <EmptyState
+              icon={BellRing}
+              title="No broadcast messages"
+              description="Platform-wide announcements from the developer console will appear here."
+            />
+          ) : (
+            broadcasts.map((broadcast) => (
+              <div
+                key={broadcast.id}
+                className="rounded-[var(--radius-card)] border border-[var(--border-color)] bg-[var(--bg-card-muted)] p-4"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-base font-semibold text-[var(--text-primary)]">{broadcast.title}</p>
+                    <p className="mt-2 text-sm text-[var(--text-secondary)]">{broadcast.message}</p>
+                  </div>
+                  <span className="shrink-0 rounded-full bg-[var(--color-primary-soft)] px-3 py-1 text-xs font-semibold text-[var(--color-primary)]">
+                    Broadcast
+                  </span>
+                </div>
+                <p className="mt-3 text-xs text-[var(--text-secondary)]">{formatDate(broadcast.createdAt)}</p>
+              </div>
+            ))
+          )}
+        </div>
+      </Card>
 
       <Modal
         title={latestEodSummary ? `End-of-Day Summary • ${latestEodSummary.date}` : 'End-of-Day Summary'}

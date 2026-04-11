@@ -9,6 +9,7 @@ import KOTLayout from './components/layout/KOTLayout';
 // Pages
 const HomeAccess = lazy(() => import('./pages/HomeAccess'));
 const Login = lazy(() => import('./pages/Login'));
+const PosLogin = lazy(() => import('./pages/pos/PosLogin'));
 const ResetPassword = lazy(() => import('./pages/ResetPassword'));
 const StaffPasswordResetOTP = lazy(() => import('./pages/StaffPasswordResetOTP'));
 const Register = lazy(() => import('./pages/Register'));
@@ -46,6 +47,7 @@ import { useManagerStore } from './context/managerStore';
 import { readPortalSession } from './utils/authStorage';
 import { canAccessPortal, resolvePortalHome } from './utils/portalRouting';
 import { AuthSessionRedirectListener } from './components/shared/AuthSessionRedirectListener';
+import ToastViewport from './components/common/ToastViewport';
 
 function RouteLoader() {
   return (
@@ -118,19 +120,17 @@ function App() {
         }}
       >
         <AuthSessionRedirectListener />
+        <ToastViewport />
         <Routes>
           {/* Public Routes */}
           <Route path="/" element={withSuspense(<HomeAccess />)} />
           <Route path="/login" element={<Navigate to="/" replace />} />
-          <Route path="/staff/login" element={<Navigate to="/pos/login" replace />} />
           <Route path="/admin/login" element={withSuspense(<Login portal="admin" />)} />
           <Route path="/admin/reset-password" element={withSuspense(<ResetPassword />)} />
           <Route path="/manager/login" element={withSuspense(<Login portal="admin" initialModeKey="manager" />)} />
           <Route path="/developer/login" element={withSuspense(<Login portal="admin" initialModeKey="developer" />)} />
-          <Route path="/pos/login" element={withSuspense(<Login portal="pos" />)} />
-          <Route path="/pos/reset-password" element={withSuspense(<StaffPasswordResetOTP />)} />
-          <Route path="/kitchen/login" element={<Navigate to="/pos/login" replace />} />
-          <Route path="/kot/login" element={<Navigate to="/pos/login" replace />} />
+          <Route path="/pos/login" element={withSuspense(<PosLogin />)} />
+          <Route path="/staff/login" element={withSuspense(<PosLogin />)} />
           <Route path="/register" element={withSuspense(<Register />)} />
           <Route path="/menu" element={withSuspense(<CustomerMenu />)} />
           <Route path="/order-status" element={withSuspense(<OrderStatus />)} />
@@ -195,7 +195,7 @@ function App() {
           <Route path="/menu-management" element={<Navigate to="/admin/menu" replace />} />
           <Route path="/orders" element={<Navigate to="/admin/orders" replace />} />
           <Route path="/analytics" element={<Navigate to="/admin/analytics" replace />} />
-          <Route path="/staff" element={<Navigate to="/admin/staff" replace />} />
+          <Route path="/staff" element={<Navigate to="/staff/login" replace />} />
           <Route path="/settings" element={<Navigate to="/admin/settings" replace />} />
           <Route path="/tables" element={<TablesEntryRedirect />} />
           <Route path="/kitchen" element={<Navigate to="/kot" replace />} />

@@ -6,6 +6,7 @@ import Toast from '../components/common/Toast';
 import { restaurantAPI } from '../services/apiEndpoints';
 import { useAuthStore } from '../context/authStore';
 import { getFormattedActivity } from '../utils/activityFormatter';
+import { getUserErrorMessage, reportClientError, showToast } from '../utils/errorHandling';
 
 export default function StaffActivity() {
   const currentUser = useAuthStore((state) => state.user);
@@ -47,8 +48,10 @@ export default function StaffActivity() {
       setStaff(staffList);
       setFilteredStaff(staffList);
     } catch (err) {
-      console.error('Staff list error:', err);
-      setError(err.response?.data?.message || 'Failed to load staff list');
+      reportClientError(err, 'Staff list error');
+      const message = getUserErrorMessage(err, 'Failed to load staff list');
+      setError(message);
+      showToast(message);
     } finally {
       setLoading(false);
     }
@@ -62,8 +65,10 @@ export default function StaffActivity() {
       const { logs = [] } = response.data?.data || {};
       setActivityLogs(logs);
     } catch (err) {
-      console.error('Activity logs error:', err);
-      setError(err.response?.data?.message || 'Failed to load activity logs');
+      reportClientError(err, 'Activity logs error');
+      const message = getUserErrorMessage(err, 'Failed to load activity logs');
+      setError(message);
+      showToast(message);
     } finally {
       setLoadingLogs(false);
     }

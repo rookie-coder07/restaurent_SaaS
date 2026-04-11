@@ -9,6 +9,7 @@ import { restaurantAPI } from '../services/apiEndpoints';
 import { useApi } from '../hooks/useApi';
 import { getRestaurantPrinterSettings } from '../utils/printerConfig';
 import { useAuthStore } from '../context/authStore';
+import { getUserErrorMessage, reportClientError, showToast } from '../utils/errorHandling';
 
 const themeIcons = {
   midnight: MoonStar,
@@ -132,8 +133,10 @@ export default function Settings() {
           setInvoiceError('');
         }
       } catch (error) {
-        console.error('Failed to fetch bill settings:', error);
-        setInvoiceError('Unable to load bill settings');
+        reportClientError(error, 'Failed to fetch bill settings');
+        const message = getUserErrorMessage(error, 'Unable to load bill settings');
+        setInvoiceError(message);
+        showToast(message);
       } finally {
         setInvoiceLoading(false);
       }
@@ -220,7 +223,8 @@ export default function Settings() {
       await restaurantAPI.updateProfile(profileForm);
       setSaveState((current) => ({ ...current, profile: 'saved' }));
     } catch (error) {
-      console.error('Failed to save profile settings', error);
+      reportClientError(error, 'Failed to save profile settings');
+      showToast(getUserErrorMessage(error, 'Unable to save changes.'));
       setSaveState((current) => ({ ...current, profile: 'error' }));
     }
   };
@@ -261,9 +265,10 @@ export default function Settings() {
       });
       setSaveState((current) => ({ ...current, settings: 'saved' }));
     } catch (error) {
-      console.error('Failed to save workspace settings', error);
-      const errorMsg = error?.response?.data?.message || error?.message || 'Failed to save printer settings';
+      reportClientError(error, 'Failed to save workspace settings');
+      const errorMsg = getUserErrorMessage(error, 'Failed to save printer settings');
       setSettingsError(errorMsg);
+      showToast(errorMsg);
       setSaveState((current) => ({ ...current, settings: 'error' }));
     }
   };
@@ -319,7 +324,9 @@ export default function Settings() {
       
       setSaveState((current) => ({ ...current, invoice: 'saved' }));
     } catch (error) {
-      setInvoiceError(error.response?.data?.message || 'Could not save invoice settings.');
+      const message = getUserErrorMessage(error, 'Could not save invoice settings.');
+      setInvoiceError(message);
+      showToast(message);
       setSaveState((current) => ({ ...current, invoice: 'error' }));
     }
   };

@@ -468,6 +468,9 @@ export default function ManagerBills() {
     try {
       const freshBill = await fetchFreshBill(payingBill);
       const receivedAmount = Number(amountReceived || payableAfterLoyalty || 0);
+      if (!Number.isFinite(receivedAmount) || receivedAmount < 0) {
+        throw new Error('Enter a valid settlement amount.');
+      }
 
       await orderAPI.settleOrder(payingBill.id, {
         paymentMethod,

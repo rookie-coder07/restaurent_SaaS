@@ -76,7 +76,7 @@ test('live UI smoke covers manager login, POS billing, invoice, print, and inven
   });
   const posPage = await posContext.newPage();
 
-  await posPage.goto('/pos/login');
+  // POS login removed
   await posPage.getByLabel(/Email/i).fill(POS_EMAIL);
   await posPage.getByLabel(/Password/i).fill(POS_PASSWORD);
   await posPage.getByRole('button', { name: /Open POS Portal/i }).click();

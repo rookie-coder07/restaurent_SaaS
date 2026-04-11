@@ -5,7 +5,7 @@ test.describe('POS Complete Flow Test', () => {
     test.setTimeout(120000);
 
     // LOGIN
-    await page.goto('http://localhost:5173/pos/login');
+    // POS login removed
     await page.waitForLoadState('networkidle');
     await page.fill('input[name="username"]', 'posbilling@gmail.com');
     await page.fill('input[name="password"]', 'password123');

@@ -43,7 +43,7 @@ export function getPortalKeyFromPathname(pathname = '') {
     return 'kot';
   }
 
-  if (pathname.startsWith('/pos')) {
+  if (pathname.startsWith('/pos') || pathname.startsWith('/staff')) {
     return 'pos';
   }
 
@@ -53,12 +53,12 @@ export function getPortalKeyFromPathname(pathname = '') {
 export function getDefaultPortalPath(role) {
   const normalizedRole = normalizePortalRole(role);
 
-  if (normalizedRole === 'staff') {
-    return PORTAL_HOME.pos;
-  }
-
   if (normalizedRole === 'kitchen_staff') {
     return PORTAL_HOME.kot;
+  }
+
+  if (normalizedRole === 'staff') {
+    return PORTAL_HOME.pos;
   }
 
   if (normalizedRole === 'manager') {
@@ -77,7 +77,15 @@ export function getDefaultPortalPath(role) {
 }
 
 export function getLoginPathForPathname(pathname = '') {
-  if (pathname.startsWith('/kot') || pathname.startsWith('/kitchen')) {
+  if (pathname.startsWith('/kitchen') || pathname.startsWith('/kot')) {
+    return PORTAL_LOGIN.kot;
+  }
+
+  if (pathname.startsWith('/pos')) {
+    return '/pos/login';
+  }
+
+  if (pathname.startsWith('/staff')) {
     return '/staff/login';
   }
 
@@ -87,10 +95,6 @@ export function getLoginPathForPathname(pathname = '') {
 
   if (pathname.startsWith('/developer')) {
     return '/developer/login';
-  }
-
-  if (pathname.startsWith('/pos')) {
-    return PORTAL_LOGIN.pos;
   }
 
   return PORTAL_LOGIN.admin;

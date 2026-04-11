@@ -100,6 +100,11 @@ export default function Notifications() {
     error: tablesError,
     refetch: refetchTables,
   } = useApi(() => tableAPI.getTables({}));
+  const {
+    data: broadcastsData = {},
+    error: broadcastsError,
+    refetch: refetchBroadcasts,
+  } = useApi(() => restaurantAPI.getBroadcasts({ limit: 20 }));
   const approvedDiscounts = useManagerStore((state) => state.approvedDiscounts);
   const tableClosures = useManagerStore((state) => state.tableClosures);
   const tableTransfers = useManagerStore((state) => state.tableTransfers);
@@ -115,7 +120,11 @@ export default function Notifications() {
   const lowStockItems = inventorySummary?.lowStockItems || [];
   const staff = staffData?.staff || [];
   const tables = tablesData?.tables || [];
+  const broadcasts = broadcastsData?.items || [];
   const loading = ordersLoading || inventoryLoading;
+  const notificationsFeatureDisabled =
+    typeof broadcastsError === 'string' &&
+    broadcastsError.toLowerCase().includes('disabled by the platform administrator');
 
   const notifications = useMemo(() => {
     const liveNotifications = buildSmartNotifications({ orders, lowStockItems, approvedDiscounts });
@@ -247,11 +256,25 @@ export default function Notifications() {
       });
     });
 
+    broadcasts.forEach((broadcast) => {
+      extraNotifications.push({
+        id: `broadcast-${broadcast.id}`,
+        title: broadcast.title || 'Platform broadcast',
+        detail: broadcast.message || '',
+        timestamp: broadcast.createdAt,
+        priority: 'warning',
+        category: 'notifications',
+        sourceRole: 'developer',
+        status: 'live',
+      });
+    });
+
     return [...liveNotifications, ...extraNotifications].sort(
       (left, right) => new Date(right.timestamp || 0) - new Date(left.timestamp || 0)
     );
   }, [
     approvedDiscounts,
+    broadcasts,
     lowStockItems,
     orders,
     staff,
@@ -293,12 +316,13 @@ export default function Notifications() {
     inventoryError ? `inventory: ${inventoryError}` : null,
     staffError ? `staff: ${staffError}` : null,
     tablesError ? `tables: ${tablesError}` : null,
+    broadcastsError ? `broadcasts: ${broadcastsError}` : null,
   ].filter(Boolean);
 
   const refreshNow = async () => {
     setRefreshing(true);
     try {
-      await Promise.allSettled([refetchOrders(), refetchInventory(), refetchStaff(), refetchTables()]);
+      await Promise.allSettled([refetchOrders(), refetchInventory(), refetchStaff(), refetchTables(), refetchBroadcasts()]);
     } finally {
       window.setTimeout(() => setRefreshing(false), 500);
     }
@@ -351,6 +375,18 @@ export default function Notifications() {
       { eventName: 'notification' }
     );
   }, [refetchOrders]);
+
+  if (notificationsFeatureDisabled) {
+    return (
+      <Card className="p-6">
+        <EmptyState
+          icon={BellRing}
+          title="Notifications are disabled"
+          description="This feature has been turned off from the developer console."
+        />
+      </Card>
+    );
+  }
 
   return (
     <div className="space-y-4 sm:space-y-6">

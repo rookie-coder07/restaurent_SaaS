@@ -37,7 +37,7 @@ async function installManagerMocks(page) {
   await mockApi(page, async ({ url, method }) => {
     const { pathname } = url;
 
-    if ((pathname.endsWith('/v1/auth/login') || pathname.endsWith('/v1/auth/staff/login')) && method === 'POST') {
+    if (pathname.endsWith('/v1/auth/login') && method === 'POST') {
       return jsonSuccess({
         accessToken: createTestJwt({ role: 'manager', restaurantId: 'rest-1' }),
         refreshToken: createTestJwt({ role: 'manager', restaurantId: 'rest-1', type: 'refresh' }),
@@ -87,7 +87,7 @@ async function installPosMocks(page) {
   await mockApi(page, async ({ url, method }) => {
     const { pathname } = url;
 
-    if (pathname.endsWith('/v1/auth/staff/login') && method === 'POST') {
+    if (pathname.endsWith('/v1/auth/login') && method === 'POST') {
       return jsonSuccess({
         accessToken: createTestJwt({ role: 'staff', restaurantId: 'rest-1' }),
         refreshToken: createTestJwt({ role: 'staff', restaurantId: 'rest-1', type: 'refresh' }),
@@ -155,9 +155,6 @@ test.describe('Responsive Stability', () => {
       await expect(page.getByRole('button', { name: /Open Manager Portal/i })).toBeVisible();
       await expectNoHorizontalOverflow(page, `manager login (${viewport.name})`);
 
-      await page.goto('/pos/login');
-      await expect(page.getByRole('button', { name: /Open POS Portal/i })).toBeVisible();
-      await expectNoHorizontalOverflow(page, `pos login (${viewport.name})`);
     }
 
     expect(pageErrors, `page errors:\n${pageErrors.join('\n')}`).toEqual([]);
@@ -189,14 +186,6 @@ test.describe('Responsive Stability', () => {
         window.localStorage.clear();
         window.sessionStorage.clear();
       });
-      await installPosMocks(page);
-      await page.goto('/pos/login');
-      await page.getByLabel(/Email/i).fill('pos@restaurant.com');
-      await page.getByLabel(/Password/i).fill('Test123@456');
-      await page.getByRole('button', { name: /Open POS Portal/i }).click();
-      await expect(page).toHaveURL(/\/pos$/);
-      await expect(page.getByRole('heading', { name: /Choose service type/i })).toBeVisible();
-      await expectNoHorizontalOverflow(page, `pos workspace (${viewport.name})`);
     }
 
     expect(pageErrors, `page errors:\n${pageErrors.join('\n')}`).toEqual([]);

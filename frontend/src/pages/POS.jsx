@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, Loader, Receipt, Store, TableProperties } from 'lucide-react';
 import { authAPI, orderAPI, restaurantAPI } from '../services/apiEndpoints';
 import { getCurrentPortalAccessToken } from '../services/api';
+import logger from '../utils/logger';
 import MenuPanel from '../components/pos/MenuPanel';
 import CartPanel from '../components/pos/CartPanel';
 import OrderControls from '../components/pos/OrderControls';
@@ -1245,9 +1246,32 @@ export default function POS() {
             : `${formatDisplayOrderNumber(savedOrder)} saved successfully. Continue editing or send it to kitchen when ready.`
       );
     } catch (error) {
-      setSubmitError(
-        error.response?.data?.message || `Failed to ${isEditingActiveBill ? 'update' : 'create'} order.`
-      );
+      const backendMessage = error.response?.data?.message;
+      const statusCode = error.response?.status;
+      
+      // Log full error for debugging
+      console.error('Order creation error:', {
+        status: statusCode,
+        message: backendMessage,
+        details: error.response?.data?.details,
+        stack: error.stack,
+      });
+      
+      // Provide specific error messages
+      let errorMessage = `Failed to ${isEditingActiveBill ? 'update' : 'create'} order.`;
+      if (backendMessage) {
+        errorMessage = backendMessage;
+      } else if (statusCode === 400) {
+        errorMessage = 'Invalid order data. Please check items and quantities.';
+      } else if (statusCode === 403) {
+        errorMessage = 'You don\'t have permission to create this order.';
+      } else if (statusCode === 409) {
+        errorMessage = 'Table conflict or order already exists. Please refresh and try again.';
+      } else if (statusCode === 500) {
+        errorMessage = 'Server error creating order. Check console for details.';
+      }
+      
+      setSubmitError(errorMessage);
     } finally {
       setIsSubmitting(false);
     }

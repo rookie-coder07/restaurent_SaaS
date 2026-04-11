@@ -9,6 +9,7 @@ export const tenantIsolation = (req, res, next) => {
     }
 
     if (normalizeRole(req.user.role) === 'developer') {
+      // Developers can operate across restaurants; keep optional restaurantId if provided, but do not enforce.
       req.restaurantId =
         req.headers['x-restaurant-id'] ||
         req.body?.restaurantId ||

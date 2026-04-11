@@ -1,44 +1,47 @@
-import supabase from '../config/supabase.js';
+import supabaseImport, { supabaseAdmin } from '../config/supabase.js';
 import logger from '../utils/logger.js';
 
-// Create a separate client with service role for activity logging (bypasses RLS)
-import { createClient } from '@supabase/supabase-js';
-const supabaseServiceClient = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_KEY
-);
+// Dependency injection setup
+let injectedSupabase = null;
+const getSupabase = () => injectedSupabase || supabaseImport;
+
+// Use admin client; in tests config returns a mock
+const supabaseServiceClient = supabaseAdmin;
 
 export class ActivityService {
+  static setSupabase(supabaseInstance) {
+    injectedSupabase = supabaseInstance;
+  }
+
   static async logActivity(restaurantId, userId, role, action, details = null) {
     try {
       if (!restaurantId || !userId) {
         logger.warn(`Missing params for activity log: restaurantId=${restaurantId}, userId=${userId}, action=${action}`);
         return;
       }
-      
+
       const { error } = await supabaseServiceClient
         .from('activity_logs')
         .insert([{
           restaurant_id: restaurantId,
           user_id: userId,
-          role: role,
+          role: role || '',
           action: action,
-          details: details,
+          details: details || {},
+          created_at: new Date().toISOString(),
         }]);
 
       if (error) {
         logger.error(`Activity insert failed - Action: ${action}, User: ${userId}, Error:`, error);
-        return;
       }
-      logger.info(`✅ Activity logged: ${action} by ${userId} in restaurant ${restaurantId}`);
     } catch (error) {
-      logger.error(`🔴 Exception logging activity [${action}]:`, error.message, error);
+      logger.error(`Exception logging activity [${action}]:`, error.message, error);
     }
   }
 
   static async getStaffList(restaurantId, currentUserRole) {
     try {
-      let query = supabase
+      let query = getSupabase()
         .from('users')
         .select('id, name, email, role, created_at, updated_at')
         .eq('restaurant_id', restaurantId);
@@ -78,7 +81,7 @@ export class ActivityService {
   static async getUserStats(restaurantId, userId) {
     try {
       // Get total orders where action = 'order_created'
-      const { count: totalOrders, error: countError } = await supabase
+      const { count: totalOrders, error: countError } = await getSupabase()
         .from('activity_logs')
         .select('id', { count: 'exact', head: true })
         .eq('restaurant_id', restaurantId)
@@ -90,7 +93,7 @@ export class ActivityService {
       }
 
       // Get last active time
-      const { data: lastLog, error: timeError } = await supabase
+      const { data: lastLog, error: timeError } = await getSupabase()
         .from('activity_logs')
         .select('created_at')
         .eq('restaurant_id', restaurantId)
@@ -117,7 +120,7 @@ export class ActivityService {
     try {
       logger.info(`Fetching activity logs: restaurant=${restaurantId}, user=${userId}`);
       
-      const { data: logs, error } = await supabase
+      const { data: logs, error } = await getSupabase()
         .from('activity_logs')
         .select('id, action, details, created_at, role')
         .eq('restaurant_id', restaurantId)
@@ -125,40 +128,14 @@ export class ActivityService {
         .order('created_at', { ascending: false })
         .limit(limit);
 
-      if (error) {
-        logger.error(`❌ Activity fetch failed: ${error.message}`, { restaurantId, userId, error });
-        return { logs: [] };
-      }
-
-      logger.info(`✅ Retrieved ${logs?.length || 0} activity logs for user ${userId}`);
-      return { logs: logs || [] };
-    } catch (error) {
-      logger.error(`🔴 Exception fetching activity logs: ${error.message}`, { restaurantId, userId });
-      return { logs: [] };
-    }
-  }
-
-  static async getUserInfo(restaurantId, userId) {
-    try {
-      const { data: user, error } = await supabase
-        .from('users')
-        .select('id, name, email, role, created_at')
-        .eq('restaurant_id', restaurantId)
-        .eq('id', userId)
-        .single();
-
       if (error) throw error;
 
-      const stats = await this.getUserStats(restaurantId, userId);
-
-      return {
-        ...user,
-        totalOrders: stats.totalOrders,
-        lastActive: stats.lastActive,
-      };
+      return logs || [];
     } catch (error) {
-      logger.error('Get user info error:', error);
+      logger.error('Get activity logs error:', error);
       throw error;
     }
   }
 }
+
+export default ActivityService;

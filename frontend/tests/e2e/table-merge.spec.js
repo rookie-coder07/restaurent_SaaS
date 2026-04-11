@@ -33,7 +33,7 @@ test.describe('Table Merge Flow', () => {
     await mockApi(page, async ({ url, method, body }) => {
       const { pathname } = url;
 
-      if ((pathname.endsWith('/v1/auth/login') || pathname.endsWith('/v1/auth/staff/login')) && method === 'POST') {
+      if (pathname.endsWith('/v1/auth/login') && method === 'POST') {
         if (String(body?.email || '').includes('manager')) {
           return jsonSuccess({
             accessToken: createTestJwt({ role: 'manager', restaurantId: 'rest-1' }),
@@ -138,7 +138,7 @@ test.describe('Table Merge Flow', () => {
     await expect(page.getByRole('button', { name: /Table 6 open 0 active orders/i })).toHaveCount(0);
     await expect(page.getByRole('button', { name: /Table 7 open 0 active orders/i })).toHaveCount(0);
 
-    await page.goto('/pos/login');
+    await page.goto('/admin/login');
     await page.getByLabel(/Email/i).fill('pos@restaurant.com');
     await page.getByLabel(/Password/i).fill('Test123@456');
     await page.getByRole('button', { name: /Open POS Portal/i }).click();

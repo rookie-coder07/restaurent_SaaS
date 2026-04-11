@@ -6,7 +6,7 @@ test('Complete POS Workflow - End to End', async ({ page, context }) => {
   
   // ===== STEP 1: Login =====
   console.log('🔐 STEP 1: Login as waiter');
-  await freshPage.goto('http://localhost:5173/staff/login', { waitUntil: 'domcontentloaded' });
+  // POS login removed
   await freshPage.waitForTimeout(1500);
   
   const emailInput = freshPage.locator('input[name="username"]').first();

@@ -13,7 +13,7 @@ export const options = {
 };
 
 const BASE_URL = (__ENV.BASE_URL || 'http://localhost:3000/api').replace(/\/+$/, '');
-const AUTH_URL = `${BASE_URL}/v1/auth/staff/login`;
+const AUTH_URL = `${BASE_URL}/v1/auth/login`;
 const ORDERS_URL = `${BASE_URL}/v1/orders`;
 const MENU_URL = `${BASE_URL}/v1/menu/items`;
 const TABLES_URL = `${BASE_URL}/v1/tables`;

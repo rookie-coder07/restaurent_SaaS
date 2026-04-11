@@ -2,6 +2,7 @@ import 'dotenv/config';
 import logger from './src/utils/logger.js';
 import { validateEnvironment, getConfig } from './src/config/environment.js';
 import { connectSupabase } from './src/config/supabase.js';
+import { monitoringService } from './src/services/monitoringService.js';
 import app from './src/app.js';
 
 const startServer = async () => {
@@ -55,7 +56,9 @@ const startServer = async () => {
       logger.info('');
       logger.info('📌 Key Endpoints:');
       logger.info(`   - GET    http://localhost:${PORT}/health (Health Check)`);
-      logger.info(`   - GET    http://localhost:${PORT}/api/health (API Health Check)`);
+      logger.info(`   - GET    http://localhost:${PORT}/api/v1/health/health (API Health Check)`);
+      logger.info(`   - GET    http://localhost:${PORT}/api/v1/health/metrics (Metrics)`);
+      logger.info(`   - GET    http://localhost:${PORT}/api/v1/health/alerts (Alerts)`);
       logger.info(`   - POST   http://localhost:${PORT}/api/v1/auth/register (Register)`);
       logger.info(`   - POST   http://localhost:${PORT}/api/v1/auth/login (Login)`);
       logger.info(`   - GET    http://localhost:${PORT}/api/v1/menu (Get Menu)`);
@@ -64,6 +67,13 @@ const startServer = async () => {
       logger.info('');
       logger.info(`☁️  Cloudinary: ✅ Configured`);
       logger.info(`🔐 Authentication: ✅ JWT + Cookies`);
+      logger.info(`📊 Monitoring: ✅ Active`);
+      logger.info('');
+
+      // Start monitoring service
+      monitoringService.start();
+      logger.info('✅ Monitoring service enabled');
+
       logger.info('');
       logger.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
       logger.info('🎯 Ready to handle requests!');
@@ -77,6 +87,10 @@ const startServer = async () => {
       logger.warn(`⏹️  ${signal} signal received`);
       logger.warn('🛑 BACKEND SHUTDOWN IN PROGRESS');
       logger.warn('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+
+      // Stop monitoring service
+      monitoringService.stop();
+      logger.info('✅ Monitoring service stopped');
 
       server.close(() => {
         logger.info('✅ HTTP server closed gracefully');

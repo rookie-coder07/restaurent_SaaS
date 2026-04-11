@@ -3,12 +3,26 @@ import { authAPI } from '../services/apiEndpoints.js';
 import { useNavigate } from 'react-router-dom';
 import { canAccessPortal, normalizePortalRole, PORTAL_LOGIN, resolvePortalHome } from '../utils/portalRouting.js';
 import { clearAllPortalSessions, clearPortalSession, savePortalSession } from '../utils/authStorage.js';
+import { reportClientError, showToast } from '../utils/errorHandling.js';
 
 const AUTH_RETRYABLE_ERROR_CODES = new Set(['ECONNABORTED', 'ERR_NETWORK']);
 
 const delay = (ms) => new Promise((resolve) => {
   setTimeout(resolve, ms);
 });
+
+const persistPrimarySession = (token, restaurantId = null) => {
+  if (!token) {
+    return;
+  }
+
+  localStorage.setItem('token', token);
+  localStorage.setItem('accessToken', token);
+
+  if (restaurantId) {
+    localStorage.setItem('restaurantId', String(restaurantId));
+  }
+};
 
 export const useAuth = () => {
   const navigate = useNavigate();
@@ -48,14 +62,10 @@ export const useAuth = () => {
       authStore.setLoading(true);
       authStore.setError(null);
 
-      const loginRequest = () => (
-        isStaff ? authAPI.staffLogin(email, password) : authAPI.login(email, password)
-      );
-
+      // Use unified login endpoint for all users
       let response;
-
       try {
-        response = await loginRequest();
+        response = await authAPI.login(email, password, portal);
       } catch (error) {
         const shouldRetry = !error.response && AUTH_RETRYABLE_ERROR_CODES.has(error.code);
 
@@ -65,34 +75,68 @@ export const useAuth = () => {
 
         authStore.setError('Backend is waking up. Retrying login...');
         await delay(2000);
-        response = await loginRequest();
+        response = await authAPI.login(email, password, portal);
       }
 
       const { accessToken, refreshToken, restaurant, user } = response.data.data;
+      
+      // Determine portal based on response role and redirectTo hint
+      const responseUser = user || restaurant;
+      const redirectTo = responseUser?.redirectTo;
+      const userRole = responseUser?.role || '';
+      
+      // Auto-detect portal from response, but respect current portal context
+      // Start with the portal the user is on; only override if backend explicitly says POS
+      let targetPortal = portal || 'admin';
+      if (redirectTo === 'pos') {
+        targetPortal = 'pos';
+      } else if (portal === 'pos' && normalizePortalRole(userRole) === 'staff') {
+        targetPortal = 'pos';
+      }
+
+      // Prevent silent success when the role is routed to a different portal than the current page
+      if (targetPortal !== portal) {
+        authStore.setError(
+          `This account belongs to the ${targetPortal.toUpperCase()} portal. Please sign in at the correct portal.`
+        );
+        return false;
+      }
+      
       const session = {
         accessToken,
         refreshToken,
-        user: normalizeUser(restaurant, user, isStaff),
+        user: normalizeUser(restaurant, user, targetPortal === 'pos'),
       };
 
-      if (!canAccessPortal(session.user?.role, portal)) {
-        clearPortalSession(portal);
-        authStore.logout(portal);
-        authStore.setError(`This account does not have access to the ${portal.toUpperCase()} portal.`);
+      if (!canAccessPortal(session.user?.role, targetPortal)) {
+        clearPortalSession(targetPortal);
+        authStore.logout(targetPortal);
+        authStore.setError(`This account does not have access to the ${targetPortal.toUpperCase()} portal.`);
         return false;
       }
 
-      savePortalSession(portal, session);
-      authStore.setPortalSession(portal, session);
+      savePortalSession(targetPortal, session);
+      persistPrimarySession(session.accessToken, session.user?.restaurantId);
+      authStore.setPortalSession(targetPortal, session);
       authStore.setError(null);
 
       return true;
     } catch (error) {
-      const errorMessage =
-        error.response?.data?.message ||
-        (!error.response && AUTH_RETRYABLE_ERROR_CODES.has(error.code)
-          ? 'Backend is taking too long to respond. Please try again in a few seconds.'
-          : 'Login failed');
+      const serverMessage = error.response?.data?.message || error.response?.data?.error;
+
+      let errorMessage = 'Login failed';
+      if (!error.response && AUTH_RETRYABLE_ERROR_CODES.has(error.code)) {
+        errorMessage = 'Backend is taking too long to respond. Please try again in a few seconds.';
+      } else if (error.response?.status === 401) {
+        errorMessage = serverMessage || 'Invalid email or password';
+      } else if (error.response?.status === 403) {
+        errorMessage =
+          serverMessage ||
+          'This account does not have access to this portal. Use the correct portal for your role (e.g., POS for staff).';
+      } else if (serverMessage) {
+        errorMessage = serverMessage;
+      }
+
       authStore.setError(errorMessage);
       return false;
     } finally {
@@ -114,6 +158,7 @@ export const useAuth = () => {
       };
 
       savePortalSession('admin', session);
+      persistPrimarySession(session.accessToken, session.user?.restaurantId);
       authStore.setPortalSession('admin', session);
       authStore.setError(null);
 
@@ -131,7 +176,8 @@ export const useAuth = () => {
     try {
       await authAPI.logout();
     } catch (error) {
-      console.error('Logout error:', error);
+      reportClientError(error, 'Logout error');
+      showToast('We could not complete logout cleanly, but your session is being cleared.', 'warning');
     } finally {
       if (allPortals) {
         clearAllPortalSessions();

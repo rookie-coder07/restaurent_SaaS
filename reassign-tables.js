@@ -50,7 +50,7 @@ function apiCall(method, path, body = null, token = null, restaurantId = null) {
 async function main() {
   try {
     console.log('🔐 Login as Manager...');
-    const loginRes = await apiCall('POST', '/auth/staff/login', {
+    const loginRes = await apiCall('POST', '/auth/login', {
       email: managerEmail,
       password: managerPassword,
     });

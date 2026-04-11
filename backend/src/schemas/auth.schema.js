@@ -14,6 +14,7 @@ export const registerSchema = Joi.object({
 export const loginSchema = Joi.object({
   email: Joi.string().email().lowercase().required(),
   password: Joi.string().required(),
+  portal: Joi.string().valid('admin', 'pos', 'kot', 'manager', 'developer').optional(),
 });
 
 export const refreshTokenSchema = Joi.object({

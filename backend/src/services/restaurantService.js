@@ -1,5 +1,5 @@
 import logger from '../utils/logger.js';
-import supabase from '../config/supabase.js';
+import supabase, { supabaseAdmin } from '../config/supabase.js';
 import AuthService from './authService.js';
 import InvoiceService from './invoiceService.js';
 import { validateRestaurantGSTContext, validateInvoiceCounterRestaurant } from '../middleware/multiTenantValidation.js';
@@ -95,6 +95,28 @@ export class RestaurantService {
       createdAt: user.created_at,
       updatedAt: user.updated_at,
     };
+  }
+
+  static async getBroadcastNotifications(restaurantId, { limit = 20 } = {}) {
+    const { data, error } = await supabase
+      .from('broadcast_notifications')
+      .select('id, restaurant_id, title, message, audience, created_at')
+      .or(`restaurant_id.is.null,restaurant_id.eq.${restaurantId}`)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    if (error && error.code !== 'PGRST116') {
+      throw error;
+    }
+
+    return (data || []).map((row) => ({
+      id: row.id,
+      restaurantId: row.restaurant_id,
+      title: row.title,
+      message: row.message,
+      audience: row.audience,
+      createdAt: row.created_at,
+    }));
   }
 
   static sanitizeStaffAssignmentRows(staffUsers = []) {
@@ -556,11 +578,24 @@ export class RestaurantService {
 
   static async createStaffUser(restaurantId, staffData) {
     try {
+      const normalizedEmail = staffData.email.toLowerCase();
+
+      // Cross-role uniqueness: block emails that belong to owners
+      const { data: ownerByEmail, error: ownerLookupError } = await supabase
+        .from('restaurants')
+        .select('id')
+        .eq('email', normalizedEmail)
+        .maybeSingle();
+      if (ownerLookupError) throw ownerLookupError;
+      if (ownerByEmail) {
+        throw new Error('Email already registered to a restaurant owner');
+      }
+
       const { data: existingUser, error: existingError } = await supabase
         .from('users')
         .select('id')
         .eq('restaurant_id', restaurantId)
-        .eq('email', staffData.email.toLowerCase())
+        .eq('email', normalizedEmail)
         .maybeSingle();
 
       if (existingError) throw existingError;
@@ -568,21 +603,36 @@ export class RestaurantService {
         throw new Error('Staff email already exists for this restaurant');
       }
 
-      const passwordHash = await AuthService.hashPassword(staffData.password);
       const assignedTableValidation = staffData.role === 'staff'
         ? await this.validateAssignedTables(restaurantId, staffData.assignedTables, {
             allowTableReassign: Boolean(staffData.allowTableReassign),
           })
         : { assignedTables: [], conflictingAssignments: [] };
       const assignedTables = assignedTableValidation.assignedTables;
+
+      // Create user in Supabase Auth (password managed by Supabase)
+      const { data: authUser, error: authError } = await supabase.auth.admin.createUser({
+        email: normalizedEmail,
+        password: staffData.password,
+        email_confirm: true,
+        user_metadata: {
+          name: staffData.name,
+          role: staffData.role,
+        },
+      });
+
+      if (authError) throw authError;
+      if (!authUser.user?.id) throw new Error('Failed to create auth user');
+
+      // Insert user record in database (NO password stored)
       const staffPayload = {
+        id: authUser.user.id,
         restaurant_id: restaurantId,
         name: staffData.name,
-        email: staffData.email.toLowerCase(),
+        email: normalizedEmail,
         phone: staffData.phone,
         role: staffData.role,
         assigned_tables: assignedTables,
-        password_hash: passwordHash,
         status: 'active',
       };
 
@@ -790,9 +840,20 @@ export class RestaurantService {
       if (updateData.phone !== undefined) payload.phone = updateData.phone;
       if (updateData.role !== undefined) payload.role = updateData.role;
       
+      let emailWasUpdatedInAuth = false;
       if (updateData.email !== undefined) {
         const normalizedEmail = updateData.email.toLowerCase();
         if (normalizedEmail !== String(existingUser.email || '').toLowerCase()) {
+          const { data: ownerByEmail, error: ownerLookupError } = await supabase
+            .from('restaurants')
+            .select('id')
+            .eq('email', normalizedEmail)
+            .maybeSingle();
+          if (ownerLookupError) throw ownerLookupError;
+          if (ownerByEmail) {
+            throw new Error('Email already registered to a restaurant owner');
+          }
+
           const { data: duplicateUser, error: duplicateError } = await supabase
             .from('users')
             .select('id')
@@ -802,12 +863,26 @@ export class RestaurantService {
             .maybeSingle();
           if (duplicateError) throw duplicateError;
           if (duplicateUser) throw new Error('Staff email already exists for this restaurant');
+
+          // Keep Supabase Auth in sync so login uses the new email
+          const { error: authEmailError } = await supabaseAdmin.auth.admin.updateUserById(
+            staffId,
+            { email: normalizedEmail, email_confirm: true }
+          );
+          if (authEmailError) throw authEmailError;
+
+          emailWasUpdatedInAuth = true;
         }
         payload.email = normalizedEmail;
       }
 
       if (updateData.password) {
-        payload.password_hash = await AuthService.hashPassword(updateData.password);
+        // Update password via Supabase Auth (not in database)
+        const { error: authError } = await supabaseAdmin.auth.admin.updateUserById(
+          staffId,
+          { password: updateData.password }
+        );
+        if (authError) throw authError;
       }
 
       if (updateData.assignedTables !== undefined || nextRole !== 'staff') {
@@ -1027,6 +1102,13 @@ export class RestaurantService {
         .single();
 
       if (error || !user) {
+        if (emailWasUpdatedInAuth) {
+          await supabaseAdmin.auth.admin.updateUserById(staffId, {
+            email: existingUser.email,
+            email_confirm: true,
+          });
+        }
+
         if (error?.code === 'PGRST204' && String(error.message || '').includes("'assigned_tables'")) {
           throw new Error("Database schema is missing users.assigned_tables. Run the migration 2026-04-05-add-user-assigned-tables.sql.");
         }
@@ -1044,7 +1126,7 @@ export class RestaurantService {
     try {
       const { data: existingUser, error: existingError } = await supabase
         .from('users')
-        .select('*')
+        .select('id, email')
         .eq('restaurant_id', restaurantId)
         .eq('id', staffId)
         .single();
@@ -1053,12 +1135,18 @@ export class RestaurantService {
         throw existingError || new Error('Staff user not found');
       }
 
-      const passwordHash = await AuthService.hashPassword(newPassword);
-      
+      // Update password via Supabase Auth (not in database)
+      const { error: authError } = await supabaseAdmin.auth.admin.updateUserById(
+        staffId,
+        { password: newPassword }
+      );
+
+      if (authError) throw authError;
+
+      // Update user record with timestamp only
       const { data: user, error } = await supabase
         .from('users')
         .update({
-          password_hash: passwordHash,
           updated_at: new Date().toISOString(),
         })
         .eq('restaurant_id', restaurantId)

@@ -42,18 +42,18 @@ export const verifyAccessToken = (token) => {
 
 function handleAuthError(res, error) {
   if (error.name === 'TokenExpiredError') {
-    return sendError(res, 401, 'Token has expired', { error: error.message });
+    return sendError(res, 401, 'Unauthorized access');
   }
 
   if (error.name === 'JsonWebTokenError') {
-    return sendError(res, 401, 'Invalid token', { error: error.message });
+    return sendError(res, 401, 'Unauthorized access');
   }
 
   if (error instanceof AppError) {
-    return sendError(res, error.statusCode, error.message);
+    return sendError(res, error.statusCode, error.statusCode === 401 ? 'Unauthorized access' : error.message);
   }
 
-  return sendError(res, 500, 'Authentication error');
+  return sendError(res, 401, 'Unauthorized access');
 }
 
 export const authMiddleware = (req, res, next) => {
@@ -70,11 +70,17 @@ export const streamAuthMiddleware = (req, res, next) => {
   try {
     const token = extractAuthToken(req, { allowQuery: true });
     if (!token) {
+      logger.warn('Event stream access denied - no token provided', { 
+        path: req.path,
+        query: req.query,
+      });
       throw new AppError('UNAUTHORIZED', 'No token provided');
     }
     req.user = verifyAccessToken(token);
+    logger.info('Event stream access granted', { userId: req.user.userId });
     next();
   } catch (error) {
+    logger.error('Event stream auth failed', { error: error.message, path: req.path });
     return handleAuthError(res, error);
   }
 };

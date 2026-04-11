@@ -7,7 +7,7 @@ test.describe('POS Complete Workflow', () => {
     // ============================================
     // STEP 1: Login to POS
     // ============================================
-    await page.goto('http://localhost:5173/pos/login');
+    // POS login removed
     await page.waitForLoadState('networkidle');
 
     // Fill email (name="username")

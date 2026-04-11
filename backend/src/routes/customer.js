@@ -7,6 +7,8 @@ import TableService from '../services/tableService.js';
 import OrderService from '../services/orderService.js';
 import * as orderController from '../controllers/orderController.js';
 import supabase from '../config/supabase.js';
+import SecurityAuditLogger from '../utils/securityAudit.js';
+import { requireFeatureFlag } from '../middleware/featureFlags.js';
 
 const router = express.Router();
 
@@ -24,8 +26,22 @@ async function getBusyTableOrder(restaurantId, tableId) {
   }
 
   try {
-    return await OrderService.getActiveOrderByTable(restaurantId, tableId);
-  } catch {
+    const activeOrder = await OrderService.getActiveOrderByTable(restaurantId, tableId);
+    console.log('✅ Busy table check:', { 
+      restaurantId, 
+      tableId, 
+      hasActiveOrder: !!activeOrder,
+      orderId: activeOrder?.id,
+    });
+    return activeOrder;
+  } catch (error) {
+    console.error('⚠️ Error checking busy table:', {
+      restaurantId,
+      tableId,
+      error: error.message,
+      code: error.code,
+    });
+    // Return null to allow order attempt (fail gracefully)
     return null;
   }
 }
@@ -33,13 +49,11 @@ async function getBusyTableOrder(restaurantId, tableId) {
 // Get public menu items (no auth required)
 // This endpoint is called by customers who scanned a QR code
 // Pass ?table=X to get the menu for that table's restaurant
-router.get('/menu/items', async (req, res) => {
+router.get('/menu/items', requireFeatureFlag('qr_ordering', 'QR ordering is currently disabled by the platform administrator.'), async (req, res) => {
   try {
     const { table, tableId } = req.query;
-    console.log(`📋 Customer menu request - Table: ${table}, Table ID: ${tableId}`);
 
     if (!table && !tableId) {
-      console.warn('⚠️  Missing table identifier');
       return res.status(400).json({
         statusCode: 400,
         success: false,
@@ -52,10 +66,8 @@ router.get('/menu/items', async (req, res) => {
       .select('id, restaurant_id, table_number');
 
     if (tableId) {
-      console.log(`🔍 Looking up table by id ${tableId}...`);
       query = query.eq('id', tableId);
     } else {
-      console.log(`🔍 Looking up table by number ${table}...`);
       query = query.eq('table_number', normalizeTableLabel(table));
     }
 
@@ -73,7 +85,6 @@ router.get('/menu/items', async (req, res) => {
     }
 
     const restaurantId = tableData.restaurant_id;
-    console.log(`✅ Found restaurant: ${restaurantId} for table ${tableData.table_number}`);
 
     const activeOrder = await getBusyTableOrder(restaurantId, tableData.id);
     if (activeOrder) {
@@ -90,7 +101,6 @@ router.get('/menu/items', async (req, res) => {
       });
     }
 
-    console.log(`📦 Fetching categories and menu items for restaurant ${restaurantId}...`);
     const [{ data: restaurantData }, categories, items] = await Promise.all([
       supabase
         .from('restaurants')
@@ -110,7 +120,6 @@ router.get('/menu/items', async (req, res) => {
       items,
     };
 
-    console.log(`✅ Retrieved ${(categories || []).length} categories and ${(items || []).length} menu items`);
     res.status(200).json({
       statusCode: 200,
       success: true,
@@ -128,7 +137,7 @@ router.get('/menu/items', async (req, res) => {
 });
 
 // Get menu for customer via QR code (no auth required)
-router.get('/menu/:qrCodeData/items', validateParams(tableSchema), async (req, res) => {
+router.get('/menu/:qrCodeData/items', requireFeatureFlag('qr_ordering', 'QR ordering is currently disabled by the platform administrator.'), validateParams(tableSchema), async (req, res) => {
   try {
     const { qrCodeData } = req.params;
 
@@ -160,8 +169,39 @@ router.get('/menu/:qrCodeData/items', validateParams(tableSchema), async (req, r
 
 // Create order as customer (no auth required, but table must be valid)
 // This handles table resolution from tableNumber to tableId
-router.post('/orders', optionalAuth, async (req, res, next) => {
+router.post('/orders', optionalAuth, requireFeatureFlag('qr_ordering', 'QR ordering is currently disabled by the platform administrator.'), async (req, res, next) => {
   try {
+    // ✅ Validate input data
+    if (!req.body.tableId && !req.body.tableNumber) {
+      SecurityAuditLogger.logFailedValidation(
+        req.user?.id || 'unknown',
+        'table_identifier',
+        'order_creation',
+        'Missing table ID or table number',
+        req.ip
+      );
+      return res.status(400).json({
+        statusCode: 400,
+        success: false,
+        message: 'Table ID or table number is required'
+      });
+    }
+
+    if (req.body.items && (!Array.isArray(req.body.items) || req.body.items.length === 0)) {
+      SecurityAuditLogger.logFailedValidation(
+        req.user?.id || 'unknown',
+        'items',
+        'order_creation',
+        'Invalid or empty items array',
+        req.ip
+      );
+      return res.status(400).json({
+        statusCode: 400,
+        success: false,
+        message: 'Order must contain at least one item'
+      });
+    }
+
     req.orderOrigin = 'qr';
 
     if (req.body.tableId) {
@@ -172,28 +212,43 @@ router.post('/orders', optionalAuth, async (req, res, next) => {
         .single();
 
       if (tableError || !table) {
+        SecurityAuditLogger.logUnauthorizedAccess(
+          req.user?.id || 'unknown',
+          '/customer/orders',
+          'POST',
+          req.ip
+        );
         return res.status(404).json({
           statusCode: 404,
           success: false,
-          message: 'Table not found',
+          message: 'Table not found'
         });
       }
 
       req.restaurantId = table.restaurant_id;
       console.log(`✅ Using table ID ${req.body.tableId} for restaurant ${table.restaurant_id}`);
 
-      const activeOrder = await getBusyTableOrder(table.restaurant_id, table.id);
-      if (activeOrder) {
-        return res.status(409).json({
-          statusCode: 409,
-          success: false,
-          message: 'This table already has a running bill. New QR orders are blocked until that bill is cleared.',
-          data: {
-            tableId: table.id,
-            orderId: activeOrder.id,
-            orderStatus: activeOrder.status,
-          },
+      try {
+        const activeOrder = await getBusyTableOrder(table.restaurant_id, table.id);
+        if (activeOrder) {
+          return res.status(409).json({
+            statusCode: 409,
+            success: false,
+            message: 'This table already has a running bill. New QR orders are blocked until that bill is cleared.',
+            data: {
+              tableId: table.id,
+              orderId: activeOrder.id,
+              orderStatus: activeOrder.status,
+            },
+          });
+        }
+      } catch (busyTableError) {
+        console.error('⚠️ Error checking busy table status:', {
+          error: busyTableError.message,
+          tableId: req.body.tableId,
         });
+        // Don't block order creation if busy table check fails
+        // Log but continue to order creation
       }
     }
 
@@ -206,6 +261,13 @@ router.post('/orders', optionalAuth, async (req, res, next) => {
         .single();
 
       if (tableError || !table) {
+        SecurityAuditLogger.logFailedValidation(
+          req.user?.id || 'unknown',
+          'table_number',
+          'order_creation',
+          `Table ${req.body.tableNumber} not found`,
+          req.ip
+        );
         return res.status(404).json({
           statusCode: 404,
           success: false,
@@ -218,35 +280,68 @@ router.post('/orders', optionalAuth, async (req, res, next) => {
       req.restaurantId = table.restaurant_id;
       console.log(`✅ Resolved Table #${req.body.tableNumber} → ID: ${table.id}`);
 
-      const activeOrder = await getBusyTableOrder(table.restaurant_id, table.id);
-      if (activeOrder) {
-        return res.status(409).json({
-          statusCode: 409,
-          success: false,
-          message: `Table ${req.body.tableNumber} already has a running bill. New QR orders are blocked until that bill is cleared.`,
-          data: {
-            tableId: table.id,
-            tableNumber: req.body.tableNumber,
-            orderId: activeOrder.id,
-            orderStatus: activeOrder.status,
-          },
+      try {
+        const activeOrder = await getBusyTableOrder(table.restaurant_id, table.id);
+        if (activeOrder) {
+          return res.status(409).json({
+            statusCode: 409,
+            success: false,
+            message: `Table ${req.body.tableNumber} already has a running bill. New QR orders are blocked until that bill is cleared.`,
+            data: {
+              tableId: table.id,
+              tableNumber: req.body.tableNumber,
+              orderId: activeOrder.id,
+              orderStatus: activeOrder.status,
+            },
+          });
+        }
+      } catch (busyTableError) {
+        console.error('⚠️ Error checking busy table status:', {
+          error: busyTableError.message,
+          tableNumber: req.body.tableNumber,
         });
+        // Don't block order creation if busy table check fails
+        // Log but continue to order creation
       }
     }
+
+    // ✅ Log data access
+    SecurityAuditLogger.logDataAccess(
+      req.user?.id || 'unknown',
+      'orders',
+      'create',
+      req.ip
+    );
 
     // Call the order controller
     next();
   } catch (error) {
-    console.error('❌ Error resolving table:', error.message);
+    console.error('❌ CRITICAL: Error in POST /orders pre-check:', {
+      message: error.message,
+      code: error.code,
+      status: error.status,
+      details: error.details,
+      stack: error.stack,
+    });
+    SecurityAuditLogger.logSuspiciousActivity(
+      req.user?.id || 'unknown',
+      'order_creation_error',
+      { 
+        error: error.message,
+        code: error.code,
+        status: error.status,
+      },
+      req.ip
+    );
     return res.status(500).json({
       statusCode: 500,
       success: false,
-      message: 'Failed to process order',
+      message: 'Failed to validate order. Please try again.',
     });
   }
 }, orderController.createOrder);
 
-router.get('/orders/:orderId', async (req, res, next) => {
+router.get('/orders/:orderId', requireFeatureFlag('qr_ordering', 'QR ordering is currently disabled by the platform administrator.'), async (req, res, next) => {
   try {
     const { data: order, error } = await supabase
       .from('orders')
@@ -290,7 +385,7 @@ router.get('/orders/:orderId', async (req, res, next) => {
   }
 }, orderController.getOrderById);
 
-router.get('/orders/table/:tableNumber', async (req, res) => {
+router.get('/orders/table/:tableNumber', requireFeatureFlag('qr_ordering', 'QR ordering is currently disabled by the platform administrator.'), async (req, res) => {
   try {
     const { data: table, error: tableError } = await supabase
       .from('tables')

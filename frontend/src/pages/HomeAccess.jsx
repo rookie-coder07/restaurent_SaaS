@@ -1,4 +1,4 @@
-import { ArrowRight, ShieldCheck, Briefcase, Receipt } from 'lucide-react';
+import { ArrowRight, Shield, Briefcase, Users } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import Card from '../components/common/Card';
 
@@ -6,7 +6,7 @@ const ACCESS_CARDS = [
   {
     title: 'Admin Login',
     href: '/admin/login',
-    icon: ShieldCheck,
+    icon: Shield,
     helper: 'Owner access',
     actionLabel: 'Open Admin Portal',
   },
@@ -19,9 +19,9 @@ const ACCESS_CARDS = [
   },
   {
     title: 'Staff Login',
-    href: '/staff/login',
-    icon: Receipt,
-    helper: 'POS access',
+    href: '/pos/login',
+    icon: Users,
+    helper: 'Waiter & Cashier access',
     actionLabel: 'Open Staff Portal',
   },
 ];

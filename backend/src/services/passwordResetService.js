@@ -1,6 +1,5 @@
 import supabase from '../config/supabase.js';
 import logger from '../utils/logger.js';
-import bcrypt from 'bcrypt';
 import { broadcastRestaurantEvent } from '../utils/realtimeEvents.js';
 import OTPService from '../utils/otpService.js';
 import EmailService from '../utils/emailService.js';
@@ -99,14 +98,18 @@ class PasswordResetService {
         throw new Error('User not found');
       }
 
-      // Hash the new password
-      const hashedPassword = await bcrypt.hash(newPassword, 10);
+      // Update password via Supabase Auth (not in database)
+      const { error: authError } = await supabase.auth.admin.updateUserById(
+        user.id,
+        { password: newPassword }
+      );
 
-      // Update user password
+      if (authError) throw authError;
+
+      // Update user record with timestamp only
       const { error: updateError } = await supabase
         .from('users')
         .update({
-          password_hash: hashedPassword,
           updated_at: new Date().toISOString(),
         })
         .eq('id', user.id);

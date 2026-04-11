@@ -5,7 +5,7 @@ const takeawayController = {
   createOrder: async (req, res) => {
     const order = await takeawayService.createOrder(req.restaurantId, req.body, {
       actorId: req.user.id,
-      actorRole: req.user.role || 'manager',
+      actorRole: req.user.role,
     });
     return sendSuccess(res, 201, order);
   },
@@ -15,7 +15,7 @@ const takeawayController = {
       req.restaurantId,
       req.params.orderId,
       req.body,
-      { actorId: req.user.id, actorRole: req.user.role || 'manager' }
+      { actorId: req.user.id, actorRole: req.user.role }
     );
     return sendSuccess(res, 200, order);
   },

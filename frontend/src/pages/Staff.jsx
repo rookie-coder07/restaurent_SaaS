@@ -12,6 +12,7 @@ import EmptyState from '../components/common/EmptyState';
 import StatCard from '../components/common/StatCard';
 import PaginationControls from '../components/common/PaginationControls';
 import useResponsivePagination from '../hooks/useResponsivePagination';
+import { getUserErrorMessage } from '../utils/errorHandling';
 
 const ROLE_META = {
   manager: {
@@ -162,6 +163,21 @@ export default function StaffManagement() {
       return 'Password is required.';
     }
 
+    // Validate table assignments - check for conflicts with other staff
+    if (formData.role === 'staff' && formData.assignedTables.length > 0) {
+      const conflictedTables = [];
+      formData.assignedTables.forEach((tableId) => {
+        const owner = assignedTableOwners.get(tableId);
+        if (owner && owner.staffId !== editingStaff?.id) {
+          conflictedTables.push(tableLabelMap.get(tableId) || `Table ${tableId}`);
+        }
+      });
+
+      if (conflictedTables.length > 0) {
+        return `Cannot assign tables (${conflictedTables.join(', ')}) - already assigned to other staff. Remove from them first.`;
+      }
+    }
+
     return null;
   };
 
@@ -213,7 +229,7 @@ export default function StaffManagement() {
         Array.isArray(details) && details.length > 0
           ? details.map((detail) => detail.message).join(' ')
           : null;
-      setError(detailedMessage || err.response?.data?.message || 'Failed to add staff');
+      setError(detailedMessage || getUserErrorMessage(err, 'Failed to add staff'));
     } finally {
       setSubmitting(false);
     }
@@ -252,7 +268,7 @@ export default function StaffManagement() {
       await refetch();
       window.setTimeout(() => setSuccess(null), 5000);
     } catch (err) {
-      setError(err.response?.data?.message || 'Failed to remove staff');
+      setError(getUserErrorMessage(err, 'Failed to remove staff'));
     }
   };
 
@@ -480,27 +496,32 @@ export default function StaffManagement() {
                     const assignedOwner = assignedTableOwners.get(table.id);
                     const isTakenByAnotherWaiter =
                       Boolean(assignedOwner) && assignedOwner.staffId !== editingStaff?.id;
+                    const isDisabled = isTakenByAnotherWaiter;
 
                     return (
                       <label
                         key={table.id}
-                        className={`flex items-center gap-3 rounded-xl px-3 py-2 text-sm ${
-                          isTakenByAnotherWaiter
-                            ? 'bg-[var(--color-surface)] text-[var(--color-text-muted)] opacity-70'
-                            : 'bg-[var(--color-panel)] text-[var(--color-text)]'
+                        className={`flex items-center gap-3 rounded-xl px-3 py-2 text-sm transition-colors ${
+                          isDisabled
+                            ? 'cursor-not-allowed bg-red-500/10 text-red-600 opacity-60'
+                            : isChecked
+                              ? 'bg-emerald-500/10 text-emerald-700'
+                              : 'bg-[var(--color-panel)] text-[var(--color-text)]'
                         }`}
                       >
                         <input
                           type="checkbox"
                           checked={isChecked}
-                          onChange={() => toggleAssignedTable(table.id)}
-                          disabled={isTakenByAnotherWaiter}
-                          className="h-4 w-4 accent-[var(--color-primary)]"
+                          onChange={() => !isDisabled && toggleAssignedTable(table.id)}
+                          disabled={isDisabled}
+                          className="h-4 w-4 cursor-pointer accent-[var(--color-primary)] disabled:cursor-not-allowed"
                         />
                         <div className="flex min-w-0 flex-col">
-                          <span>{table.mergedDisplayName || `Table ${table.tableNumber}`}</span>
-                          {isTakenByAnotherWaiter ? (
-                            <span className="text-xs text-amber-400">Remove from {assignedOwner.name} first</span>
+                          <span className="font-medium">{table.mergedDisplayName || `Table ${table.tableNumber}`}</span>
+                          {isTakenByAnotherWaiter && assignedOwner ? (
+                            <span className="text-xs font-semibold text-red-500">❌ Assigned to {assignedOwner.name}</span>
+                          ) : isChecked ? (
+                            <span className="text-xs font-semibold text-emerald-600">✓ Will be assigned</span>
                           ) : null}
                         </div>
                       </label>

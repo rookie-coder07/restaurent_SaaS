@@ -1,6 +1,8 @@
 import axios from 'axios';
 import { clearPortalSession, readPortalSession, savePortalSession } from '../utils/authStorage';
 import { PORTAL_LOGIN, canAccessPortal, getPortalKeyFromPathname, normalizePortalRole } from '../utils/portalRouting';
+import logger from '../utils/logger';
+import { getUserErrorMessage, isDeveloperConsoleContext, showToast } from '../utils/errorHandling';
 
 const PRODUCTION_API_BASE_URL = 'https://restaurent-backend-448t.onrender.com/api';
 const DEVELOPMENT_API_BASE_URL = 'http://localhost:3000/api';
@@ -13,6 +15,19 @@ const API_BASE_URL =
 const isDevelopmentHost =
   window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
 const shouldDebugApi = import.meta.env.DEV && import.meta.env.VITE_DEBUG_API === 'true';
+
+function persistPrimaryToken(token, restaurantId = '') {
+  if (!token) {
+    return;
+  }
+
+  localStorage.setItem('token', token);
+  localStorage.setItem('accessToken', token);
+
+  if (restaurantId) {
+    localStorage.setItem('restaurantId', String(restaurantId));
+  }
+}
 
 function decodeTokenPayload(token) {
   try {
@@ -72,11 +87,14 @@ async function refreshPortalAccessToken(portal, existingSession) {
       }
     )
     .then((response) => {
-      const { accessToken } = response.data.data;
+      const { accessToken, refreshToken: rotatedRefreshToken } = response.data.data;
       const refreshedPayload = decodeTokenPayload(accessToken);
       const refreshedRole = normalizePortalRole(refreshedPayload?.role);
+      const nextRefreshToken = rotatedRefreshToken || existingSession.refreshToken;
 
-      if (!refreshedPayload?.restaurantId || (refreshedRole && !canAccessPortal(refreshedRole, portal))) {
+      const isDeveloper = refreshedRole === 'developer';
+
+      if ((!refreshedPayload?.restaurantId && !isDeveloper) || (refreshedRole && !canAccessPortal(refreshedRole, portal))) {
         rejectMismatchedPortalSession(portal);
         throw new Error('Portal session does not match the refreshed account role.');
       }
@@ -89,6 +107,7 @@ async function refreshPortalAccessToken(portal, existingSession) {
           restaurantId: existingSession.user?.restaurantId || refreshedPayload.restaurantId || null,
         },
         accessToken,
+        refreshToken: nextRefreshToken,
       };
 
       savePortalSession(portal, nextSession);
@@ -102,19 +121,8 @@ async function refreshPortalAccessToken(portal, existingSession) {
   return refreshPromise;
 }
 
-if (shouldDebugApi) {
-  console.log('='.repeat(60));
-  console.log('Frontend API Configuration');
-  console.log('='.repeat(60));
-  console.log('Environment:', import.meta.env.MODE);
-  console.log('VITE_API_BASE_URL:', import.meta.env.VITE_API_BASE_URL || '(not set)');
-  console.log('NEXT_PUBLIC_API_URL:', import.meta.env.NEXT_PUBLIC_API_URL || '(not set)');
-  console.log('Actual API Base URL:', API_BASE_URL);
-  console.log('='.repeat(60));
-}
-
 if (!isDevelopmentHost && API_BASE_URL.includes('localhost')) {
-  console.error('Production is using a localhost API URL. Check API environment variables.');
+  logger.error('Production is using localhost API URL');
 }
 
 const api = axios.create({
@@ -133,14 +141,18 @@ const api = axios.create({
 // Bootstrap defaults from stored tokens so the very first request is authorized
 (() => {
   const bootstrapToken =
+    localStorage.getItem('token') ||
     localStorage.getItem('accessToken') ||
     sessionStorage.getItem('accessToken');
   const bootstrapRestaurantId =
     localStorage.getItem('restaurantId') ||
     sessionStorage.getItem('restaurantId');
 
-  if (bootstrapToken && bootstrapRestaurantId) {
+  if (bootstrapToken) {
     api.defaults.headers.common.Authorization = `Bearer ${bootstrapToken}`;
+  }
+
+  if (bootstrapRestaurantId) {
     api.defaults.headers.common['X-Restaurant-Id'] = String(bootstrapRestaurantId);
   }
 })();
@@ -149,7 +161,13 @@ export { API_BASE_URL };
 
 export function getCurrentPortalAccessToken() {
   const portal = getPortalKeyFromPathname(window.location.pathname);
-  return readPortalSession(portal)?.accessToken || '';
+  return (
+    readPortalSession(portal)?.accessToken ||
+    localStorage.getItem('token') ||
+    localStorage.getItem('accessToken') ||
+    sessionStorage.getItem('accessToken') ||
+    ''
+  );
 }
 
 export function getCurrentRestaurantId() {
@@ -166,33 +184,50 @@ export function getCurrentRestaurantId() {
 }
 
 api.interceptors.request.use(
-  (config) => {
-  return (async () => {
+  async (config) => {
+    // Skip auth headers for public endpoints
+    const publicEndpoints = ['/v1/auth/login', '/v1/auth/register', '/v1/auth/staff/register', '/v1/auth/forgot-password', '/v1/auth/reset-password', '/v1/auth/verify-otp'];
+    const url = config.url || '';
+    const isPublicEndpoint = publicEndpoints.some(endpoint => url.includes(endpoint));
+    
+    if (isPublicEndpoint) {
+      if (shouldDebugApi) {
+        logger.debug(`⏭️  Skipping auth headers for public endpoint: ${url}`);
+      }
+      return config;
+    }
+
     const portal = getPortalKeyFromPathname(window.location.pathname);
     let session = readPortalSession(portal);
     let token = session?.accessToken;
     let tokenPayload = decodeTokenPayload(token);
 
-   // Broader fallback: try any portal session or localStorage (POS)
-   if (!token) {
-     const portals = ['pos', 'admin', 'kot'];
-     for (const p of portals) {
-       const altSession = readPortalSession(p);
-       if (altSession?.accessToken) {
-         session = altSession;
-         token = altSession.accessToken;
-         tokenPayload = decodeTokenPayload(token);
-         break;
-       }
-     }
-   }
+    // Broader fallback: try any portal session or localStorage (POS)
+    if (!token) {
+      const portals = ['pos', 'admin', 'kot'];
+      for (const p of portals) {
+        const altSession = readPortalSession(p);
+        if (altSession?.accessToken) {
+          session = altSession;
+          token = altSession.accessToken;
+          tokenPayload = decodeTokenPayload(token);
+          break;
+        }
+      }
+    }
 
-   if (!token) {
-      const fallbackToken = localStorage.getItem('accessToken') || sessionStorage.getItem('accessToken');
+    if (!token) {
+      const fallbackToken =
+        localStorage.getItem('token') ||
+        localStorage.getItem('accessToken') ||
+        sessionStorage.getItem('accessToken');
       const fallbackRestaurantId = localStorage.getItem('restaurantId') || sessionStorage.getItem('restaurantId');
       if (fallbackToken && fallbackRestaurantId) {
         token = fallbackToken;
         tokenPayload = decodeTokenPayload(fallbackToken) || { restaurantId: fallbackRestaurantId };
+      } else if (fallbackToken) {
+        token = fallbackToken;
+        tokenPayload = decodeTokenPayload(fallbackToken) || {};
       }
     }
 
@@ -200,48 +235,55 @@ api.interceptors.request.use(
       session = await refreshPortalAccessToken(portal, session);
       token = session?.accessToken;
       tokenPayload = decodeTokenPayload(token);
-      }
+    }
 
-      if (token) {
-        const tokenRole = normalizePortalRole(tokenPayload?.role);
+    if (token) {
+      const tokenRole = normalizePortalRole(tokenPayload?.role);
 
-        if (!tokenPayload?.restaurantId || !tokenRole) {
-          // fallback to stored restaurantId if present
-          const storedRestaurantId = localStorage.getItem('restaurantId') || sessionStorage.getItem('restaurantId');
-          if (storedRestaurantId) {
-            tokenPayload = { ...tokenPayload, restaurantId: storedRestaurantId };
-          } else {
-            rejectMismatchedPortalSession(portal);
-            throw new Error('Your session has expired. Please sign in again.');
-          }
-        }
+      const isDeveloper = tokenRole === 'developer';
 
-        if (tokenRole && !canAccessPortal(tokenRole, portal)) {
+      if ((!tokenPayload?.restaurantId && !isDeveloper) || !tokenRole) {
+        // fallback to stored restaurantId if present
+        const storedRestaurantId = localStorage.getItem('restaurantId') || sessionStorage.getItem('restaurantId');
+        if (storedRestaurantId) {
+          tokenPayload = { ...tokenPayload, restaurantId: storedRestaurantId };
+        } else if (isDeveloper) {
+          tokenPayload = { ...tokenPayload, restaurantId: null };
+        } else {
           rejectMismatchedPortalSession(portal);
-          throw new Error('Portal session does not match the current account role.');
+          throw new Error('Your session has expired. Please sign in again.');
         }
+      }
 
-        config.headers.Authorization = `Bearer ${token}`;
+      if (tokenRole && !canAccessPortal(tokenRole, portal)) {
+        rejectMismatchedPortalSession(portal);
+        throw new Error('Portal session does not match the current account role.');
+      }
+
+      config.headers.Authorization = `Bearer ${token}`;
+      api.defaults.headers.common.Authorization = `Bearer ${token}`;
+      if (tokenPayload.restaurantId) {
         config.headers['X-Restaurant-Id'] = String(tokenPayload.restaurantId);
-
-        if (config.params && typeof config.params === 'object' && !Array.isArray(config.params)) {
-          config.params = {
-            ...config.params,
-            restaurantId: config.params.restaurantId || String(tokenPayload.restaurantId),
-          };
-        }
+        api.defaults.headers.common['X-Restaurant-Id'] = String(tokenPayload.restaurantId);
       }
 
-      if (shouldDebugApi) {
-        console.log(`API Request: ${config.method?.toUpperCase()} ${API_BASE_URL}${config.url}`);
+      if (tokenPayload.restaurantId && config.params && typeof config.params === 'object' && !Array.isArray(config.params)) {
+        config.params = {
+          ...config.params,
+          restaurantId: config.params.restaurantId || String(tokenPayload.restaurantId),
+        };
       }
+    }
 
-      return config;
-    })();
+    if (shouldDebugApi) {
+      logger.debug(`API Request: ${config.method?.toUpperCase()} ${config.url}`);
+    }
+
+    return config;
   },
   (error) => {
     if (shouldDebugApi) {
-      console.error('Request interceptor error:', error);
+      logger.debug(`Request interceptor error: ${error.message}`);
     }
     return Promise.reject(error);
   }
@@ -249,53 +291,73 @@ api.interceptors.request.use(
 
 api.interceptors.response.use(
   (response) => {
-    if (shouldDebugApi) {
-      console.log(`API Response: ${response.status} ${API_BASE_URL}${response.config.url}`);
+    if (!isDeveloperConsoleContext() && response?.status >= 400 && response?.data?.message) {
+      response.data.message = getUserErrorMessage({ response });
     }
     return response;
   },
   async (error) => {
     const originalRequest = error.config;
-
-    if (shouldDebugApi) {
-      if (error.response) {
-        console.error('API Error Response:', {
-          status: error.response.status,
-          statusText: error.response.statusText,
-          url: `${API_BASE_URL}${error.config?.url || ''}`,
-          data: error.response.data,
-        });
-      } else if (error.request) {
-        console.error('API Error - No Response:', {
-          url: `${API_BASE_URL}${error.config?.url || ''}`,
-          message: error.message,
-          code: error.code,
-        });
-      } else {
-        console.error('API Error:', error.message);
-      }
+    
+    if (!originalRequest) {
+      return Promise.reject(error);
     }
 
-    if (error.response?.status === 401 && originalRequest && !originalRequest._retry) {
-      originalRequest._retry = true;
+    try {
+      const portal = getPortalKeyFromPathname(window.location.pathname);
+      const existingSession = readPortalSession(portal);
+      
+      if (error.response?.status === 401 && existingSession?.refreshToken) {
+        const refreshedSession = await refreshPortalAccessToken(portal, existingSession);
+        originalRequest.headers.Authorization = `Bearer ${refreshedSession.accessToken}`;
+        persistPrimaryToken(
+          refreshedSession.accessToken,
+          refreshedSession.user?.restaurantId || decodeTokenPayload(refreshedSession.accessToken)?.restaurantId || ''
+        );
+        return api(originalRequest);
+      }
+    } catch (refreshError) {
+      const portal = getPortalKeyFromPathname(window.location.pathname);
+      rejectMismatchedPortalSession(portal);
+      return Promise.reject(refreshError);
+    }
 
-      try {
-        const portal = getPortalKeyFromPathname(window.location.pathname);
-        const existingSession = readPortalSession(portal);
-        if (existingSession?.refreshToken) {
-          const refreshedSession = await refreshPortalAccessToken(portal, existingSession);
-          originalRequest.headers.Authorization = `Bearer ${refreshedSession.accessToken}`;
-          return api(originalRequest);
-        }
-      } catch (refreshError) {
-        const portal = getPortalKeyFromPathname(window.location.pathname);
-        rejectMismatchedPortalSession(portal);
-        return Promise.reject(refreshError);
+    const safeMessage = getUserErrorMessage(error);
+
+    if (!isDeveloperConsoleContext()) {
+      if (error.response?.data && typeof error.response.data === 'object') {
+        error.response.data.message = safeMessage;
+      }
+
+      if ((originalRequest?.method || 'get').toLowerCase() !== 'get' && originalRequest?.showErrorToast !== false) {
+        showToast(safeMessage);
       }
     }
 
     return Promise.reject(error);
   }
 );
+
+api.interceptors.response.use((response) => {
+  const requestUrl = response.config?.url || '';
+  const responseData = response.data?.data || {};
+
+  if (requestUrl.includes('/v1/auth/login') || requestUrl.includes('/v1/auth/register') || requestUrl.includes('/v1/auth/refresh-token')) {
+    const token = responseData.accessToken || responseData.token;
+    const payload = decodeTokenPayload(token);
+    const restaurantId =
+      responseData.user?.restaurantId ||
+      responseData.restaurant?.id ||
+      responseData.restaurantId ||
+      payload?.restaurantId ||
+      '';
+
+    if (token) {
+      persistPrimaryToken(token, restaurantId);
+    }
+  }
+
+  return response;
+}, (error) => Promise.reject(error));
 
 export default api;

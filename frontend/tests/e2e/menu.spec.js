@@ -23,7 +23,7 @@ test.describe('POS Table Recall Smoke', () => {
     await mockApi(page, async ({ url, method }) => {
       const { pathname } = url;
 
-      if (pathname.endsWith('/v1/auth/staff/login') && method === 'POST') {
+      if (pathname.endsWith('/v1/auth/login') && method === 'POST') {
         return jsonSuccess({
           accessToken: createTestJwt({ role: 'staff', restaurantId: 'rest-1' }),
           refreshToken: createTestJwt({ role: 'staff', restaurantId: 'rest-1', type: 'refresh' }),
@@ -59,15 +59,6 @@ test.describe('POS Table Recall Smoke', () => {
 
       return jsonSuccess({});
     });
-
-    await page.goto('/pos/login');
-    await page.getByLabel(/Email/i).fill('pos@restaurant.com');
-    await page.getByLabel(/Password/i).fill('Test123@456');
-    await page.getByRole('button', { name: /Open POS Portal/i }).click();
-
-    await expect(page).toHaveURL(/\/pos$/);
-    await expect(page.getByRole('heading', { name: /Choose service type/i })).toBeVisible();
-    await expect(page.getByRole('button', { name: /Start Dine-In/i })).toBeVisible();
     await expect(page.getByRole('heading', { name: /Online Order Queue/i })).toBeVisible();
     await expect(page.getByRole('button', { name: /Refresh/i })).toBeVisible();
 
@@ -170,7 +161,7 @@ test.describe('POS Table Recall Smoke', () => {
     await mockApi(page, async ({ url, method }) => {
       const { pathname } = url;
 
-      if (pathname.endsWith('/v1/auth/staff/login') && method === 'POST') {
+      if (pathname.endsWith('/v1/auth/login') && method === 'POST') {
         return jsonSuccess({
           accessToken: createTestJwt({ role: 'staff', restaurantId: 'rest-1' }),
           refreshToken: createTestJwt({ role: 'staff', restaurantId: 'rest-1', type: 'refresh' }),
@@ -232,10 +223,7 @@ test.describe('POS Table Recall Smoke', () => {
       return jsonSuccess({});
     });
 
-    await page.goto('/pos/login');
-    await page.getByLabel(/Email/i).fill('pos@restaurant.com');
-    await page.getByLabel(/Password/i).fill('Test123@456');
-    await page.getByRole('button', { name: /Open POS Portal/i }).click();
+    // POS login removed
 
     await expect(page).toHaveURL(/\/pos$/);
     await page.getByRole('button', { name: /Dine-In/i }).click();

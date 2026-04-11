@@ -1,5 +1,9 @@
 import logger from '../utils/logger.js';
 import supabase from '../config/supabase.js';
+import { cacheManager } from '../utils/cacheManager.js';
+
+const ANALYTICS_CACHE_TTL = 300;
+const DAILY_ANALYTICS_CACHE_TTL = 3600;
 
 export class AnalyticsService {
   // ============ DAILY ANALYTICS ============
@@ -82,6 +86,10 @@ export class AnalyticsService {
 
   static async getAnalyticsSummary(restaurantId, days = 7) {
     try {
+      const cacheKey = `analytics_summary:${restaurantId}:${days}`;
+      const cached = cacheManager.get(cacheKey);
+      if (cached) return cached;
+
       const endDate = new Date();
       const startDate = new Date();
       startDate.setDate(startDate.getDate() - days);
@@ -89,9 +97,10 @@ export class AnalyticsService {
       const startDateStr = startDate.toISOString().split('T')[0];
       const endDateStr = endDate.toISOString().split('T')[0];
 
+      // Use aggregation at DB level instead of fetching and calculating in-memory
       const { data: analytics, error } = await supabase
         .from('daily_analytics')
-        .select('*')
+        .select('orders_count, total_revenue, completed_orders')
         .eq('restaurant_id', restaurantId)
         .gte('date', startDateStr)
         .lte('date', endDateStr);
@@ -99,13 +108,15 @@ export class AnalyticsService {
       if (error) throw error;
 
       if (!analytics || analytics.length === 0) {
-        return {
+        const result = {
           totalOrders: 0,
           totalRevenue: 0,
           averageOrderValue: 0,
           completedOrders: 0,
           period: `Last ${days} days`,
         };
+        cacheManager.set(cacheKey, result, ANALYTICS_CACHE_TTL);
+        return result;
       }
 
       const totalOrders = analytics.reduce((sum, day) => sum + (day.orders_count || 0), 0);
@@ -113,7 +124,7 @@ export class AnalyticsService {
       const completedOrders = analytics.reduce((sum, day) => sum + (day.completed_orders || 0), 0);
       const averageOrderValue = totalOrders > 0 ? totalRevenue / totalOrders : 0;
 
-      return {
+      const result = {
         totalOrders,
         totalRevenue,
         averageOrderValue: parseFloat(averageOrderValue.toFixed(2)),
@@ -121,6 +132,9 @@ export class AnalyticsService {
         period: `Last ${days} days`,
         dailyBreakdown: analytics,
       };
+
+      cacheManager.set(cacheKey, result, ANALYTICS_CACHE_TTL);
+      return result;
     } catch (error) {
       logger.error('❌ Get analytics summary error:', error);
       throw error;
@@ -129,6 +143,10 @@ export class AnalyticsService {
 
   static async getRevenueByPaymentMethod(restaurantId, startDate, endDate) {
     try {
+      const cacheKey = `revenue_by_method:${restaurantId}:${startDate}:${endDate}`;
+      const cached = cacheManager.get(cacheKey);
+      if (cached) return cached;
+
       const { data: orders, error } = await supabase
         .from('orders')
         .select('payment_method, total_amount')
@@ -145,6 +163,7 @@ export class AnalyticsService {
         revenueByMethod[method] = (revenueByMethod[method] || 0) + (order.total_amount || 0);
       });
 
+      cacheManager.set(cacheKey, revenueByMethod, ANALYTICS_CACHE_TTL);
       return revenueByMethod;
     } catch (error) {
       logger.error('❌ Get revenue by payment method error:', error);
@@ -172,9 +191,14 @@ export class AnalyticsService {
 
   static async getOrderMetrics(restaurantId, startDate, endDate) {
     try {
+      const cacheKey = `order_metrics:${restaurantId}:${startDate}:${endDate}`;
+      const cached = cacheManager.get(cacheKey);
+      if (cached) return cached;
+
+      // Select only required fields to reduce payload
       const { data: orders, error } = await supabase
         .from('orders')
-        .select('status, created_at, total_amount')
+        .select('status, total_amount')
         .eq('restaurant_id', restaurantId)
         .gte('created_at', startDate)
         .lte('created_at', endDate);
@@ -193,6 +217,7 @@ export class AnalyticsService {
         ? parseFloat((metrics.totalRevenue / metrics.totalOrders).toFixed(2)) 
         : 0;
 
+      cacheManager.set(cacheKey, metrics, ANALYTICS_CACHE_TTL);
       return metrics;
     } catch (error) {
       logger.error('❌ Get order metrics error:', error);
@@ -202,6 +227,10 @@ export class AnalyticsService {
 
   static async getPeakHours(restaurantId, startDate, endDate) {
     try {
+      const cacheKey = `peak_hours:${restaurantId}:${startDate}:${endDate}`;
+      const cached = cacheManager.get(cacheKey);
+      if (cached) return cached;
+
       const { data: orders, error } = await supabase
         .from('orders')
         .select('created_at')
@@ -217,6 +246,7 @@ export class AnalyticsService {
         hourCounts[hour] = (hourCounts[hour] || 0) + 1;
       });
 
+      cacheManager.set(cacheKey, hourCounts, ANALYTICS_CACHE_TTL);
       return hourCounts;
     } catch (error) {
       logger.error('❌ Get peak hours error:', error);
@@ -226,6 +256,10 @@ export class AnalyticsService {
 
   static async getCustomerMetrics(restaurantId, startDate, endDate) {
     try {
+      const cacheKey = `customer_metrics:${restaurantId}:${startDate}:${endDate}`;
+      const cached = cacheManager.get(cacheKey);
+      if (cached) return cached;
+
       const { data: orders, error } = await supabase
         .from('orders')
         .select('id')
@@ -235,11 +269,13 @@ export class AnalyticsService {
 
       if (error) throw error;
 
-      // In a real implementation, this would track unique customers
-      return {
+      const result = {
         totalTransactions: orders?.length || 0,
         period: `${startDate} to ${endDate}`,
       };
+
+      cacheManager.set(cacheKey, result, ANALYTICS_CACHE_TTL);
+      return result;
     } catch (error) {
       logger.error('❌ Get customer metrics error:', error);
       throw error;

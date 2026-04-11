@@ -2,13 +2,16 @@ import logger from '../utils/logger.js';
 import { sendSuccess, sendError } from '../utils/apiResponse.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import OrderService from '../services/orderService.js';
+import { ActivityService } from '../services/activityService.js';
 import supabase from '../config/supabase.js';
+import { safetyEngine } from '../utils/productionSafety.js';
 import {
   attachRestaurantStream,
   detachRestaurantStream,
   writeSseEvent,
 } from '../utils/realtimeEvents.js';
 import { logOrderCreation, formatOrderResponse } from '../utils/orderDisplay.js';
+import { logError, logFailedRequest, logCriticalAction, logSuccessfulOperation } from '../utils/structuredLogging.js';
 
 function getTableIdFromBody(body = {}) {
   if (Object.prototype.hasOwnProperty.call(body, 'tableId')) {
@@ -363,61 +366,205 @@ async function validateTableAccess(restaurantId, tableId, currentUser = {}, { is
 }
 
 export const createOrder = asyncHandler(async (req, res) => {
-  const orderOrigin = req.orderOrigin || (req.user ? 'pos' : 'qr');
-  const normalizedOrder = {
-    requestId: getOptionalRequestId(req.body),
-    tableId: getTableIdFromBody(req.body) ?? null,
-    items: (req.body.items || []).map((item) => ({
-      menuItemId: item.menuItemId || item.itemId || item.id,
-      quantity: item.quantity || item.qty,
-      unitPrice: item.unitPrice ?? item.price ?? 0,
-      specialInstructions: item.specialInstructions || '',
-      itemNote: item.itemNote || item.note || item.specialInstructions || '',
-      modifiers: item.modifiers || [],
-      name: item.name || '',
-    })),
-    totalAmount: getOptionalTotalAmount(req.body),
-    orderType: req.body.orderType || req.body.order_type || 'dine-in',
-    paymentMethod: getOptionalPaymentMethod(req.body),
-    notes: getOptionalNotes(req.body) ?? '',
-    requiresWaiterApproval: !req.user,
-    origin: orderOrigin,
-    orderSource: orderOrigin === 'qr' ? 'qr' : 'manual',
-    online: extractOnlineOrderFields(req.body),
-  };
+  try {
+    console.log('📦 ORDER CREATION STARTED:', {
+      orderOrigin: req.orderOrigin,
+      hasUser: !!req.user,
+      restaurantId: req.restaurantId,
+      tableId: req.body.tableId,
+      tableNumber: req.body.tableNumber,
+      itemsCount: req.body.items?.length,
+    });
 
-  if (normalizedOrder.orderType === 'dine-in' && !normalizedOrder.tableId) {
-    return sendError(res, 400, 'Table is required for dine-in orders');
-  }
+    const orderOrigin = req.orderOrigin || (req.user ? 'pos' : 'qr');
+    const normalizedOrder = {
+      requestId: getOptionalRequestId(req.body),
+      tableId: getTableIdFromBody(req.body) ?? null,
+      items: (req.body.items || []).map((item) => ({
+        menuItemId: item.menuItemId || item.itemId || item.id,
+        quantity: item.quantity || item.qty,
+        unitPrice: item.unitPrice ?? item.price ?? 0,
+        specialInstructions: item.specialInstructions || '',
+        itemNote: item.itemNote || item.note || item.specialInstructions || '',
+        modifiers: item.modifiers || [],
+        name: item.name || '',
+      })),
+      totalAmount: getOptionalTotalAmount(req.body),
+      orderType: req.body.orderType || req.body.order_type || 'dine-in',
+      paymentMethod: getOptionalPaymentMethod(req.body),
+      notes: getOptionalNotes(req.body) ?? '',
+      requiresWaiterApproval: !req.user,
+      origin: orderOrigin,
+      orderSource: orderOrigin === 'qr' ? 'qr' : 'manual',
+      online: extractOnlineOrderFields(req.body),
+    };
 
-  const restaurantId = req.restaurantId || req.user?.restaurantId;
-  if (!restaurantId) {
-    return sendError(res, 401, 'Restaurant ID is required');
-  }
+    console.log('✅ Order normalized:', {
+      tableId: normalizedOrder.tableId,
+      itemsCount: normalizedOrder.items.length,
+      orderType: normalizedOrder.orderType,
+    });
 
-  const order = await OrderService.createOrder(
-    restaurantId,
-    normalizedOrder,
-    {
-      userId: req.user?.id || req.user?.userId,
-      actorRole: req.user?.role,
-      actorName: req.user?.name || req.user?.email || 'System',
+    if (normalizedOrder.orderType === 'dine-in' && !normalizedOrder.tableId) {
+      logFailedRequest(new Error('Table is required for dine-in orders'), {
+        message: 'Create order validation failed',
+        endpoint: req.path,
+        method: req.method,
+        userId: req.user?.id || req.user?.userId,
+        restaurantId: req.restaurantId,
+        statusCode: 400,
+        action: 'create_order_validation',
+      });
+      return sendError(res, 400, 'Table is required for dine-in orders');
     }
-  );
 
-  if (order?.reusedExistingBill) {
-    return sendSuccess(
-      res,
-      200,
-      order,
-      'Table is currently in use. Opened the existing bill instead.'
+    const restaurantId = req.restaurantId || req.user?.restaurantId;
+    if (!restaurantId) {
+      console.error('❌ Missing restaurantId in createOrder:', {
+        'req.restaurantId': req.restaurantId,
+        'req.user?.restaurantId': req.user?.restaurantId,
+        'req.user': req.user,
+      });
+      logFailedRequest(new Error('Restaurant ID missing'), {
+        message: 'Create order failed - no restaurant ID',
+        endpoint: req.path,
+        method: req.method,
+        userId: req.user?.id || req.user?.userId,
+        statusCode: 401,
+        action: 'create_order_auth',
+      });
+      return sendError(res, 401, 'Restaurant ID is required');
+    }
+
+    console.log('📊 Calling OrderService.createOrder with:', {
+      restaurantId,
+      itemsCount: normalizedOrder.items.length,
+      tableId: normalizedOrder.tableId,
+    });
+
+    if (normalizedOrder.items.length === 0) {
+      console.error('❌ Order has no items');
+      return sendError(res, 400, 'Cannot create order: Cart is empty. Add at least one item.');
+    }
+
+    const order = await OrderService.createOrder(
+      restaurantId,
+      normalizedOrder,
+      {
+        userId: req.user?.id || req.user?.userId,
+        actorRole: req.user?.role,
+        actorName: req.user?.name || req.user?.email || 'System',
+      }
     );
+
+    console.log('✅ Order created successfully:', { orderId: order?.id });
+
+    logCriticalAction('order_created', {
+      message: 'New order created',
+      userId: req.user?.id || req.user?.userId,
+      restaurantId,
+      orderId: order?.id,
+      tableId: normalizedOrder.tableId,
+      details: {
+        itemCount: normalizedOrder.items.length,
+        totalAmount: normalizedOrder.totalAmount,
+        orderType: normalizedOrder.orderType,
+      },
+    });
+
+    if (order?.reusedExistingBill) {
+      // Log activity for existing bill usage (fire-and-forget)
+      if (req.user?.userId) {
+        setImmediate(() => {
+          ActivityService.logActivity(
+            restaurantId,
+            req.user.userId,
+            req.user?.role,
+            'order_created_reused_bill',
+            {
+              orderId: order?.id,
+              tableId: normalizedOrder.tableId,
+              itemCount: normalizedOrder.items.length,
+              totalAmount: normalizedOrder.totalAmount,
+            }
+          ).catch(error => logger.warn('Failed to log order activity:', error.message));
+        });
+      }
+      return sendSuccess(
+        res,
+        200,
+        order,
+        'Table is currently in use. Opened the existing bill instead.'
+      );
+    }
+
+    // Log order creation with friendly formatting
+    logOrderCreation(order, normalizedOrder.items || [], logger);
+
+    // Log activity for new order creation (fire-and-forget)
+    if (req.user?.userId) {
+      setImmediate(() => {
+        ActivityService.logActivity(
+          restaurantId,
+          req.user.userId,
+          req.user?.role,
+          'order_created',
+          {
+            orderId: order?.id,
+            tableId: normalizedOrder.tableId,
+            itemCount: normalizedOrder.items.length,
+            totalAmount: normalizedOrder.totalAmount,
+            orderType: normalizedOrder.orderType,
+          }
+        ).catch(error => logger.warn('Failed to log order activity:', error.message));
+      });
+    }
+
+    console.log('📤 Sending order response:', { orderId: order?.id, status: 201 });
+    return sendSuccess(res, 201, formatOrderResponse(order), 'Order created successfully');
+  } catch (error) {
+    console.error('❌ CRITICAL ORDER CREATION ERROR:', {
+      message: error.message,
+      code: error.code,
+      status: error.status,
+      details: error.details,
+      stack: error.stack,
+      restaurantId: req.restaurantId,
+      tableId: req.body.tableId,
+      orderOrigin: req.orderOrigin,
+    });
+    
+    logError(error, {
+      message: 'Failed to create order',
+      endpoint: req.path,
+      method: req.method,
+      userId: req.user?.id || req.user?.userId,
+      restaurantId: req.restaurantId,
+      statusCode: 500,
+      action: 'create_order',
+    });
+
+    // Return specific error response instead of throwing
+    let errorMessage = error.publicMessage || error.message || 'Failed to create order';
+    let statusCode = error.statusCode || error.status || 500;
+
+    // Map common error messages to more user-friendly versions
+    if (errorMessage.includes('Cart is empty') || errorMessage.includes('0 items')) {
+      errorMessage = 'Your cart is empty. Please add at least one item to place an order.';
+      statusCode = 400;
+    } else if (errorMessage.includes('Table not found') || errorMessage.includes('invalid table')) {
+      errorMessage = 'The selected table is not available. Please try again or select a different table.';
+      statusCode = 404;
+    } else if (errorMessage.includes('Restaurant') && errorMessage.includes('not found')) {
+      errorMessage = 'The restaurant information could not be found. Please refresh and try again.';
+      statusCode = 404;
+    } else if (statusCode === 500) {
+      // For 500 errors, don't expose the technical message
+      errorMessage = 'An error occurred while creating your order. Please try again.';
+    }
+    
+    return sendError(res, statusCode, errorMessage);
   }
-
-  // Log order creation with friendly formatting
-  logOrderCreation(order, normalizedOrder.items || [], logger);
-
-  return sendSuccess(res, 201, formatOrderResponse(order), 'Order created successfully');
 });
 
 export const getActiveOrderByTable = asyncHandler(async (req, res) => {
@@ -455,29 +602,95 @@ export const getOrderById = asyncHandler(async (req, res) => {
 });
 
 export const getOrders = asyncHandler(async (req, res) => {
-  const filters = {
-    status: req.query.status,
-    orderType: req.query.orderType || req.query.order_type,
-    tableNumber: req.query.tableNumber ? String(req.query.tableNumber).trim() : undefined,
-    startDate: req.query.startDate,
-    endDate: req.query.endDate,
-    limit: parseInt(req.query.limit) || 20,
-    skip: parseInt(req.query.skip) || 0,
-  };
+  try {
+    const filters = {
+      status: req.query.status,
+      orderType: req.query.orderType || req.query.order_type,
+      tableNumber: req.query.tableNumber ? String(req.query.tableNumber).trim() : undefined,
+      startDate: req.query.startDate,
+      endDate: req.query.endDate,
+      limit: parseInt(req.query.limit) || 20,
+      skip: parseInt(req.query.skip) || 0,
+    };
 
-  const result = await OrderService.getOrders(req.user.restaurantId, filters);
-  return sendSuccess(res, 200, result, 'Orders fetched successfully');
+    const result = await OrderService.getOrders(req.user.restaurantId, filters, req.user);
+    
+    logSuccessfulOperation('get_orders', {
+      message: 'Orders retrieved successfully',
+      endpoint: req.path,
+      method: req.method,
+      userId: req.user?.id || req.user?.userId,
+      restaurantId: req.user.restaurantId,
+      details: { orderCount: result?.data?.length || 0, filters },
+    });
+
+    return sendSuccess(res, 200, result, 'Orders fetched successfully');
+  } catch (error) {
+    logError(error, {
+      message: 'Failed to retrieve orders',
+      endpoint: req.path,
+      method: req.method,
+      userId: req.user?.id || req.user?.userId,
+      restaurantId: req.user.restaurantId,
+      statusCode: 500,
+      action: 'get_orders',
+    });
+    throw error;
+  }
 });
 
 export const getActiveOrders = asyncHandler(async (req, res) => {
-  const orders = await OrderService.getActiveOrders(req.user.restaurantId);
-  return sendSuccess(res, 200, orders, 'Active orders fetched successfully');
+  try {
+    const orders = await OrderService.getActiveOrders(req.user.restaurantId);
+    
+    logger.info('Active orders retrieved', {
+      userId: req.user?.id,
+      restaurantId: req.user.restaurantId,
+      orderCount: orders?.length || 0,
+    });
+
+    return sendSuccess(res, 200, orders, 'Active orders fetched successfully');
+  } catch (error) {
+    logError(error, {
+      message: 'Failed to retrieve active orders',
+      endpoint: req.path,
+      method: req.method,
+      userId: req.user?.id || req.user?.userId,
+      restaurantId: req.user.restaurantId,
+      statusCode: 500,
+      action: 'get_active_orders',
+    });
+    throw error;
+  }
 });
 
 export const getOpenBills = asyncHandler(async (req, res) => {
-  logger.info(`API HIT: GET /orders/open - Restaurant: ${req.user.restaurantId}`);
-  const orders = await OrderService.getOpenBills(req.user.restaurantId);
-  return sendSuccess(res, 200, orders, 'Open bills fetched successfully');
+  try {
+    logger.info(`API HIT: GET /orders/open - Restaurant: ${req.user.restaurantId}`);
+    const orders = await OrderService.getOpenBills(req.user.restaurantId);
+    
+    logSuccessfulOperation('get_open_bills', {
+      message: 'Open bills retrieved',
+      endpoint: req.path,
+      method: req.method,
+      userId: req.user?.id || req.user?.userId,
+      restaurantId: req.user.restaurantId,
+      details: { billCount: orders?.length || 0 },
+    });
+
+    return sendSuccess(res, 200, orders, 'Open bills fetched successfully');
+  } catch (error) {
+    logError(error, {
+      message: 'Failed to retrieve open bills',
+      endpoint: req.path,
+      method: req.method,
+      userId: req.user?.id || req.user?.userId,
+      restaurantId: req.user.restaurantId,
+      statusCode: 500,
+      action: 'get_open_bills',
+    });
+    throw error;
+  }
 });
 
 export const cancelPendingBills = asyncHandler(async (req, res) => {
@@ -496,6 +709,23 @@ export const softDeleteOrder = asyncHandler(async (req, res) => {
 
   if (!deletedOrder || !deletedOrder.id) {
     return sendError(res, 400, 'Order deletion failed - no rows were updated in database');
+  }
+
+  // Log activity for order deletion (fire-and-forget)
+  if (req.user?.userId) {
+    setImmediate(() => {
+      ActivityService.logActivity(
+        req.user.restaurantId,
+        req.user.userId,
+        req.user?.role,
+        'order_deleted',
+        {
+          orderId: orderId,
+          reason: req.body.reason || 'No reason provided',
+          deletedAt: new Date().toISOString(),
+        }
+      ).catch(error => logger.warn('Failed to log order deletion activity:', error.message));
+    });
   }
 
   return sendSuccess(res, 200, deletedOrder, 'Order deleted safely');
@@ -603,84 +833,224 @@ export const updateOrder = asyncHandler(async (req, res) => {
 export const sendOrderToKitchen = asyncHandler(async (req, res) => {
   const { orderId } = req.params;
   
-  // ✅ CRITICAL: Validate order ID before sending to kitchen
-  if (!orderId) {
-    return sendError(res, 400, 'Order ID is required');
-  }
+  try {
+    // ✅ CRITICAL: Validate order ID before sending to kitchen
+    if (!orderId) {
+      logFailedRequest(new Error('Order ID missing'), {
+        message: 'Send to kitchen validation failed',
+        endpoint: req.path,
+        method: req.method,
+        userId: req.user?.id || req.user?.userId,
+        restaurantId: req.restaurantId,
+        statusCode: 400,
+        action: 'send_to_kitchen_validation',
+      });
+      return sendError(res, 400, 'Order ID is required');
+    }
 
-  const result = await OrderService.sendOrderToKitchen(req.restaurantId, orderId);
-  return sendSuccess(res, 200, result, 'Order sent to kitchen successfully');
+    const result = await OrderService.sendOrderToKitchen(req.restaurantId, orderId);
+    
+    logCriticalAction('order_sent_to_kitchen', {
+      message: 'Order sent to kitchen',
+      userId: req.user?.id || req.user?.userId,
+      restaurantId: req.restaurantId,
+      orderId,
+      details: { kitchenTickets: result?.kotId },
+    });
+
+    return sendSuccess(res, 200, result, 'Order sent to kitchen successfully');
+  } catch (error) {
+    logError(error, {
+      message: 'Failed to send order to kitchen',
+      endpoint: req.path,
+      method: req.method,
+      userId: req.user?.id || req.user?.userId,
+      restaurantId: req.restaurantId,
+      orderId,
+      statusCode: 500,
+      action: 'send_to_kitchen',
+    });
+    throw error;
+  }
 });
 
 export const updateOrderStatus = asyncHandler(async (req, res) => {
   const { orderId } = req.params;
   const { status, cancelReason } = req.body;
 
-  const order = await OrderService.updateOrderStatus(
-    req.restaurantId,
-    orderId,
-    status,
-    cancelReason
-  );
+  try {
+    if (!status) {
+      logFailedRequest(new Error('Status missing'), {
+        message: 'Update order status validation failed',
+        endpoint: req.path,
+        method: req.method,
+        userId: req.user?.id || req.user?.userId,
+        restaurantId: req.restaurantId,
+        orderId,
+        statusCode: 400,
+        action: 'update_status_validation',
+      });
+      return sendError(res, 400, 'Order status is required');
+    }
 
-  return sendSuccess(res, 200, order, 'Order status updated successfully');
+    const order = await OrderService.updateOrderStatus(
+      req.restaurantId,
+      orderId,
+      status,
+      cancelReason
+    );
+
+    logCriticalAction('order_status_updated', {
+      message: 'Order status updated',
+      userId: req.user?.id || req.user?.userId,
+      restaurantId: req.restaurantId,
+      orderId,
+      details: { newStatus: status, cancelReason },
+    });
+
+    return sendSuccess(res, 200, order, 'Order status updated successfully');
+  } catch (error) {
+    logError(error, {
+      message: 'Failed to update order status',
+      endpoint: req.path,
+      method: req.method,
+      userId: req.user?.id || req.user?.userId,
+      restaurantId: req.restaurantId,
+      orderId,
+      statusCode: 500,
+      action: 'update_order_status',
+    });
+    throw error;
+  }
 });
 
 export const settleOrder = asyncHandler(async (req, res) => {
-  const { orderId } = req.params;
+  try {
+    const { orderId } = req.params;
+    const restaurantId = req.restaurantId;
+    const userId = req.user?.id;
+    const userRole = req.user?.role;
 
-  if (!orderId) {
-    return sendError(res, 400, 'Order ID is required');
+    // Role-based access control
+    if (!userRole || !['admin', 'manager', 'waiter', 'cashier'].includes(userRole)) {
+      return sendError(res, 403, 'Unauthorized: insufficient role permissions');
+    }
+
+    if (!orderId || !restaurantId) {
+      return sendError(res, 400, 'Order ID and Restaurant ID required');
+    }
+
+    // Prevent duplicate billing
+    const billingKey = `order_${orderId}_settlement`;
+    if (!safetyEngine.canExecuteRequest(billingKey)) {
+      return sendError(res, 409, 'Settlement already in progress. Please wait.');
+    }
+
+    const tracked = safetyEngine.trackBillingOperation(orderId, 'settlement');
+    if (!tracked) {
+      return sendError(res, 409, 'Settlement already in progress. Please wait.');
+    }
+
+    // Validate settlement data
+    const settlementData = { ...req.body };
+
+    const rawAmount = settlementData.totalAmount ?? settlementData.amount ?? settlementData.finalAmount;
+    const hasAmount = rawAmount !== undefined && rawAmount !== null && String(rawAmount).trim() !== '';
+    if (hasAmount) {
+      const numericAmount = Number(rawAmount);
+      if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
+        return sendError(res, 400, 'Invalid settlement amount');
+      }
+      settlementData.totalAmount = numericAmount;
+    } else {
+      settlementData.totalAmount = undefined;
+    }
+
+    if (settlementData.amountReceived !== undefined) {
+      const numericReceived = Number(settlementData.amountReceived);
+      if (!Number.isFinite(numericReceived) || numericReceived < 0) {
+        return sendError(res, 400, 'Invalid amount received');
+      }
+      settlementData.amountReceived = numericReceived;
+    }
+
+    try {
+      safetyEngine.validateTransactionIntegrity({
+        orderId,
+        amount: settlementData.totalAmount, // allow undefined to trigger stored total usage
+        paymentMethod: settlementData.paymentMethod,
+      });
+    } catch (validationError) {
+      return sendError(res, 400, `Invalid settlement data: ${validationError.message}`);
+    }
+
+    // Execute settlement with retry logic
+    let result;
+    try {
+      result = await safetyEngine.executeWithRetry(
+        () => OrderService.settleOrder(restaurantId, orderId, settlementData, { userId }),
+        'settlementOrder'
+      );
+    } catch (settlementError) {
+      logger.error('Settlement failed after retries', { orderId, error: settlementError.message });
+      return sendError(res, 500, 'Failed to settle order. Please try again.');
+    }
+
+    logCriticalAction('order_settled', {
+      message: 'Order settled',
+      userId,
+      restaurantId,
+      orderId,
+      amount: settlementData.totalAmount,
+      severity: 'high',
+    });
+
+    // Log activity for order settlement (fire-and-forget)
+    if (userId) {
+      setImmediate(() => {
+        ActivityService.logActivity(
+          restaurantId,
+          userId,
+          userRole,
+          'order_settled',
+          {
+            orderId: orderId,
+            amount: settlementData.totalAmount,
+            paymentMethod: settlementData.paymentMethod,
+            amountReceived: settlementData.amountReceived,
+            settledAt: new Date().toISOString(),
+          }
+        ).catch(error => logger.warn('Failed to log order settlement activity:', error.message));
+      });
+    }
+
+    return sendSuccess(res, 200, result, 'Order settled successfully');
+  } catch (error) {
+    logError(error, {
+      message: 'Settlement error',
+      endpoint: req.path,
+      method: req.method,
+      userId: req.user?.id,
+      restaurantId: req.restaurantId,
+      statusCode: 500,
+      action: 'settle_order',
+    });
+    throw error;
   }
-
-  // ACCESS CHECK: Fetch order to get table and validate access
-  const { data: order, error: orderError } = await supabase
-    .from('orders')
-    .select('table_id, status, payment_status, total_amount')
-    .eq('id', orderId)
-    .eq('restaurant_id', req.restaurantId)
-    .single();
-
-  if (orderError || !order) {
-    return sendError(res, 404, 'Order not found');
-  }
-
-  if (!order.status) {
-    return sendError(res, 400, 'Order status is invalid');
-  }
-
-  // Validate waiter can access the table (enforce validation for billing)
-  await validateTableAccess(req.restaurantId, order.table_id, req.user || {}, { isManual: false });
-
-  // Fetch fresh bill number and process settlement
-  const settlement = await OrderService.settleOrder(req.restaurantId, orderId, {
-    method: getOptionalPaymentMethod(req.body),
-    amountReceived: getOptionalAmountReceived(req.body),
-    discountPercent: getOptionalDiscountPercent(req.body),
-    paymentNote: getOptionalPaymentNote(req.body) ?? '',
-    loyaltyPhone: getOptionalLoyaltyPhone(req.body) ?? '',
-    redeemPoints: getOptionalRedeemPoints(req.body),
-    packingCharge: getOptionalChargeValue(req.body, 'packingCharge', 'packing_charge'),
-    serviceCharge: getOptionalChargeValue(req.body, 'serviceCharge', 'service_charge'),
-    deliveryCharge: getOptionalChargeValue(req.body, 'deliveryCharge', 'delivery_charge'),
-    actorRole: req.user?.role,
-    actorUserId: req.user?.userId,
-    actorName: req.user?.name || req.user?.email || 'Unknown user',
-  });
-
-  return sendSuccess(res, 200, settlement, 'Bill created successfully');
 });
 
 export const markOrderPaid = asyncHandler(async (req, res) => {
   const { orderId } = req.params;
 
   // ACCESS CHECK: Fetch order to get table and validate access
-  const { data: order, error: orderError } = await supabase
+  let paidQuery = supabase
     .from('orders')
     .select('table_id')
-    .eq('id', orderId)
-    .eq('restaurant_id', req.restaurantId)
-    .single();
+    .eq('id', orderId);
+  if (req.user?.role?.toLowerCase() !== 'developer') {
+    paidQuery = paidQuery.eq('restaurant_id', req.restaurantId);
+  }
+  const { data: order, error: orderError } = await paidQuery.single();
 
   if (orderError || !order) {
     return sendError(res, 404, 'Order not found');

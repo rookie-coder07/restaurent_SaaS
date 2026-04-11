@@ -6,7 +6,7 @@ test.describe('Manager Production Hardening', () => {
     await mockApi(page, async ({ url, method }) => {
       const { pathname } = url;
 
-      if ((pathname.endsWith('/v1/auth/login') || pathname.endsWith('/v1/auth/staff/login')) && method === 'POST') {
+      if (pathname.endsWith('/v1/auth/login') && method === 'POST') {
         return jsonSuccess({
           accessToken: createTestJwt({ role: 'manager', restaurantId: 'rest-1' }),
           refreshToken: createTestJwt({ role: 'manager', restaurantId: 'rest-1', type: 'refresh' }),
@@ -123,7 +123,7 @@ test.describe('Manager Production Hardening', () => {
     await mockApi(page, async ({ url, method, body }) => {
       const { pathname } = url;
 
-      if ((pathname.endsWith('/v1/auth/login') || pathname.endsWith('/v1/auth/staff/login')) && method === 'POST') {
+      if (pathname.endsWith('/v1/auth/login') && method === 'POST') {
         return jsonSuccess({
           accessToken: createTestJwt({ role: 'manager', restaurantId: 'rest-1' }),
           refreshToken: createTestJwt({ role: 'manager', restaurantId: 'rest-1', type: 'refresh' }),

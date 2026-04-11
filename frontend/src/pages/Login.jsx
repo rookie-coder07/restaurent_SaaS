@@ -34,6 +34,7 @@ export default function Login({ portal = 'admin', initialModeKey = '' }) {
   const navigate = useNavigate();
   const { login, isLoading, error: authError } = useAuth();
   const isHydrated = useAuthStore((state) => state.isHydrated);
+  const setError = useAuthStore((state) => state.setError);
   const baseConfig = PORTAL_CONFIG[portal] || PORTAL_CONFIG.admin;
   const filteredModes = initialModeKey
     ? baseConfig.modes.filter((mode) => mode.key === initialModeKey)
@@ -61,6 +62,7 @@ export default function Login({ portal = 'admin', initialModeKey = '' }) {
     error: '',
     success: '',
   });
+  const [forgotCooldown, setForgotCooldown] = useState(0);
 
   const selectedMode = useMemo(
     () => config.modes.find((mode) => mode.key === selectedModeKey) || config.modes[0],
@@ -71,6 +73,20 @@ export default function Login({ portal = 'admin', initialModeKey = '' }) {
   useEffect(() => {
     setSelectedModeKey(initialModeKey || config.modes[0]?.key || 'owner');
   }, [config.modes, initialModeKey, portal]);
+
+  // Countdown timer used to prevent spamming reset links (avoids Supabase email rate limit)
+  useEffect(() => {
+    if (forgotCooldown <= 0) return;
+    const timer = setInterval(() => {
+      setForgotCooldown((value) => Math.max(0, value - 1));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [forgotCooldown]);
+
+  // Clear auth error when switching modes to show fresh state
+  useEffect(() => {
+    setError(null);
+  }, [selectedModeKey, setError]);
 
   useEffect(() => {
     if (!isHydrated) {
@@ -117,6 +133,7 @@ export default function Login({ portal = 'admin', initialModeKey = '' }) {
 
   const handleForgotPassword = async (event) => {
     event.preventDefault();
+    if (forgotCooldown > 0) return;
 
     const emailToReset = String(forgotEmail || formData.email || '').trim().toLowerCase();
     if (!validateEmail(emailToReset)) {
@@ -140,9 +157,16 @@ export default function Login({ portal = 'admin', initialModeKey = '' }) {
     });
 
     if (error) {
+      const message = error.message || 'Unable to send reset link right now.';
+      if (message.toLowerCase().includes('rate limit')) {
+        setForgotCooldown(60);
+      }
+
       setForgotPasswordState({
         isLoading: false,
-        error: error.message || 'Unable to send reset link right now.',
+        error: message.toLowerCase().includes('rate limit')
+          ? 'Too many reset requests. Please wait 60 seconds before retrying.'
+          : message,
         success: '',
       });
       return;
@@ -153,6 +177,8 @@ export default function Login({ portal = 'admin', initialModeKey = '' }) {
       error: '',
       success: 'Reset link sent to your email',
     });
+    // Avoid immediately triggering the provider rate limiter again
+    setForgotCooldown(30);
   };
 
   return (
@@ -176,6 +202,11 @@ export default function Login({ portal = 'admin', initialModeKey = '' }) {
               </p>
             </div>
 
+            {authError && (
+              <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg">
+                <p className="text-sm font-medium text-red-700">{authError}</p>
+              </div>
+            )}
             {authError ? <Toast type="error" message={authError} /> : null}
             {forgotPasswordState.error ? <Toast type="error" message={forgotPasswordState.error} /> : null}
             {forgotPasswordState.success ? <Toast type="success" message={forgotPasswordState.success} /> : null}
@@ -312,10 +343,14 @@ export default function Login({ portal = 'admin', initialModeKey = '' }) {
                   <Button
                     type="submit"
                     className="w-full sm:flex-1"
-                    disabled={forgotPasswordState.isLoading}
+                    disabled={forgotPasswordState.isLoading || forgotCooldown > 0}
                   >
                     {forgotPasswordState.isLoading ? <Loader className="h-4 w-4 animate-spin" /> : null}
-                    {forgotPasswordState.isLoading ? 'Sending...' : 'Send Reset Link'}
+                    {forgotPasswordState.isLoading
+                      ? 'Sending...'
+                      : forgotCooldown > 0
+                        ? `Retry in ${forgotCooldown}s`
+                        : 'Send Reset Link'}
                   </Button>
                 </div>
               </form>

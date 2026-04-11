@@ -2,6 +2,7 @@ const express = require('express');
 const { verifyAuth } = require('../middleware/auth');
 const AnalyticsService = require('../services/analyticsService');
 const logger = require('../utils/logger');
+const SecurityAuditLogger = require('../utils/securityAudit');
 
 const router = express.Router();
 
@@ -21,6 +22,14 @@ router.get('/dashboard', async (req, res) => {
     if (!restaurantId) {
       return res.status(400).json({ error: 'Restaurant ID required' });
     }
+
+    // ✅ Log data access
+    SecurityAuditLogger.logDataAccess(
+      req.user?.id || 'unknown',
+      'analytics_dashboard',
+      'view',
+      req.ip
+    );
 
     // Determine date range
     let startDate, endDate;
@@ -84,6 +93,14 @@ router.get('/kpi', async (req, res) => {
     if (!restaurantId) {
       return res.status(400).json({ error: 'Restaurant ID required' });
     }
+
+    // ✅ Log data access
+    SecurityAuditLogger.logDataAccess(
+      req.user?.id || 'unknown',
+      'analytics_kpi',
+      'view',
+      req.ip
+    );
 
     let startDate, endDate;
     const now = new Date();
@@ -300,6 +317,14 @@ router.get('/top-items', async (req, res) => {
     if (!restaurantId) {
       return res.status(400).json({ error: 'Restaurant ID required' });
     }
+
+    // ✅ Log data access
+    SecurityAuditLogger.logDataAccess(
+      req.user?.id || 'unknown',
+      'analytics_top_items',
+      'view',
+      req.ip
+    );
 
     let startDate, endDate;
     const now = new Date();

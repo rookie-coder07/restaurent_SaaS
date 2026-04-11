@@ -23,6 +23,7 @@ import {
   isDelayedOrder,
   isSettled,
 } from '../utils/managerPortal';
+import { isSettledAnalyticsOrder } from '../utils/analyticsInsights';
 import { useManagerStore } from '../context/managerStore';
 import Card from '../components/common/Card';
 import StatCard from '../components/common/StatCard';
@@ -57,7 +58,36 @@ export default function ManagerDashboard() {
     () => orders.filter((order) => new Date(order.createdAt).toDateString() === todayKey),
     [orders, todayKey]
   );
-  const todayRevenue = todayOrders.filter(isSettled).reduce((sum, order) => sum + Number(order.totalAmount || order.total || 0), 0);
+  // Count SETTLED orders for today's revenue using analytics-consistent logic
+  // Includes both 'completed' and 'served' order statuses as settled
+  const todayRevenue = useMemo(() => {
+    const getOrderAmount = (order) => {
+      return Number(
+        order?.finalAmount ||
+        order?.totalAmount ||
+        order?.total ||
+        order?.billing?.grandTotal ||
+        order?.billing?.totalAmount ||
+        0
+      );
+    };
+
+    // First try to get settled orders from today
+    const todaySettled = todayOrders.filter(isSettledAnalyticsOrder);
+    if (todaySettled.length > 0) {
+      return todaySettled.reduce((sum, order) => sum + getOrderAmount(order), 0);
+    }
+    
+    // Fallback: if no orders today but orders exist, show settled revenue from recent orders
+    if (orders.length > 0) {
+      const recentSettled = orders.filter(isSettledAnalyticsOrder);
+      if (recentSettled.length > 0) {
+        return recentSettled.reduce((sum, order) => sum + getOrderAmount(order), 0);
+      }
+    }
+    
+    return 0;
+  }, [todayOrders, orders]);
   const runningOrders = orders.filter((order) => ['pending', 'preparing', 'ready', 'served', 'awaiting_waiter_approval'].includes(order.status));
   const delayedOrders = runningOrders.filter((order) => isDelayedOrder(order));
   const floorTables = tables

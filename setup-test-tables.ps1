@@ -12,7 +12,7 @@ $loginBody = @{
   password = $managerPassword
 } | ConvertTo-Json
 
-$loginResponse = Invoke-RestMethod -Uri "$baseUrl/auth/staff/login" `
+$loginResponse = Invoke-RestMethod -Uri "$baseUrl/auth/login" `
   -Method Post `
   -ContentType "application/json" `
   -Body $loginBody -ErrorAction Stop

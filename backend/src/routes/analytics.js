@@ -4,11 +4,13 @@ import { tenantIsolation, checkPermission } from '../middleware/tenantIsolation.
 import { validateQuery } from '../middleware/validation.js';
 import { analyticsQuerySchema } from '../schemas/restaurant.schema.js';
 import * as analyticsController from '../controllers/analyticsController.js';
+import { requireFeatureFlag } from '../middleware/featureFlags.js';
 
 const router = express.Router();
 
 // All routes protected
 router.use(authMiddleware, tenantIsolation);
+router.use(requireFeatureFlag('analytics', 'Analytics is currently disabled by the platform administrator.'));
 
 // Reports
 router.get('/daily-sales', checkPermission(['view_analytics']), analyticsController.getDailySalesReport);

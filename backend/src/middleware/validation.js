@@ -17,7 +17,7 @@ export const validateRequest = (schema) => {
         }));
         
         logger.warn('Validation failed:', { details });
-        return sendError(res, 400, 'Validation error', { details });
+        return sendError(res, 400, 'Validation error: does not meet security requirements', { details });
       }
 
       // Replace body with validated data

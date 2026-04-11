@@ -5,7 +5,7 @@ test.describe('POS Workflow Test', () => {
     test.setTimeout(120000);
     
     // Navigate to login
-    await page.goto('http://localhost:5173/pos/login');
+    // POS login removed
     await page.waitForLoadState('networkidle');
     await page.screenshot({ path: 'screenshot-1-login-page.png' });
     

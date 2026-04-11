@@ -1,11 +1,34 @@
 import logger from '../utils/logger.js';
-import { sendSuccess } from '../utils/apiResponse.js';
+import { sendSuccess, sendError } from '../utils/apiResponse.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import TableService from '../services/tableService.js';
+import { logError, logFailedRequest, logCriticalAction, logSuccessfulOperation } from '../utils/structuredLogging.js';
 
 export const createTable = asyncHandler(async (req, res) => {
-  const table = await TableService.createTable(req.user.restaurantId, req.body);
-  return sendSuccess(res, 201, table, 'Table created successfully');
+  try {
+    const table = await TableService.createTable(req.user.restaurantId, req.body);
+    
+    logCriticalAction('table_created', {
+      message: 'New table created',
+      userId: req.user?.id || req.user?.userId,
+      restaurantId: req.user.restaurantId,
+      tableId: table?.id,
+      details: { tableNumber: req.body.tableNumber },
+    });
+
+    return sendSuccess(res, 201, table, 'Table created successfully');
+  } catch (error) {
+    logError(error, {
+      message: 'Failed to create table',
+      endpoint: req.path,
+      method: req.method,
+      userId: req.user?.id || req.user?.userId,
+      restaurantId: req.user.restaurantId,
+      statusCode: 500,
+      action: 'create_table',
+    });
+    throw error;
+  }
 });
 
 export const createMultipleTables = asyncHandler(async (req, res) => {
@@ -32,8 +55,45 @@ export const getTableByQRCode = asyncHandler(async (req, res) => {
 
 export const updateTable = asyncHandler(async (req, res) => {
   const { tableId } = req.params;
-  const table = await TableService.updateTable(req.user.restaurantId, tableId, req.body);
-  return sendSuccess(res, 200, table, 'Table updated successfully');
+  
+  try {
+    if (!tableId) {
+      logFailedRequest(new Error('Table ID missing'), {
+        message: 'Update table validation failed',
+        endpoint: req.path,
+        method: req.method,
+        userId: req.user?.id || req.user?.userId,
+        restaurantId: req.user.restaurantId,
+        statusCode: 400,
+        action: 'update_table_validation',
+      });
+      return sendError(res, 400, 'Table ID is required');
+    }
+
+    const table = await TableService.updateTable(req.user.restaurantId, tableId, req.body);
+    
+    logCriticalAction('table_updated', {
+      message: 'Table updated',
+      userId: req.user?.id || req.user?.userId,
+      restaurantId: req.user.restaurantId,
+      tableId,
+      details: req.body,
+    });
+
+    return sendSuccess(res, 200, table, 'Table updated successfully');
+  } catch (error) {
+    logError(error, {
+      message: 'Failed to update table',
+      endpoint: req.path,
+      method: req.method,
+      userId: req.user?.id || req.user?.userId,
+      restaurantId: req.user.restaurantId,
+      tableId,
+      statusCode: 500,
+      action: 'update_table',
+    });
+    throw error;
+  }
 });
 
 export const reserveTable = asyncHandler(async (req, res) => {
@@ -58,12 +118,48 @@ export const claimTable = asyncHandler(async (req, res) => {
 
 export const deleteTable = asyncHandler(async (req, res) => {
   const { tableId } = req.params;
-  logger.info(`📨 DELETE /tables/${tableId} - Deleting table`);
+  
+  try {
+    if (!tableId) {
+      logFailedRequest(new Error('Table ID missing'), {
+        message: 'Delete table validation failed',
+        endpoint: req.path,
+        method: req.method,
+        userId: req.user?.id || req.user?.userId,
+        restaurantId: req.user.restaurantId,
+        statusCode: 400,
+        action: 'delete_table_validation',
+      });
+      return sendError(res, 400, 'Table ID is required');
+    }
 
-  const result = await TableService.deleteTable(req.user.restaurantId, tableId);
+    logger.info(`📨 DELETE /tables/${tableId} - Deleting table`);
 
-  logger.info(`✅ Table deleted: ${tableId}`);
-  return sendSuccess(res, 200, result, 'Table deleted successfully');
+    const result = await TableService.deleteTable(req.user.restaurantId, tableId);
+
+    logCriticalAction('table_deleted', {
+      message: 'Table deleted',
+      userId: req.user?.id || req.user?.userId,
+      restaurantId: req.user.restaurantId,
+      tableId,
+      severity: 'critical',
+    });
+
+    logger.info(`✅ Table deleted: ${tableId}`);
+    return sendSuccess(res, 200, result, 'Table deleted successfully');
+  } catch (error) {
+    logError(error, {
+      message: 'Failed to delete table',
+      endpoint: req.path,
+      method: req.method,
+      userId: req.user?.id || req.user?.userId,
+      restaurantId: req.user.restaurantId,
+      tableId,
+      statusCode: 500,
+      action: 'delete_table',
+    });
+    throw error;
+  }
 });
 
 export const generateQRUrls = asyncHandler(async (req, res) => {

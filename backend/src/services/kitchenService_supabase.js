@@ -1,11 +1,21 @@
 import logger from '../utils/logger.js';
 import supabase from '../config/supabase.js';
+import { cacheManager } from '../utils/cacheManager.js';
+
+const KITCHEN_CACHE_TTL = 30; // Shorter TTL for kitchen display
+const KITCHEN_STATS_CACHE_TTL = 15;
 
 export class KitchenService {
   // ============ KITCHEN DISPLAY SYSTEM ============
 
-  static async getPendingOrders(restaurantId) {
+  static async getPendingOrders(restaurantId, limit = 50, offset = 0) {
     try {
+      if (!restaurantId) return [];
+      
+      const cacheKey = `pending_orders:${restaurantId}:${limit}:${offset}`;
+      const cached = cacheManager.get(cacheKey);
+      if (cached) return cached;
+
       const { data: orders, error } = await supabase
         .from('orders')
         .select(`
@@ -13,35 +23,46 @@ export class KitchenService {
           table_id,
           status,
           created_at,
+          total_amount,
           order_items (
             id,
             quantity,
             menu_item_id
           ),
           tables!table_id (
+            id,
             table_number
           )
         `)
         .eq('restaurant_id', restaurantId)
         .eq('status', 'pending')
-        .order('created_at', { ascending: true });
+        .order('created_at', { ascending: true })
+        .range(offset, offset + limit - 1);
 
-      if (error) throw error;
+      if (error) return [];
 
-      // Transform to include tableNumber for easier consumption
-      return (orders || []).map(order => ({
+      const result = (orders || []).map(order => ({
         ...order,
-        tableNumber: order.tables?.table_number || null,
-        table: order.tables,
+        tableNumber: order?.tables?.table_number || null,
+        table: order?.tables,
       }));
+
+      cacheManager.set(cacheKey, result, KITCHEN_CACHE_TTL);
+      return result;
     } catch (error) {
       logger.error('❌ Get pending orders error:', error);
       throw error;
     }
   }
 
-  static async getOrdersInProgress(restaurantId) {
+  static async getOrdersInProgress(restaurantId, limit = 50, offset = 0) {
     try {
+      if (!restaurantId) return [];
+      
+      const cacheKey = `in_progress_orders:${restaurantId}:${limit}:${offset}`;
+      const cached = cacheManager.get(cacheKey);
+      if (cached) return cached;
+
       const { data: orders, error } = await supabase
         .from('orders')
         .select(`
@@ -49,27 +70,33 @@ export class KitchenService {
           table_id,
           status,
           created_at,
+          total_amount,
+          updated_at,
           order_items (
             id,
             quantity,
             menu_item_id
           ),
           tables!table_id (
+            id,
             table_number
           )
         `)
         .eq('restaurant_id', restaurantId)
         .eq('status', 'in_progress')
-        .order('created_at', { ascending: true });
+        .order('created_at', { ascending: true })
+        .range(offset, offset + limit - 1);
 
-      if (error) throw error;
+      if (error) return [];
 
-      // Transform to include tableNumber for easier consumption
-      return (orders || []).map(order => ({
+      const result = (orders || []).map(order => ({
         ...order,
-        tableNumber: order.tables?.table_number || null,
-        table: order.tables,
+        tableNumber: order?.tables?.table_number || null,
+        table: order?.tables,
       }));
+
+      cacheManager.set(cacheKey, result, KITCHEN_CACHE_TTL);
+      return result;
     } catch (error) {
       logger.error('❌ Get in-progress orders error:', error);
       throw error;
@@ -78,6 +105,9 @@ export class KitchenService {
 
   static async startCooking(restaurantId, orderId) {
     try {
+      if (!restaurantId) return null;
+      if (!orderId) return null;
+      
       const { data: order, error } = await supabase
         .from('orders')
         .update({
@@ -89,7 +119,7 @@ export class KitchenService {
         .select()
         .single();
 
-      if (error || !order) throw error || new Error('Order not found');
+      if (error || !order) return null;
 
       logger.info(`✅ Order cooking started: ${orderId}`);
       return order;
@@ -101,6 +131,9 @@ export class KitchenService {
 
   static async completeOrder(restaurantId, orderId) {
     try {
+      if (!restaurantId) return null;
+      if (!orderId) return null;
+      
       const { data: order, error } = await supabase
         .from('orders')
         .update({
@@ -112,7 +145,7 @@ export class KitchenService {
         .select()
         .single();
 
-      if (error || !order) throw error || new Error('Order not found');
+      if (error || !order) return null;
 
       logger.info(`✅ Order completed: ${orderId}`);
       return order;
@@ -124,6 +157,9 @@ export class KitchenService {
 
   static async getOrderDetails(restaurantId, orderId) {
     try {
+      if (!restaurantId) return null;
+      if (!orderId) return null;
+      
       const { data: order, error } = await supabase
         .from('orders')
         .select(`
@@ -142,13 +178,13 @@ export class KitchenService {
         .eq('restaurant_id', restaurantId)
         .single();
 
-      if (error || !order) throw error || new Error('Order not found');
+      if (error || !order) return null;
 
       // Add tableNumber for easier consumption
       return {
         ...order,
-        tableNumber: order.tables?.table_number || null,
-        table: order.tables,
+        tableNumber: order?.tables?.table_number || null,
+        table: order?.tables,
       };
     } catch (error) {
       logger.error('❌ Get order details error:', error);
@@ -158,29 +194,37 @@ export class KitchenService {
 
   static async getKitchenStats(restaurantId) {
     try {
-      // Get pending count
-      const { count: pendingCount, error: pendingError } = await supabase
-        .from('orders')
-        .select('*', { count: 'exact', head: true })
-        .eq('restaurant_id', restaurantId)
-        .eq('status', 'pending');
+      if (!restaurantId) return { pendingOrders: 0, inProgressOrders: 0, totalQueue: 0 };
+      
+      const cacheKey = `kitchen_stats:${restaurantId}`;
+      const cached = cacheManager.get(cacheKey);
+      if (cached) return cached;
 
-      if (pendingError) throw pendingError;
+      // Batch query using count for efficiency
+      const [pendingResult, inProgressResult] = await Promise.all([
+        supabase
+          .from('orders')
+          .select('*', { count: 'exact', head: true })
+          .eq('restaurant_id', restaurantId)
+          .eq('status', 'pending'),
+        supabase
+          .from('orders')
+          .select('*', { count: 'exact', head: true })
+          .eq('restaurant_id', restaurantId)
+          .eq('status', 'in_progress'),
+      ]);
 
-      // Get in-progress count
-      const { count: inProgressCount, error: inProgressError } = await supabase
-        .from('orders')
-        .select('*', { count: 'exact', head: true })
-        .eq('restaurant_id', restaurantId)
-        .eq('status', 'in_progress');
+      const pendingCount = pendingResult?.count || 0;
+      const inProgressCount = inProgressResult?.count || 0;
 
-      if (inProgressError) throw inProgressError;
-
-      return {
-        pendingOrders: pendingCount || 0,
-        inProgressOrders: inProgressCount || 0,
-        totalQueue: (pendingCount || 0) + (inProgressCount || 0),
+      const stats = {
+        pendingOrders: pendingCount,
+        inProgressOrders: inProgressCount,
+        totalQueue: pendingCount + inProgressCount,
       };
+
+      cacheManager.set(cacheKey, stats, KITCHEN_STATS_CACHE_TTL);
+      return stats;
     } catch (error) {
       logger.error('❌ Get kitchen stats error:', error);
       throw error;
@@ -223,6 +267,9 @@ export class KitchenService {
 
   static async markOrderReady(restaurantId, orderId) {
     try {
+      if (!restaurantId) return null;
+      if (!orderId) return null;
+      
       const { data: order, error } = await supabase
         .from('orders')
         .update({
@@ -234,7 +281,7 @@ export class KitchenService {
         .select()
         .single();
 
-      if (error || !order) throw error || new Error('Order not found');
+      if (error || !order) return null;
 
       logger.info(`✅ Order marked as ready: ${orderId}`);
       return order;
@@ -244,8 +291,12 @@ export class KitchenService {
     }
   }
 
-  static async getReadyOrders(restaurantId) {
+  static async getReadyOrders(restaurantId, limit = 50, offset = 0) {
     try {
+      const cacheKey = `ready_orders:${restaurantId}:${limit}:${offset}`;
+      const cached = cacheManager.get(cacheKey);
+      if (cached) return cached;
+
       const { data: orders, error } = await supabase
         .from('orders')
         .select(`
@@ -253,6 +304,7 @@ export class KitchenService {
           table_id,
           status,
           created_at,
+          updated_at,
           order_items (
             id,
             quantity,
@@ -261,19 +313,26 @@ export class KitchenService {
         `)
         .eq('restaurant_id', restaurantId)
         .eq('status', 'ready')
-        .order('updated_at', { ascending: true });
+        .order('updated_at', { ascending: true })
+        .range(offset, offset + limit - 1);
 
       if (error) throw error;
 
-      return orders || [];
+      const result = orders || [];
+      cacheManager.set(cacheKey, result, KITCHEN_CACHE_TTL);
+      return result;
     } catch (error) {
       logger.error('❌ Get ready orders error:', error);
       throw error;
     }
   }
 
-  static async getOrderHistory(restaurantId, limit = 50) {
+  static async getOrderHistory(restaurantId, limit = 50, offset = 0) {
     try {
+      const cacheKey = `order_history:${restaurantId}:${limit}:${offset}`;
+      const cached = cacheManager.get(cacheKey);
+      if (cached) return cached;
+
       const { data: orders, error } = await supabase
         .from('orders')
         .select(`
@@ -286,11 +345,13 @@ export class KitchenService {
         .eq('restaurant_id', restaurantId)
         .neq('status', 'pending')
         .order('updated_at', { ascending: false })
-        .limit(limit);
+        .range(offset, offset + limit - 1);
 
       if (error) throw error;
 
-      return orders || [];
+      const result = orders || [];
+      cacheManager.set(cacheKey, result, KITCHEN_CACHE_TTL);
+      return result;
     } catch (error) {
       logger.error('❌ Get order history error:', error);
       throw error;

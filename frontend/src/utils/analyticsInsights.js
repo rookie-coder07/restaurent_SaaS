@@ -44,7 +44,10 @@ function getHourLabel(hour) {
 }
 
 export function isSettledAnalyticsOrder(order) {
-  return order?.status === 'completed' || String(order?.paymentStatus || '').toLowerCase() === 'paid';
+  const status = String(order?.status || '').toLowerCase();
+  const paymentStatus = String(order?.paymentStatus || '').toLowerCase();
+  // Order is settled if: status is completed/served, OR payment status is paid
+  return status === 'completed' || status === 'served' || paymentStatus === 'paid';
 }
 
 export function parseDiscountAmountFromNotes(notes = '') {
