@@ -203,7 +203,7 @@ function CartPanel({
                 disabled={items.length === 0 || isSubmitting || isSendingToKitchen || isSettling || isCancelling || isSendToKitchenDisabled}
                 className="min-h-[4rem] w-full rounded-[1.6rem] bg-amber-400 px-4 text-base font-bold text-slate-950 shadow-lg transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {isSendingToKitchen ? 'Sending...' : sendToKitchenLabel}
+                {isSendingToKitchen ? 'Placing...' : sendToKitchenLabel}
               </button>
             ) : null}
 

@@ -41,7 +41,7 @@ export function subscribeToOrderEvents(onEvent, options = {}) {
     return () => {};
   }
 
-  const streamUrl = new URL(`${API_BASE_URL}/v1/orders/events/stream`);
+  const streamUrl = new URL(`${API_BASE_URL}/orders/events/stream`);
   streamUrl.searchParams.set('accessToken', accessToken);
 
   const eventName = options.eventName || 'order';

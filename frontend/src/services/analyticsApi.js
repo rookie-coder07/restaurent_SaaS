@@ -1,6 +1,6 @@
 import api, { API_BASE_URL, getCurrentRestaurantId, getCurrentPortalAccessToken } from './api';
 
-const ANALYTICS_BASE = `${API_BASE_URL}/v1/analytics`;
+const ANALYTICS_BASE = `${API_BASE_URL}/analytics`;
 
 const analyticsApi = {
   // Dashboard endpoints

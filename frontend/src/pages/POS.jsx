@@ -1278,8 +1278,20 @@ export default function POS() {
   };
 
   const handleSendToKitchen = async () => {
+    if (isSendingToKitchen) {
+      return;
+    }
+
     setSubmitError(null);
     setSubmitSuccess(null);
+
+    console.log('Table:', selectedTable);
+    console.log('Cart:', cartItems);
+
+    if (!selectedTable || cartItems.length === 0) {
+      setSubmitError('Select table and items first');
+      return;
+    }
 
     if (!validateDraftBeforeSave()) {
       return;
@@ -1732,6 +1744,7 @@ export default function POS() {
                         : 'SEND TO KITCHEN'
                       : 'CREATE & SEND TO KITCHEN'
                 }
+                isSendToKitchenDisabled={!selectedTable || cartItems.length === 0 || isLoadingTableOrder}
                 settleLabel={
                   isEditingActiveBill
                     ? hasUnsavedChanges

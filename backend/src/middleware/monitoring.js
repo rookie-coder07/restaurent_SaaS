@@ -1,4 +1,4 @@
-import { logSlowAPI, logInfo } from '../utils/logger.js';
+import { logSlowAPI } from '../utils/logger.js';
 
 export class ResponseMetrics {
   constructor() {
@@ -8,12 +8,28 @@ export class ResponseMetrics {
       totalSuccess: 0,
       totalDuration: 0,
       avgResponseTime: 0,
+      p95ResponseTime: 0,
       errorRate: 0,
       slowAPICount: 0,
       endpoints: {},
       startTime: Date.now(),
       uptime: 0,
+      recentDurations: [],
     };
+  }
+
+  calculatePercentile(percentile) {
+    if (this.metrics.recentDurations.length === 0) {
+      return 0;
+    }
+
+    const sortedDurations = [...this.metrics.recentDurations].sort((left, right) => left - right);
+    const index = Math.min(
+      sortedDurations.length - 1,
+      Math.max(0, Math.ceil((percentile / 100) * sortedDurations.length) - 1)
+    );
+
+    return sortedDurations[index];
   }
 
   recordRequest(method, endpoint, statusCode, duration) {
@@ -21,6 +37,13 @@ export class ResponseMetrics {
     this.metrics.totalDuration += duration;
     this.metrics.avgResponseTime = Math.round(this.metrics.totalDuration / this.metrics.totalRequests);
     this.metrics.uptime = Math.round((Date.now() - this.metrics.startTime) / 1000);
+    this.metrics.recentDurations.push(duration);
+
+    if (this.metrics.recentDurations.length > 200) {
+      this.metrics.recentDurations.shift();
+    }
+
+    this.metrics.p95ResponseTime = this.calculatePercentile(95);
 
     if (statusCode >= 400) {
       this.metrics.totalErrors++;
@@ -74,11 +97,13 @@ export class ResponseMetrics {
       totalSuccess: 0,
       totalDuration: 0,
       avgResponseTime: 0,
+      p95ResponseTime: 0,
       errorRate: 0,
       slowAPICount: 0,
       endpoints: {},
       startTime: Date.now(),
       uptime: 0,
+      recentDurations: [],
     };
   }
 }
@@ -96,10 +121,6 @@ export const monitoringMiddleware = (req, res, next) => {
     const method = req.method;
 
     metricsInstance.recordRequest(method, endpoint, statusCode, duration);
-
-    if (duration > 1000) {
-      logSlowAPI(endpoint, method, duration, 1000);
-    }
 
     res.set('X-Response-Time', `${duration}ms`);
     res.set('X-Request-Id', req.id || 'N/A');

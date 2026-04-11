@@ -14,10 +14,11 @@ const startServer = async () => {
 
     const config = getConfig();
     const PORT = process.env.PORT || process.env.APP_PORT || config.port || 5000;
-    const isProd = process.env.NODE_ENV === 'production';
-    const baseUrl = (process.env.BASE_URL || config.baseUrl || 'https://restaurent-backend-448t.onrender.com').replace(/\/+$/, '');
+    const isProd = config.isProd;
+    const baseUrl = (config.baseUrl || 'https://restaurent-backend-448t.onrender.com').replace(/\/+$/, '');
     const publicServerUrl = isProd ? baseUrl : `http://localhost:${PORT}`;
     const publicApiBaseUrl = isProd ? `${baseUrl}/api/v1` : `http://localhost:${PORT}/api/v1`;
+    const hasLocalhostExposure = /localhost|127\.0\.0\.1/i.test(publicServerUrl) || /localhost|127\.0\.0\.1/i.test(publicApiBaseUrl);
 
     logger.info('BACKEND INITIALIZATION STARTED');
     logger.info(`Environment target: ${config.nodeEnv || 'development'}`);
@@ -41,12 +42,12 @@ const startServer = async () => {
 
     const server = app.listen(PORT, () => {
       logger.info('BACKEND HTTP SERVER STARTED');
-      logger.info(`✔ Environment: ${config.nodeEnv || 'development'}`);
+      logger.info(`Environment: ${config.nodeEnv || 'development'}`);
       logger.info(`Server URL: ${publicServerUrl}`);
-      logger.info(`✔ API Base: ${publicApiBaseUrl}`);
+      logger.info(`API Base: ${publicApiBaseUrl}`);
       logger.info(`API Version: ${config.apiVersion || 'v1'}`);
-      logger.info(`✔ No localhost usage: ${String(!(isProd && baseUrl.includes('localhost')))}`);
-      logger.info('✔ Health endpoint working: /health');
+      logger.info(`No localhost usage: ${String(!hasLocalhostExposure)}`);
+      logger.info('Health endpoint working: /health');
 
       monitoringService.start();
       logger.info('Monitoring service enabled');

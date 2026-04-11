@@ -79,7 +79,7 @@ async function refreshPortalAccessToken(portal, existingSession) {
 
   const refreshPromise = axios
     .post(
-      `${API_BASE_URL}/v1/auth/refresh-token`,
+      `${API_BASE_URL}/auth/refresh-token`,
       { refreshToken: existingSession.refreshToken },
       {
         withCredentials: false,

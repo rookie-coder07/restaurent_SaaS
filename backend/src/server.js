@@ -8,10 +8,11 @@ const KEEP_ALIVE_URL = 'https://restaurent-backend-448t.onrender.com/health';
 
 const config = getConfig();
 const PORT = config.port || 3000;
-const isProd = process.env.NODE_ENV === 'production';
-const baseUrl = (process.env.BASE_URL || config.baseUrl || 'https://restaurent-backend-448t.onrender.com').replace(/\/+$/, '');
+const isProd = config.isProd;
+const baseUrl = (config.baseUrl || 'https://restaurent-backend-448t.onrender.com').replace(/\/+$/, '');
 const publicServerUrl = isProd ? baseUrl : `http://localhost:${PORT}`;
 const publicApiBaseUrl = isProd ? `${baseUrl}/api/v1` : `http://localhost:${PORT}/api/v1`;
+const hasLocalhostExposure = /localhost|127\.0\.0\.1/i.test(publicServerUrl) || /localhost|127\.0\.0\.1/i.test(publicApiBaseUrl);
 
 async function startServer() {
   try {
@@ -19,11 +20,11 @@ async function startServer() {
     logger.info('DATABASE CONNECTED SUCCESSFULLY');
 
     const server = app.listen(PORT, () => {
-      logger.info(`✔ Environment: ${config.nodeEnv || 'development'}`);
+      logger.info(`Environment: ${config.nodeEnv || 'development'}`);
       logger.info(`Server URL: ${publicServerUrl}`);
-      logger.info(`✔ API Base: ${publicApiBaseUrl}`);
-      logger.info(`✔ No localhost usage: ${String(!(isProd && baseUrl.includes('localhost')))}`);
-      logger.info('✔ Health endpoint working: /health');
+      logger.info(`API Base: ${publicApiBaseUrl}`);
+      logger.info(`No localhost usage: ${String(!hasLocalhostExposure)}`);
+      logger.info('Health endpoint working: /health');
 
       if (isProd) {
         setInterval(async () => {

@@ -5,11 +5,14 @@ import { logInfo, logWarn } from '../utils/logger.js';
 export class MonitoringService {
   constructor() {
     this.isRunning = false;
-    this.checkInterval = 30000; // Check every 30 seconds
+    this.checkInterval = 30000;
+    this.minUptimeBeforeAlertsMs = 120000;
+    this.minRequestsBeforeAlerts = 20;
     this.intervalId = null;
     this.lastMetrics = null;
     this.dbErrorCount = 0;
     this.billingErrorCount = 0;
+    this.startedAt = 0;
   }
 
   start() {
@@ -19,14 +22,13 @@ export class MonitoringService {
     }
 
     this.isRunning = true;
+    this.startedAt = Date.now();
     logInfo('Monitoring service started', {
       checkInterval: `${this.checkInterval}ms`,
     });
 
-    // Initial check
     this.performCheck();
 
-    // Schedule periodic checks
     this.intervalId = setInterval(() => {
       this.performCheck();
     }, this.checkInterval);
@@ -48,19 +50,17 @@ export class MonitoringService {
 
     try {
       const metrics = metricsInstance.getMetrics();
+      const uptimeMs = Date.now() - this.startedAt;
+      const canTriggerAlerts =
+        uptimeMs >= this.minUptimeBeforeAlertsMs &&
+        metrics.totalRequests >= this.minRequestsBeforeAlerts;
 
-      // Check error rate
-      if (metrics.totalRequests > 10) {
+      if (canTriggerAlerts) {
         alertService.checkErrorRate(metrics.errorRate, metrics.totalRequests);
+        alertService.checkLatency(metrics.avgResponseTime, metrics.p95ResponseTime);
       }
 
-      // Check latency
-      if (metrics.totalRequests > 0) {
-        alertService.checkLatency(metrics.avgResponseTime, metrics.avgResponseTime * 1.5);
-      }
-
-      // Check slow API count
-      if (metrics.slowAPICount > 10) {
+      if (canTriggerAlerts && metrics.slowAPICount > 10) {
         alertService.emit({
           type: 'SLOW_APIS',
           severity: 'warning',
@@ -69,12 +69,10 @@ export class MonitoringService {
         });
       }
 
-      // Check memory usage
       const memUsage = process.memoryUsage();
       const memPercent = (memUsage.heapUsed / memUsage.heapTotal) * 100;
       alertService.checkMemoryUsage(memPercent);
 
-      // Check billing errors
       if (this.billingErrorCount > 0) {
         alertService.checkBillingErrors(this.billingErrorCount);
         this.billingErrorCount = 0;
@@ -85,9 +83,13 @@ export class MonitoringService {
       logInfo('Monitoring check completed', {
         errorRate: `${metrics.errorRate}%`,
         avgResponseTime: `${metrics.avgResponseTime}ms`,
+        p95ResponseTime: `${metrics.p95ResponseTime}ms`,
         memoryUsage: `${memPercent.toFixed(2)}%`,
         slowAPIs: metrics.slowAPICount,
+        alertingActive: canTriggerAlerts,
       });
+
+      metricsInstance.reset();
     } catch (error) {
       logWarn('Monitoring check failed', {
         error: error?.message,
@@ -109,7 +111,7 @@ export class MonitoringService {
     }
   }
 
-  recordBillingError(error) {
+  recordBillingError() {
     this.billingErrorCount++;
   }
 
