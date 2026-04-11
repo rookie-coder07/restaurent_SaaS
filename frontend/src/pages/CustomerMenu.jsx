@@ -291,8 +291,17 @@ export default function CustomerMenu() {
       removeCart(cartKey);
       setShowCart(false);
 
+      if (!createdOrder?.id) {
+        console.error('ERROR: Created order missing ID!', {
+          response: response.data,
+          createdOrder,
+        });
+        throw new Error('Order created but missing ID in response');
+      }
+
       window.setTimeout(() => {
-        navigate(`/order-status?order=${createdOrder?.id}&table=${tableNumber || ''}`);
+        const targetUrl = `/order-status?order=${createdOrder.id}&table=${tableNumber || ''}`;
+        navigate(targetUrl);
       }, 2200);
     } catch (error) {
       const statusCode = error.response?.status;
