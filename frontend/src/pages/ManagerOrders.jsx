@@ -11,6 +11,7 @@ import { useAuthStore } from '../context/authStore';
 import { orderAPI, menuAPI, restaurantAPI } from '../services/apiEndpoints';
 import { formatCurrency, formatDisplayOrderNumber } from '../utils/formatters';
 import { printKotReceipt } from '../utils/printerService';
+import { printKotInstant } from '../utils/thermalPrinter';
 import { buildInvoiceData, calculateInvoiceSummary, getRestaurantBillingSettings } from '../utils/invoice';
 
 function normalizeId(value) {

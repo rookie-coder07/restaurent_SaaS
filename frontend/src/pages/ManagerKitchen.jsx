@@ -3,6 +3,7 @@ import { AlertCircle, BellRing, RefreshCw, ShieldAlert } from 'lucide-react';
 import { kitchenAPI, restaurantAPI } from '../services/apiEndpoints';
 import { formatDate, formatDisplayOrderNumber, formatShortDisplayOrderNumber, parseServerDate } from '../utils/formatters';
 import { printKotReceipt } from '../utils/printerService';
+import { printKotInstant } from '../utils/thermalPrinter';
 import { useManagerStore } from '../context/managerStore';
 import { useAuthStore } from '../context/authStore';
 import { useOrderSubscription } from '../hooks/useOrderSubscription';
