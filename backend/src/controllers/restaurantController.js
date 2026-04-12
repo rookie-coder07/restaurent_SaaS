@@ -3,6 +3,7 @@ import { sendSuccess, sendError } from '../utils/apiResponse.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import RestaurantService from '../services/restaurantService.js';
 import PasswordResetService from '../services/passwordResetService.js';
+import { normalizeRole } from '../constants/index.js';
 
 export const getProfile = asyncHandler(async (req, res) => {
   logger.info(`API HIT: GET /profile - Restaurant: ${req.restaurantId}`);
@@ -74,13 +75,14 @@ export const deactivateStaff = asyncHandler(async (req, res) => {
 export const updateStaff = asyncHandler(async (req, res) => {
   try {
     const { staffId } = req.params;
-    const normalizedRole = String(req.user?.role || '').toLowerCase();
+    // 🔥 CRITICAL: Use proper normalizeRole to convert owner → admin
+    const userRole = normalizeRole(req.user?.role);
 
-    if (normalizedRole !== 'owner' && normalizedRole !== 'manager') {
+    if (!['admin', 'manager'].includes(userRole)) {
       return sendError(res, 403, 'Insufficient permissions for this action');
     }
 
-    if (normalizedRole === 'manager') {
+    if (userRole === 'manager') {
       const providedFields = Object.entries(req.body || {})
         .filter(([, value]) => value !== undefined)
         .map(([key]) => key);
@@ -125,14 +127,14 @@ export const resetStaffPassword = asyncHandler(async (req, res) => {
   // Role-based authorization
   const currentUserRole = req.user?.role;
   
-  // Owner can reset anyone except other owners
-  if (currentUserRole === 'owner') {
-    if (targetUser.role === 'owner') {
-      return sendError(res, 403, 'Cannot reset password for other owners');
+  // Admin (including owner) can reset anyone except other admins
+  if (['admin'].includes(currentUserRole)) {
+    if (['admin'].includes(targetUser.role)) {
+      return sendError(res, 403, 'Cannot reset password for other admins');
     }
   }
   // Manager can only reset staff, kitchen_staff, and waiters
-  else if (currentUserRole === 'manager') {
+  else if (['manager'].includes(currentUserRole)) {
     const allowedRoles = ['staff', 'kitchen_staff', 'waiter'];
     if (!allowedRoles.includes(targetUser.role)) {
       return sendError(res, 403, `You don't have permission to reset password for ${targetUser.role} users`);

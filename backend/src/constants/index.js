@@ -21,10 +21,16 @@ export const VALID_ROLES = Object.values(ROLES);
 
 export function normalizeRole(role) {
   const normalizedRole = String(role || '').trim().toLowerCase();
+  // Explicit mapping: owner → admin (for DB backward compatibility)
+  if (normalizedRole === 'owner') {
+    return 'admin';
+  }
   return ROLE_ALIASES[normalizedRole] || normalizedRole;
 }
 
 export const ROLE_PERMISSIONS = {
+  // 🔥 CRITICAL: All roles are normalized to canonical names
+  // owner role is normalized to 'admin' by normalizeRole()
   admin: ['create_menu', 'manage_menu', 'manage_orders', 'manage_staff', 'view_staff', 'view_analytics', 'manage_restaurant', 'view_orders', 'update_order_status'],
   developer: [
     'developer_console',
@@ -42,7 +48,6 @@ export const ROLE_PERMISSIONS = {
     'view_analytics',
     'update_order_status',
   ],
-  owner: ['create_menu', 'manage_menu', 'manage_orders', 'manage_staff', 'view_staff', 'view_analytics', 'manage_restaurant', 'view_orders', 'update_order_status'],
   manager: ['manage_orders', 'manage_tables', 'manage_staff', 'view_staff', 'view_analytics', 'view_orders', 'update_order_status'],
   staff: ['view_orders', 'manage_orders'],
   kitchen_staff: ['view_orders', 'update_order_status'],

@@ -9,8 +9,8 @@ import analyticsRoutes from './analytics.js';
 import customerRoutes from './customer.js';
 import inventoryRoutes from './inventory.js';
 import takeawayRoutes from './takeaway.js';
-import activityRoutes from './activity.js';
 import developerRoutes from './developer.js';
+import activityRoutes from './activity.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { optionalAuth } from '../middleware/auth.js';
 import { tenantIsolation } from '../middleware/tenantIsolation.js';
@@ -47,6 +47,7 @@ router.use(`/${apiVersion}/kitchen`, kitchenRoutes);
 router.use(`/${apiVersion}/tables`, tableRoutes);
 router.use(`/${apiVersion}/analytics`, analyticsRoutes);
 router.use(`/${apiVersion}/inventory`, inventoryRoutes);
+// ✅ Activity routes: after systemAccessGuard (now has proper middleware including tenantIsolation)
 router.use(`/${apiVersion}/activity`, activityRoutes);
 
 // Health check

@@ -1,12 +1,12 @@
 import { randomUUID } from 'crypto';
 import logger from '../utils/logger.js';
 import supabaseImport from '../config/supabase.js';
+import { normalizeRole } from '../constants/index.js';
 import TableService from './tableService.js';
 // Inventory dependency intentionally disabled to avoid blocking orders/KOTs
 // import InventoryService from './inventoryService.js';
 import InvoiceService from './invoiceService.js';
 import AuthService from './authService.js';
-import { ActivityService } from './activityService.js';
 import { validateOrderBelongsToRestaurant } from '../middleware/multiTenantValidation.js';
 import {
   appendPublicNote,
@@ -694,7 +694,7 @@ export class OrderService {
       total: Number(order.total_amount || 0),
       finalAmount: Number(order.final_amount || effectiveBilling.grandTotal || order.total_amount || 0),
       paymentMethod: order.payment_method,
-        paymentStatus: order.payment_status || 'pending',
+      paymentStatus: order.payment_status || 'pending',
       billing: effectiveBilling,
       notes: publicNotes,
       createdAt: this.normalizeTimestamp(order.created_at),
@@ -1271,8 +1271,8 @@ export class OrderService {
   }
 
   static canManageBilling(actorRole) {
-    const normalizedRole = String(actorRole || '').trim().toLowerCase();
-    return normalizedRole === 'manager' || normalizedRole === 'owner' || normalizedRole === 'admin';
+    const normalizedRole = normalizeRole(actorRole);
+    return ['admin', 'manager'].includes(normalizedRole);
   }
 
   static assertBillingChangesAllowed(actorRole, requestedTotalAmount, computedTotalAmount) {
@@ -1817,21 +1817,6 @@ export class OrderService {
 
       logger.info(`Order created: ${order.id}`);
 
-      // Log activity
-      ActivityService.logActivity(
-        finalRestaurantId,
-        options.userId,
-        options.actorRole,
-        'order_created',
-        {
-          orderId: order.id,
-          orderType: normalizedOrderType,
-          tableId: resolvedTableId,
-          itemCount: normalizedItems.length,
-          totalAmount: computedTotalAmount,
-        }
-      ).catch(err => logger.error('Failed to log order creation activity:', err));
-
       // Add items if order was successfully created
       let successfullyAddedItems = [];
       if (order?.id && normalizedItems.length > 0) {
@@ -1840,23 +1825,6 @@ export class OrderService {
           await this.addOrderItems(order.id, normalizedItems);
           successfullyAddedItems = normalizedItems;
           logger.info(`Items added to order ${order.id}`);
-
-          // Log activity for items added
-          ActivityService.logActivity(
-            finalRestaurantId,
-            options.userId,
-            options.actorRole,
-            'item_added',
-            {
-              orderId: order.id,
-              itemCount: normalizedItems.length,
-              items: normalizedItems.map(item => ({
-                menuItemId: item.menuItemId || item.itemId,
-                quantity: item.quantity,
-                unitPrice: item.unitPrice ?? item.price ?? 0,
-              })),
-            }
-          ).catch(err => logger.error('Failed to log item_added activity:', err));
         } catch (orderItemsError) {
           logger.error(`Failed to add items to order ${order.id}`, {
             message: orderItemsError.message,
@@ -2052,7 +2020,7 @@ export class OrderService {
 
   static async getOrderById(restaurantId, orderId, user = null) {
     try {
-      const normalizedRole = String(user?.role || '').toLowerCase();
+      const normalizedRole = normalizeRole(user?.role);
       const isDeveloper = normalizedRole === 'developer';
 
       let order = await this.fetchOrderRecord(restaurantId, orderId, isDeveloper);
@@ -2571,23 +2539,6 @@ export class OrderService {
       }
 
       const settledOrder = await this.getOrderById(restaurantId, orderId);
-      
-      // Log activity for bill generated
-      ActivityService.logActivity(
-        restaurantId,
-        paymentData.actorUserId,
-        paymentData.actorRole,
-        'bill_generated',
-        {
-          orderId,
-          invoiceNumber,
-          subtotal,
-          discountAmount: managerDiscountAmount,
-          taxAmount: this.roundCurrency(cgstAmount + sgstAmount),
-          totalAmount: finalTotal,
-          paymentMethod: method,
-        }
-      ).catch(err => logger.error('Failed to log bill_generated activity:', err));
 
       this.logAuditEvent('order.bill_created', {
         restaurantId,
@@ -2741,21 +2692,6 @@ export class OrderService {
       }
 
       const paidOrder = await this.getOrderById(restaurantId, orderId);
-      
-      // Log activity for payment completed
-      ActivityService.logActivity(
-        restaurantId,
-        paymentData.actorUserId,
-        paymentData.actorRole,
-        'payment_completed',
-        {
-          orderId,
-          paymentMethod: method,
-          finalAmount: expectedTotal,
-          amountReceived,
-          changeDue,
-        }
-      ).catch(err => logger.error('Failed to log payment_completed activity:', err));
 
       this.logAuditEvent('order.payment_confirmed', {
         restaurantId,
@@ -3125,7 +3061,7 @@ export class OrderService {
     try {
       const limit = Math.min(parseInt(filters.limit) || 20, 50);
       const skip = Math.max(parseInt(filters.skip) || 0, 0);
-      const normalizedRole = String(user?.role || '').toLowerCase();
+      const normalizedRole = normalizeRole(user?.role);
       const isDeveloper = normalizedRole === 'developer';
       
       let query = supabase
@@ -3583,20 +3519,30 @@ export class OrderService {
 
   static async softDeleteOrder(restaurantId, orderId, reason, options = {}) {
     try {
-      const role = String(options.actorRole || '').toLowerCase();
+      let role = String(options.actorRole || '').toLowerCase();
+      // Normalize "owner" to "admin"
+      if (role === 'owner') {
+        role = 'admin';
+      }
       const currentPassword = String(options.currentPassword || '').trim();
+
+      console.log('[DELETE_ORDER_DEBUG]:', {
+        role,
+        user: options.actorUserId,
+        orderId
+      });
 
       console.log('[SERVICE_SOFT_DELETE] 🔍 Starting order deletion');
       console.log('[SERVICE_SOFT_DELETE] Role:', options.actorRole, '→ normalized:', role);
       console.log('[SERVICE_SOFT_DELETE] Password provided:', !!currentPassword);
 
-      if (currentPassword && ['owner', 'admin', 'manager'].includes(role)) {
+      if (currentPassword && ['admin', 'manager'].includes(role)) {
         console.log('[SERVICE_SOFT_DELETE] 🔐 Verifying password');
         try {
           await AuthService.verifyCurrentPassword(
             options.actorUserId || restaurantId,
             currentPassword,
-            role === 'owner' || role === 'admin'
+            role === 'admin'
           );
           console.log('[SERVICE_SOFT_DELETE] ✅ Password verified');
         } catch (pwdError) {
@@ -3606,10 +3552,10 @@ export class OrderService {
       }
 
       console.log('[SERVICE_SOFT_DELETE] 🔐 Checking role authorization');
-      console.log('[SERVICE_SOFT_DELETE] Allowed roles: owner, admin, manager, developer');
-      console.log('[SERVICE_SOFT_DELETE] User role in allowed list:', ['owner', 'admin', 'manager', 'developer'].includes(role));
+      console.log('[SERVICE_SOFT_DELETE] Allowed roles: admin, manager, developer');
+      console.log('[SERVICE_SOFT_DELETE] User role in allowed list:', ['admin', 'manager', 'developer'].includes(role));
       
-      if (!['owner', 'admin', 'manager', 'developer'].includes(role)) {
+      if (!['admin', 'manager', 'developer'].includes(role)) {
         console.log('[SERVICE_SOFT_DELETE] ❌ Role not authorized:', role);
         throw new Error('Access denied');
       }

@@ -246,13 +246,25 @@ export default function Orders() {
       const allSuccessful = responses.every((response) => response?.status === 200 && response?.data?.data?.id);
       
       if (!allSuccessful) {
-        console.error('[OrderDelete] Deletion verification failed - not all orders deleted successfully');
-        throw new Error('One or more orders failed to delete. No rows were affected.');
+        console.error('[OrderDelete] Deletion verification failed', {
+          responses: responses.map(r => ({ status: r?.status, hasId: !!r?.data?.data?.id }))
+        });
+        // Find failed response for better error message
+        const failedResponse = responses.find((response) => response?.status !== 200 || !response?.data?.data?.id);
+        throw failedResponse?.data || new Error('One or more orders failed to delete. No rows were affected.');
       }
 
+      console.log('[OrderDelete] ✅ All deletions successful');
       removePendingDeletionEntry(entry.id);
       setRemovedOrderIds((current) => Array.from(new Set([...current, ...entry.orderIds])));
-      await Promise.allSettled([refetchOrders(), refetchTables()]);
+      
+      // ✅ FIX: Refetch immediately without showing toast
+      Promise.allSettled([refetchOrders(), refetchTables()]).then(() => {
+        console.log('[OrderDelete] ✅ Refetch complete');
+      }).catch((err) => {
+        console.error('[OrderDelete] Silent refetch error:', err);
+      });
+      
       setSuccess(
         entry.orderIds.length === 1
           ? `${entry.label} deleted permanently.`
@@ -260,15 +272,32 @@ export default function Orders() {
       );
       window.setTimeout(() => setSuccess(null), 4000);
     } catch (err) {
-      removePendingDeletionEntry(entry.id);
-      setRemovedOrderIds((ids) => ids.filter((id) => !entry.orderIds.includes(id)));
-      console.error('[OrderDelete] Deletion failed:', {
+      console.error('[OrderDelete] ❌ Deletion error:', {
         status: err.response?.status,
-        message: err.response?.data?.message || err.message,
+        statusText: err.response?.statusText,
+        message: err.message,
+        data: err.response?.data,
         userRole: user?.role,
       });
-      setError(err.response?.data?.message || err.message || 'Failed to delete orders.');
-      await Promise.allSettled([refetchOrders(), refetchTables()]);
+      
+      removePendingDeletionEntry(entry.id);
+      setRemovedOrderIds((ids) => ids.filter((id) => !entry.orderIds.includes(id)));
+      
+      let errorMessage = 'Failed to delete orders.';
+      if (err.response?.status === 403) {
+        errorMessage = `Access Denied: ${err.response?.data?.message || 'You do not have permission to delete orders'}`;
+      } else if (err.response?.data?.message) {
+        errorMessage = err.response.data.message;
+      } else if (err.message) {
+        errorMessage = err.message;
+      }
+      
+      setError(errorMessage);
+      
+      // Refetch on error to restore UI state
+      Promise.allSettled([refetchOrders(), refetchTables()]).catch((refetchErr) => {
+        console.error('[OrderDelete] Refetch failed after error:', refetchErr);
+      });
     }
   };
 

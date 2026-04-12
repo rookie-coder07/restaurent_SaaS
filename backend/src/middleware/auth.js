@@ -32,6 +32,11 @@ export const verifyAccessToken = (token) => {
     throw new AppError('UNAUTHORIZED', 'Invalid role in token');
   }
 
+  // DEBUG: Log normalization
+  if (decoded.role !== normalizedRole) {
+    logger.info(`[ROLE_NORMALIZATION] ${decoded.role} → ${normalizedRole}`);
+  }
+
   return {
     userId: decoded.userId,
     restaurantId: decoded.restaurantId,

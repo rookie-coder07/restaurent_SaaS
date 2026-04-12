@@ -163,10 +163,32 @@ export const systemAccessGuard = async (req, res, next) => {
   try {
     const normalizedRole = normalizeRole(req.user?.role);
 
+    // DEBUG: Log every request
+    console.log('[SYSTEM_ACCESS] Guard check:', {
+      path: req.path,
+      originalUrl: req.originalUrl,
+      method: req.method,
+      role: normalizedRole,
+    });
+
     if (normalizedRole === 'developer' || req.path.includes('/developer')) {
+      console.log('[SYSTEM_ACCESS] ✅ Developer role - bypassing');
       return next();
     }
 
+    // ✅ Bypass for activity routes (internal logging)
+    if (req.path.includes('/activity')) {
+      console.log('[SYSTEM_ACCESS] ✅ Activity route - bypassing access control');
+      return next();
+    }
+
+    // ✅ Bypass for event stream (real-time updates)
+    if (req.path.includes('/events/stream')) {
+      console.log('[SYSTEM_ACCESS] ✅ Event stream - bypassing access control');
+      return next();
+    }
+
+    console.log('[SYSTEM_ACCESS] Checking restaurant access for:', req.path);
     const restaurantId = getRequestRestaurantId(req);
     const [globalMaintenance, restaurantMaintenance, restaurantAccess] = await Promise.all([
       fetchGlobalMaintenance(),
@@ -175,17 +197,21 @@ export const systemAccessGuard = async (req, res, next) => {
     ]);
 
     if (restaurantId && restaurantAccess?.accessEnabled === false) {
+      console.log('[SYSTEM_ACCESS] ❌ Restaurant access disabled for:', restaurantId);
       return sendError(res, 403, 'Restaurant access has been disabled by the platform administrator.');
     }
 
     if (globalMaintenance?.enabled) {
+      console.log('[SYSTEM_ACCESS] ❌ Global maintenance enabled');
       return sendError(res, 503, globalMaintenance.message);
     }
 
     if (restaurantMaintenance?.enabled) {
+      console.log('[SYSTEM_ACCESS] ❌ Restaurant maintenance enabled for:', restaurantId);
       return sendError(res, 503, restaurantMaintenance.message);
     }
 
+    console.log('[SYSTEM_ACCESS] ✅ Access check passed');
     return next();
   } catch (error) {
     // In test mode, allow network errors to pass through (mock isn't complete)
@@ -194,6 +220,7 @@ export const systemAccessGuard = async (req, res, next) => {
       return next();
     }
     
+    console.log('[SYSTEM_ACCESS] ❌ Error:', error.message);
     logger.error('System access guard error:', error);
     return sendError(res, 500, 'System access validation failed');
   }

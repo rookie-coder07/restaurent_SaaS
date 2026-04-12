@@ -1,47 +1,20 @@
 import express from 'express';
+import { getActivityLogs, getRestaurantActivityLogs, getActivityStats } from '../controllers/activityController.js';
 import { authMiddleware } from '../middleware/auth.js';
-import { getStaffList, getUserActivity, getUserInfo } from '../controllers/activityController.js';
-import SecurityAuditLogger from '../utils/securityAudit.js';
+import { tenantIsolation } from '../middleware/tenantIsolation.js';
 
 const router = express.Router();
 
-// All activity routes require authentication
-router.use(authMiddleware);
+// All activity routes require authentication and tenant isolation
+router.use(authMiddleware, tenantIsolation);
 
-// Get staff list
-router.get('/staff', (req, res, next) => {
-  // ✅ Log data access
-  SecurityAuditLogger.logDataAccess(
-    req.user?.id || 'unknown',
-    'staff',
-    'list_view',
-    req.ip
-  );
-  next();
-}, getStaffList);
+// Get all activity logs for the restaurant (must come before /:userId/logs)
+router.get('/logs/all', getRestaurantActivityLogs);
 
-// Get user info with stats
-router.get('/:userId/info', (req, res, next) => {
-  // ✅ Log data access
-  SecurityAuditLogger.logDataAccess(
-    req.user?.id || 'unknown',
-    'user',
-    'info_view',
-    req.ip
-  );
-  next();
-}, getUserInfo);
+// Get activity statistics (must come before /:userId/logs)
+router.get('/stats/overview', getActivityStats);
 
-// Get activity logs for a user
-router.get('/:userId/logs', (req, res, next) => {
-  // ✅ Log audit access
-  SecurityAuditLogger.logDataAccess(
-    req.user?.id || 'unknown',
-    'activity_logs',
-    'view',
-    req.ip
-  );
-  next();
-}, getUserActivity);
+// Get activity logs for a specific user
+router.get('/:userId/logs', getActivityLogs);
 
 export default router;

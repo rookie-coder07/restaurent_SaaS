@@ -1,6 +1,7 @@
 import express from 'express';
 import jwt from 'jsonwebtoken';
 import { authMiddleware, optionalAuth, streamAuthMiddleware } from '../middleware/auth.js';
+import { normalizeRole } from '../constants/index.js';
 import { tenantIsolation, checkPermission, requireBillingRole } from '../middleware/tenantIsolation.js';
 import { validateRequest } from '../middleware/validation.js';
 import { orderLimiter } from '../middleware/rateLimit.js';
@@ -49,7 +50,7 @@ router.get('/events/stream', (req, res, next) => {
       userId: decoded.userId,
       restaurantId: decoded.restaurantId,
       email: decoded.email,
-      role: decoded.role,
+      role: normalizeRole(decoded.role),
     };
     req.restaurantId = decoded.restaurantId;
     next();

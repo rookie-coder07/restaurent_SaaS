@@ -145,11 +145,11 @@ function App() {
             <Route path="/admin/staff" element={withSuspense(<Staff />)} />
             <Route path="/admin/loyalty" element={withSuspense(<Loyalty />)} />
             <Route path="/admin/analytics" element={withSuspense(<Analytics />)} />
+            <Route path="/admin/staff-activity" element={withSuspense(<StaffActivity />)} />
             <Route path="/admin/tables" element={withSuspense(<Tables />)} />
             <Route path="/admin/settings" element={withSuspense(<Settings />)} />
             <Route path="/admin/change-password" element={withSuspense(<ChangePassword />)} />
             <Route path="/admin/manage-user-passwords" element={withSuspense(<UserPasswordManagement />)} />
-            <Route path="/admin/staff-activity" element={withSuspense(<StaffActivity />)} />
           </Route>
 
           <Route element={<ProtectedRoute layout={AdminLayout} allowedRoles={['manager']} portal="admin" />}>
@@ -162,10 +162,10 @@ function App() {
             <Route path="/manager/inventory" element={withSuspense(<ManagerInventory />)} />
             <Route path="/manager/bills" element={withSuspense(<ManagerBills />)} />
             <Route path="/manager/bills/:orderId" element={withSuspense(<BillView />)} />
+            <Route path="/manager/staff-activity" element={withSuspense(<StaffActivity />)} />
             <Route path="/manager/settings" element={withSuspense(<Settings />)} />
             <Route path="/manager/change-password" element={withSuspense(<ChangePassword />)} />
             <Route path="/manager/manage-user-passwords" element={withSuspense(<UserPasswordManagement />)} />
-            <Route path="/manager/staff-activity" element={withSuspense(<StaffActivity />)} />
           </Route>
 
           <Route element={<ProtectedRoute layout={AdminLayout} allowedRoles={['developer']} portal="admin" />}>

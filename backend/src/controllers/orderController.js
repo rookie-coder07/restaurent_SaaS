@@ -266,7 +266,7 @@ async function validateTableAccess(restaurantId, tableId, currentUser = {}, { is
     return;
   }
 
-  if (currentUser.role === 'manager' || currentUser.role === 'admin') {
+  if (['manager', 'admin'].includes(currentUser.role)) {
     return;
   }
 
@@ -459,6 +459,23 @@ export const createOrder = asyncHandler(async (req, res) => {
 
     console.log('✅ Order created successfully:', { orderId: order?.id });
 
+    // Log activity
+    setImmediate(() => {
+      ActivityService.logActivity(
+        restaurantId,
+        req.user?.id || req.user?.userId || 'system',
+        'order_created',
+        {
+          orderId: order?.id,
+          itemCount: normalizedOrder.items.length,
+          totalAmount: normalizedOrder.totalAmount,
+          tableId: normalizedOrder.tableId,
+          actorName: req.user?.name || req.user?.email || 'System',
+          actorRole: req.user?.role,
+        }
+      ).catch(err => logger.error('Failed to log order creation activity:', err));
+    });
+
     logCriticalAction('order_created', {
       message: 'New order created',
       userId: req.user?.id || req.user?.userId,
@@ -473,23 +490,6 @@ export const createOrder = asyncHandler(async (req, res) => {
     });
 
     if (order?.reusedExistingBill) {
-      // Log activity for existing bill usage (fire-and-forget)
-      if (req.user?.userId) {
-        setImmediate(() => {
-          ActivityService.logActivity(
-            restaurantId,
-            req.user.userId,
-            req.user?.role,
-            'order_created_reused_bill',
-            {
-              orderId: order?.id,
-              tableId: normalizedOrder.tableId,
-              itemCount: normalizedOrder.items.length,
-              totalAmount: normalizedOrder.totalAmount,
-            }
-          ).catch(error => logger.warn('Failed to log order activity:', error.message));
-        });
-      }
       return sendSuccess(
         res,
         200,
@@ -501,25 +501,6 @@ export const createOrder = asyncHandler(async (req, res) => {
     // Log order creation with friendly formatting
     // Temporarily disabled - causing TypeError with formatted strings and logger
     // logOrderCreation(order, normalizedOrder.items || [], logger);
-
-    // Log activity for new order creation (fire-and-forget)
-    if (req.user?.userId) {
-      setImmediate(() => {
-        ActivityService.logActivity(
-          restaurantId,
-          req.user.userId,
-          req.user?.role,
-          'order_created',
-          {
-            orderId: order?.id,
-            tableId: normalizedOrder.tableId,
-            itemCount: normalizedOrder.items.length,
-            totalAmount: normalizedOrder.totalAmount,
-            orderType: normalizedOrder.orderType,
-          }
-        ).catch(error => logger.warn('Failed to log order activity:', error.message));
-      });
-    }
 
     console.log('📤 Sending order response:', { orderId: order?.id, status: 201 });
     return sendSuccess(res, 201, formatOrderResponse(order), 'Order created successfully');
@@ -705,18 +686,22 @@ export const cancelPendingBills = asyncHandler(async (req, res) => {
 
 export const softDeleteOrder = asyncHandler(async (req, res) => {
   const { orderId } = req.params;
-  const role = String(req.user?.role || '').toLowerCase();
   const currentPassword = req.body.currentPassword || req.body.current_password || '';
 
-  console.log('[ORDER_DELETE] 🔍 Endpoint called');
-  console.log('[ORDER_DELETE] User role:', req.user?.role, '→ normalized:', role);
-  console.log('[ORDER_DELETE] Restaurant ID:', req.restaurantId || req.user?.restaurantId);
-  console.log('[ORDER_DELETE] Order ID:', orderId);
-  console.log('[ORDER_DELETE] User:', req.user?.userId, req.user?.email);
+  console.log('\n[ORDER_DELETE] ═══════════════════════════════════');
+  console.log('[ORDER_DELETE] Endpoint called for order:', orderId);
+  console.log('[ORDER_DELETE] User:', req.user?.email, 'Role:', req.user?.role, 'ID:', req.user?.userId);
+  console.log('[ORDER_DELETE] Restaurant ID:', req.restaurantId);
+  console.log('[ORDER_DELETE] ═══════════════════════════════════\n');
 
   try {
+    if (!orderId || orderId.trim().length === 0) {
+      console.log('[ORDER_DELETE] ❌ Invalid orderId');
+      return sendError(res, 400, 'Order ID is required');
+    }
+
     const deletedOrder = await OrderService.softDeleteOrder(req.restaurantId || req.user?.restaurantId || null, orderId, req.body.reason, {
-      actorRole: role,
+      actorRole: req.user?.role,
       actorUserId: req.user?.userId,
       actorName: req.user?.name || req.user?.email || 'Unknown user',
       currentPassword,
@@ -729,52 +714,14 @@ export const softDeleteOrder = asyncHandler(async (req, res) => {
       return sendError(res, 400, 'Order deletion failed - no rows were updated in database');
     }
 
-    // Log activity for order deletion (fire-and-forget)
-    if (req.user?.userId) {
-      setImmediate(() => {
-        ActivityService.logActivity(
-          deletedOrder.restaurantId || req.restaurantId || req.user?.restaurantId || null,
-          req.user.userId,
-          req.user?.role,
-          'order_deleted',
-          {
-            orderId: orderId,
-            reason: req.body.reason || 'No reason provided',
-            deletedAt: new Date().toISOString(),
-          }
-        ).catch(error => logger.warn('Failed to log order deletion activity:', error.message));
-      });
-    }
-
     return sendSuccess(res, 200, deletedOrder, 'Order deleted safely');
 
   } catch (error) {
     console.log('[ORDER_DELETE] ❌ Error caught:', error.message);
+    console.error('[ORDER_DELETE] Full error:', error);
+    // Let asyncHandler pass error to error middleware
     throw error;
   }
-
-  if (!deletedOrder || !deletedOrder.id) {
-    return sendError(res, 400, 'Order deletion failed - no rows were updated in database');
-  }
-
-  // Log activity for order deletion (fire-and-forget)
-  if (req.user?.userId) {
-    setImmediate(() => {
-      ActivityService.logActivity(
-        deletedOrder.restaurantId || req.restaurantId || req.user?.restaurantId || null,
-        req.user.userId,
-        req.user?.role,
-        'order_deleted',
-        {
-          orderId: orderId,
-          reason: req.body.reason || 'No reason provided',
-          deletedAt: new Date().toISOString(),
-        }
-      ).catch(error => logger.warn('Failed to log order deletion activity:', error.message));
-    });
-  }
-
-  return sendSuccess(res, 200, deletedOrder, 'Order deleted safely');
 });
 
 export const approveDiscount = asyncHandler(async (req, res) => {
@@ -975,7 +922,16 @@ export const settleOrder = asyncHandler(async (req, res) => {
     const { orderId } = req.params;
     const restaurantId = req.restaurantId;
     const userId = req.user?.id;
-    const userRole = req.user?.role;
+    
+    // 🔥 CRITICAL: Normalize role (owner → admin)
+    const normalizeRole = (role) => {
+      if (!role) return null;
+      const r = String(role).toLowerCase();
+      if (r === "owner") return "admin"; // 🔥 CRITICAL FIX
+      return r;
+    };
+    
+    const userRole = normalizeRole(req.user?.role);
 
     // Role-based access control
     if (!userRole || !['admin', 'manager', 'waiter', 'cashier'].includes(userRole)) {
@@ -1050,25 +1006,6 @@ export const settleOrder = asyncHandler(async (req, res) => {
       amount: settlementData.totalAmount,
       severity: 'high',
     });
-
-    // Log activity for order settlement (fire-and-forget)
-    if (userId) {
-      setImmediate(() => {
-        ActivityService.logActivity(
-          restaurantId,
-          userId,
-          userRole,
-          'order_settled',
-          {
-            orderId: orderId,
-            amount: settlementData.totalAmount,
-            paymentMethod: settlementData.paymentMethod,
-            amountReceived: settlementData.amountReceived,
-            settledAt: new Date().toISOString(),
-          }
-        ).catch(error => logger.warn('Failed to log order settlement activity:', error.message));
-      });
-    }
 
     return sendSuccess(res, 200, result, 'Order settled successfully');
   } catch (error) {

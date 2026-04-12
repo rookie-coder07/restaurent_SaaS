@@ -45,10 +45,21 @@ export const requireAnyRole = (roles) => {
 };
 
 export const requireAdmin = (req, res, next) => {
-  if (req.user?.role?.toLowerCase() !== 'admin') {
+  // 🔥 CRITICAL: Normalize role (owner → admin)
+  const normalizeRole = (role) => {
+    if (!role) return null;
+    const r = String(role).toLowerCase();
+    if (r === "owner") return "admin";
+    return r;
+  };
+  
+  const normalizedRole = normalizeRole(req.user?.role);
+  
+  if (!['admin'].includes(normalizedRole)) {
     logWarn('Admin access denied', {
       userId: req.user?.id,
       userRole: req.user?.role,
+      normalizedRole: normalizedRole,
       path: req.path,
       ip: req.ip,
     });
@@ -63,12 +74,21 @@ export const requireAdmin = (req, res, next) => {
 };
 
 export const requireManager = (req, res, next) => {
-  const role = req.user?.role?.toLowerCase();
+  // 🔥 CRITICAL: Normalize role (owner → admin)
+  const normalizeRole = (role) => {
+    if (!role) return null;
+    const r = String(role).toLowerCase();
+    if (r === "owner") return "admin";
+    return r;
+  };
+  
+  const role = normalizeRole(req.user?.role);
 
   if (!['admin', 'manager'].includes(role)) {
     logWarn('Manager access denied', {
       userId: req.user?.id,
       userRole: req.user?.role,
+      normalizedRole: role,
       path: req.path,
       ip: req.ip,
     });
@@ -104,11 +124,23 @@ export const validateRestaurantAccess = (req, res, next) => {
   const requestedRestaurantId = req.params.restaurantId || req.body?.restaurantId;
 
   if (requestedRestaurantId && req.user?.restaurantId && requestedRestaurantId !== req.user.restaurantId) {
-    if (req.user?.role?.toLowerCase() !== 'admin') {
+    // 🔥 CRITICAL: Normalize role (owner → admin)
+    const normalizeRole = (role) => {
+      if (!role) return null;
+      const r = String(role).toLowerCase();
+      if (r === "owner") return "admin";
+      return r;
+    };
+    
+    const normalizedRole = normalizeRole(req.user?.role);
+    
+    if (!['admin'].includes(normalizedRole)) {
       logWarn('Cross-restaurant access denied', {
         userId: req.user.id,
         userRestaurantId: req.user.restaurantId,
         requestedRestaurantId,
+        userRole: req.user?.role,
+        normalizedRole: normalizedRole,
         path: req.path,
         ip: req.ip,
       });
@@ -125,10 +157,22 @@ export const validateRestaurantAccess = (req, res, next) => {
 
 export const checkResourceOwnership = (resourceOwnerId) => {
   return (req, res, next) => {
-    if (req.user?.role?.toLowerCase() !== 'admin' && resourceOwnerId !== req.user?.id) {
+    // 🔥 CRITICAL: Normalize role (owner → admin)
+    const normalizeRole = (role) => {
+      if (!role) return null;
+      const r = String(role).toLowerCase();
+      if (r === "owner") return "admin";
+      return r;
+    };
+    
+    const normalizedRole = normalizeRole(req.user?.role);
+    
+    if (!['admin'].includes(normalizedRole) && resourceOwnerId !== req.user?.id) {
       logWarn('Resource access denied', {
         userId: req.user?.id,
         resourceOwnerId,
+        userRole: req.user?.role,
+        normalizedRole: normalizedRole,
         path: req.path,
         ip: req.ip,
       });

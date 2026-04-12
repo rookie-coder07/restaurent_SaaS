@@ -1,7 +1,7 @@
 import { logWarn } from '../utils/logger.js';
 
 export const dataIsolationMiddleware = (req, res, next) => {
-  const isDeveloper = String(req.user?.role || '').toLowerCase() === 'developer';
+  const isDeveloper = ['developer'].includes(req.user?.role);
 
   if (!req.user?.restaurantId && !isDeveloper) {
     logWarn('Restaurant ID missing for data isolation', {
@@ -44,7 +44,7 @@ export const validateRestaurantOwnership = (requiredRestaurantId) => {
     }
 
     // Admins can access any restaurant
-    if (req.user.role?.toLowerCase() === 'admin') {
+    if (['admin'].includes(req.user.role)) {
       return next();
     }
 

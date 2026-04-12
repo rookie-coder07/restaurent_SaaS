@@ -254,7 +254,7 @@ export default function Tables() {
     refreshTableOverview().catch(() => {
       // Shared store errors are already exposed in UI state.
     });
-  }, [preloadCoreData, refreshTableOverview, restaurantId]);
+  }, [restaurantId]);
 
   useOrderSubscription(restaurantId, (payload) => {
     if (!restaurantId) {
@@ -331,6 +331,7 @@ export default function Tables() {
       message: activeOrder ? 'Table is currently in use. Opened the existing bill.' : '',
     });
     setSelectedTable(null);
+    // ✅ FIX: Pass tableId via URL so it's immediately available
     navigate(`/pos/billing?${searchParams.toString()}`);
   };
 

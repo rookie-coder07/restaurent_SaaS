@@ -28,41 +28,10 @@ function formatStatusLabel(status) {
 export default function OrderStatus() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const orderId = searchParams.get('order') || searchParams.get('orderId');
+  const orderId = searchParams.get('orderId');
   const tableNumber = searchParams.get('table');
 
-  // Memoize the API function to prevent infinite re-renders
-  const fetchOrder = useCallback(() => {
-    if (!orderId) {
-      return Promise.resolve(null);
-    }
-    return customerAPI.getOrder(orderId, tableNumber);
-  }, [orderId, tableNumber]);
-
-  const [pollingInterval, setPollingInterval] = useState(2000); // Poll every 2 seconds
-  const { data: order = {}, loading, error, execute: refetchOrder } = useApi(
-    fetchOrder,
-    [orderId, tableNumber]
-  );
-
-  // Auto-refetch order status
-  useEffect(() => {
-    if (!orderId) return;
-
-    const interval = setInterval(() => {
-      refetchOrder();
-    }, pollingInterval);
-
-    return () => clearInterval(interval);
-  }, [orderId, pollingInterval, refetchOrder]);
-
-  // Switch to slower polling after order is ready
-  useEffect(() => {
-    if (order?.status === 'ready' || order?.status === 'served' || order?.status === 'completed') {
-      setPollingInterval(5000);
-    }
-  }, [order?.status]);
-
+  // ✅ FIX 2: Guard against undefined orderId
   if (!orderId) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-6">
@@ -80,6 +49,33 @@ export default function OrderStatus() {
       </div>
     );
   }
+
+  // Memoize the API function to prevent infinite re-renders
+  const fetchOrder = useCallback(() => {
+    return customerAPI.getOrder(orderId, tableNumber);
+  }, [orderId, tableNumber]);
+
+  const [pollingInterval, setPollingInterval] = useState(2000); // Poll every 2 seconds
+  const { data: order = {}, loading, error, execute: refetchOrder } = useApi(
+    fetchOrder,
+    [orderId, tableNumber]
+  );
+
+  // Auto-refetch order status
+  useEffect(() => {
+    const interval = setInterval(() => {
+      refetchOrder();
+    }, pollingInterval);
+
+    return () => clearInterval(interval);
+  }, [pollingInterval, refetchOrder]);
+
+  // Switch to slower polling after order is ready
+  useEffect(() => {
+    if (order?.status === 'ready' || order?.status === 'served' || order?.status === 'completed') {
+      setPollingInterval(5000);
+    }
+  }, [order?.status]);
 
   if (loading && !order?.id) {
     return (

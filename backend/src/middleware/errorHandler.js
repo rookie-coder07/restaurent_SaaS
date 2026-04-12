@@ -91,7 +91,7 @@ export const errorHandler = async (err, req, res, next) => {
   const error = err || new Error('Unknown error');
   const statusCode = normalizeStatusCode(error);
   const safeMessage = buildSafeMessage(error, statusCode);
-  const isDeveloper = req?.user?.role === 'developer';
+  const isDeveloper = ['developer'].includes(req?.user?.role);
 
   console.error('🔥 INTERNAL ERROR:', error);
 

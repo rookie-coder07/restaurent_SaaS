@@ -132,22 +132,20 @@ export const login = asyncHandler(async (req, res) => {
       portal,
     });
 
-    // Log successful login activity (fire-and-forget)
-    if (result.userId && result.restaurantId) {
-      setImmediate(() => {
-        ActivityService.logActivity(
-          result.restaurantId,
-          userIdForActivity,
-          userRole,
-          'user_login',
-          {
-            email: email,
-            portal: portal,
-            timestamp: new Date().toISOString(),
-          }
-        ).catch(error => logger.warn('Failed to log login activity:', error.message));
-      });
-    }
+    // Log activity
+    setImmediate(() => {
+      ActivityService.logActivity(
+        result.restaurantId,
+        result.userId,
+        'user_login',
+        {
+          email,
+          role: userRole,
+          portal,
+          loginTime: new Date().toISOString(),
+        }
+      ).catch(err => logger.error('Failed to log login activity:', err));
+    });
 
     return sendSuccess(res, 200, {
       accessToken: result.accessToken,
@@ -267,7 +265,7 @@ export const logout = asyncHandler(async (req, res) => {
 
 export const changePassword = asyncHandler(async (req, res) => {
   const { currentPassword, newPassword } = req.body;
-  const isRestaurant = req.user.role === 'owner';
+  const isRestaurant = ['admin'].includes(req.user.role);
 
   await AuthService.changePassword(
     req.user.userId,
