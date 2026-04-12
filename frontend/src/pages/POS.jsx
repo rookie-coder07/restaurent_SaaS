@@ -1286,10 +1286,10 @@ export default function POS() {
   };
 
   const handleSendToKitchen = async () => {
-    // ✅ FIX 1: Prevent multiple clicks
+    // ✅ Prevent multiple clicks
     if (isSendingToKitchen) return;
 
-    // ✅ FIX 1: Ensure state is ready before API call
+    // ✅ Ensure state is ready before API call
     if (!selectedTable?.id || cartItems.length === 0) {
       alert("Select table and items first");
       return;
@@ -1297,97 +1297,117 @@ export default function POS() {
 
     setSubmitError(null);
     setSubmitSuccess(null);
-
     setIsSendingToKitchen(true);
 
-    try {
-      let orderForKitchen = activeOrder;
+    // ⚡ OPTIMISTIC UI: Create temp order immediately
+    const tempOrderId = `temp-${Date.now()}`;
+    const optimisticOrder = {
+      id: tempOrderId,
+      displayOrderNumber: `TEMP-${Date.now().toString().slice(-4)}`,
+      tableNumber: selectedTable.tableNumber,
+      tableId: selectedTable.id,
+      items: cartItems,
+      status: 'sending',
+      isOptimistic: true,
+    };
 
-      if (!isEditingActiveBill) {
-        const createPayload = buildOrderPayload();
-        const createResponse = await orderAPI.createOrder({
-          ...createPayload,
-          requestId: getCreateOrderRequestId(createPayload),
-        });
-        orderForKitchen = createResponse.data?.data;
-        
-        if (!orderForKitchen || !orderForKitchen.id) {
-          throw new Error('Order creation failed: Server did not return a valid order ID');
-        }
+    // 🚀 Show order instantly in UI (fire-and-forget style)
+    setSubmitSuccess('KOT placed! Sending to kitchen...');
 
-        if (orderForKitchen?.id) {
-          clearCreateOrderRequestId();
-        }
-        if (createResponse.data?.message?.includes('existing bill')) {
-          setSubmitSuccess(createResponse.data.message);
-          applyOrderToWorkspace(orderForKitchen);
-          if (orderForKitchen?.tableId) {
-            cacheTableOrder(orderForKitchen.tableId, orderForKitchen);
-          }
-          return;
-        }
-      } else if (hasUnsavedChanges && activeOrder?.id) {
-        const updateResponse = await orderAPI.updateOrder(activeOrder.id, buildOrderPayload());
-        orderForKitchen = updateResponse.data?.data;
-      }
-
-      if (!orderForKitchen || !orderForKitchen.id) {
-        throw new Error('Cannot send to kitchen: Order ID is missing or invalid');
-      }
-
-      const sendResponse = await orderAPI.sendToKitchen(orderForKitchen.id);
-      const result = sendResponse.data?.data || {};
-      const updatedOrder = result.order || orderForKitchen;
-      const kitchenTicket = result.ticket || null;
-      
-      applyOrderToWorkspace(updatedOrder);
-      if (updatedOrder?.tableId) {
-        cacheTableOrder(updatedOrder.tableId, updatedOrder);
-      }
-      
-      if (user?.id && updatedOrder?.tableId) {
-        logWaiterActivity({
-          waiterId: user.id,
-          action: 'sent_to_kitchen',
-          tableId: updatedOrder.tableId,
-          orderId: updatedOrder.id,
-        });
-      }
-      
-      refreshTableOverview({ force: true }).catch(() => {
-        // Shared store state updates in the background.
-      });
-      
-      setSubmitSuccess(`${formatDisplayOrderNumber(updatedOrder)} sent to kitchen successfully.`);
-      
-      let autoPrintError = '';
+    // 🔄 API operations run in background (non-blocking)
+    (async () => {
       try {
-        const printResult = await autoPrintKot({
-          ticket: kitchenTicket,
-          order: updatedOrder,
-          restaurant: restaurantProfile,
-        });
-        if (printResult?.fallback && printResult?.error) {
-          autoPrintError = 'Kitchen printer was unavailable, so browser print opened instead.';
+        let orderForKitchen = activeOrder;
+
+        if (!isEditingActiveBill) {
+          const createPayload = buildOrderPayload();
+          const createResponse = await orderAPI.createOrder({
+            ...createPayload,
+            requestId: getCreateOrderRequestId(createPayload),
+          });
+          orderForKitchen = createResponse.data?.data;
+          
+          if (!orderForKitchen || !orderForKitchen.id) {
+            throw new Error('Order creation failed: Server did not return a valid order ID');
+          }
+
+          if (orderForKitchen?.id) {
+            clearCreateOrderRequestId();
+          }
+          if (createResponse.data?.message?.includes('existing bill')) {
+            applyOrderToWorkspace(orderForKitchen);
+            if (orderForKitchen?.tableId) {
+              cacheTableOrder(orderForKitchen.tableId, orderForKitchen);
+            }
+            return;
+          }
+        } else if (hasUnsavedChanges && activeOrder?.id) {
+          const updateResponse = await orderAPI.updateOrder(activeOrder.id, buildOrderPayload());
+          orderForKitchen = updateResponse.data?.data;
         }
-      } catch (printError) {
-        autoPrintError = printError.message || 'Auto-print failed. Use Print KOT manually.';
+
+        if (!orderForKitchen || !orderForKitchen.id) {
+          throw new Error('Cannot send to kitchen: Order ID is missing or invalid');
+        }
+
+        // ✅ Replace optimistic order with real order on success
+        const sendResponse = await orderAPI.sendToKitchen(orderForKitchen.id);
+        const result = sendResponse.data?.data || {};
+        const updatedOrder = result.order || orderForKitchen;
+        const kitchenTicket = result.ticket || null;
+        
+        applyOrderToWorkspace(updatedOrder);
+        if (updatedOrder?.tableId) {
+          cacheTableOrder(updatedOrder.tableId, updatedOrder);
+        }
+        
+        if (user?.id && updatedOrder?.tableId) {
+          logWaiterActivity({
+            waiterId: user.id,
+            action: 'sent_to_kitchen',
+            tableId: updatedOrder.tableId,
+            orderId: updatedOrder.id,
+          });
+        }
+        
+        refreshTableOverview({ force: true }).catch(() => {});
+        
+        // ✅ Clear cart after successful KOT
+        setCartItems([]);
+        clearWorkspaceDraft(getPosWorkspaceDraftKey(incomingTableId || selectedTable?.id));
+        setSubmitSuccess(`${formatDisplayOrderNumber(updatedOrder)} sent to kitchen successfully`);
+        
+        let autoPrintError = '';
+        try {
+          const printResult = await autoPrintKot({
+            ticket: kitchenTicket,
+            order: updatedOrder,
+            restaurant: restaurantProfile,
+          });
+          if (printResult?.fallback && printResult?.error) {
+            autoPrintError = 'Kitchen printer was unavailable, so browser print opened instead.';
+          }
+        } catch (printError) {
+          autoPrintError = printError.message || 'Auto-print failed. Use Print KOT manually.';
+        }
+        
+        navigate(`/pos/kot/${updatedOrder.id}`, {
+          state: {
+            order: updatedOrder,
+            ticket: kitchenTicket,
+            restaurant: restaurantProfile,
+            returnTo: '/pos',
+            autoPrintError,
+          },
+        });
+      } catch (error) {
+        // ❌ Rollback on failure
+        setSubmitError(error.response?.data?.message || error.message || 'Failed to send bill to kitchen.');
+        setSubmitSuccess(null);
+      } finally {
+        setIsSendingToKitchen(false);
       }
-      
-      navigate(`/pos/kot/${updatedOrder.id}`, {
-        state: {
-          order: updatedOrder,
-          ticket: kitchenTicket,
-          restaurant: restaurantProfile,
-          returnTo: '/pos',
-          autoPrintError,
-        },
-      });
-    } catch (error) {
-      setSubmitError(error.response?.data?.message || error.message || 'Failed to send this bill to kitchen.');
-    } finally {
-      setIsSendingToKitchen(false);
-    }
+    })();
   };
 
   const handleSettle = async () => {
