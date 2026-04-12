@@ -61,3 +61,12 @@ export const createDeveloperUserSchema = Joi.object({
   phone: Joi.string().trim().max(20).allow('').optional(),
 });
 
+export const createRestaurantSchema = Joi.object({
+  restaurantName: Joi.string().trim().min(2).max(120).required(),
+  ownerName: Joi.string().trim().min(2).max(120).required(),
+  ownerEmail: Joi.string().email().trim().lowercase().required(),
+  phone: Joi.string().trim().min(7).max(20).required(),
+  address: Joi.string().trim().max(500).allow('').optional(),
+  gstNumber: Joi.string().trim().max(50).allow('').optional(),
+});
+

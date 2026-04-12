@@ -11,6 +11,7 @@ import Modal from '../components/common/Modal';
 import EmptyState from '../components/common/EmptyState';
 import StatCard from '../components/common/StatCard';
 import Toast from '../components/common/Toast';
+import MenuBulkUpload from '../components/menu/MenuBulkUpload';
 
 function createEmptyFormData() {
   return {
@@ -282,6 +283,11 @@ export default function MenuManagement() {
 
       <div className="flex justify-end">
         <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row">
+          <MenuBulkUpload
+            onUploaded={async () => {
+              await Promise.all([refetchItems(), refetchCategories()]);
+            }}
+          />
           {activeTab === 'items' ? (
             <Button className="w-full sm:w-auto" onClick={openNewItemModal}>
               <Plus className="h-4 w-4" />

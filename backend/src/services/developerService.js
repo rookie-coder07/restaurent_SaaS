@@ -1,5 +1,6 @@
 import fs from 'fs/promises';
 import path from 'path';
+import crypto from 'crypto';
 import supabaseImport from '../config/supabase.js';
 import logger from '../utils/logger.js';
 import { clearSystemAccessCache } from '../middleware/systemAccess.js';
@@ -7,6 +8,7 @@ import { clearFeatureFlagCache } from '../middleware/featureFlags.js';
 import { metricsInstance } from '../middleware/monitoring.js';
 import { revokeAllUserTokens } from '../utils/tokenManager.js';
 import { broadcastRestaurantEvent } from '../utils/realtimeEvents.js';
+import AuthService from './authService.js';
 
 let injectedSupabase = null;
 const getSupabase = () => injectedSupabase || supabaseImport;
@@ -75,6 +77,18 @@ export class DeveloperService {
   static roleInput(role) {
     const normalized = String(role || '').trim().toLowerCase();
     return normalized === 'admin' ? 'owner' : normalized;
+  }
+
+  static ensureDeveloper(actor) {
+    if (String(actor?.role || '').trim().toLowerCase() !== 'developer') {
+      const error = new Error('Access denied');
+      error.statusCode = 403;
+      throw error;
+    }
+  }
+
+  static generateTemporaryPassword() {
+    return `RMX-${crypto.randomBytes(6).toString('base64url')}`;
   }
 
   static async logAudit({ actor, action, targetType, targetId = null, restaurantId = null, metadata = {} }) {
@@ -195,6 +209,151 @@ export class DeveloperService {
     if (error) throw error;
     await this.logAudit({ actor, action: 'developer.user_created', targetType: 'user', targetId: data.id, metadata: { email: data.email } });
     return { id: data.id, name: data.name, email: data.email, role: this.roleLabel(data.role), status: data.status };
+  }
+
+  static async createRestaurant(restaurantData, actor) {
+    this.ensureDeveloper(actor);
+
+    const normalizedEmail = String(restaurantData.ownerEmail || '').trim().toLowerCase();
+    const now = new Date().toISOString();
+    const temporaryPassword = this.generateTemporaryPassword();
+    const passwordHash = await AuthService.hashPassword(temporaryPassword);
+
+    const { data: existingRestaurant, error: restaurantLookupError } = await getSupabase()
+      .from('restaurants')
+      .select('id')
+      .eq('email', normalizedEmail)
+      .maybeSingle();
+    if (restaurantLookupError) throw restaurantLookupError;
+    if (existingRestaurant) {
+      throw new Error('Owner email already exists for another restaurant');
+    }
+
+    const { data: existingUser, error: userLookupError } = await getSupabase()
+      .from('users')
+      .select('id')
+      .eq('email', normalizedEmail)
+      .maybeSingle();
+    if (userLookupError) throw userLookupError;
+    if (existingUser) {
+      throw new Error('Owner email already exists for another user');
+    }
+
+    const { data: authData, error: authError } = await getSupabase().auth.admin.createUser({
+      email: normalizedEmail,
+      password: temporaryPassword,
+      email_confirm: true,
+      user_metadata: {
+        name: restaurantData.ownerName,
+        role: 'admin',
+      },
+    });
+
+    if (authError || !authData?.user?.id) {
+      throw authError || new Error('Failed to create auth user');
+    }
+
+    let createdRestaurant = null;
+
+    try {
+      const { data: restaurant, error: createRestaurantError } = await getSupabase()
+        .from('restaurants')
+        .insert([{
+          name: restaurantData.restaurantName,
+          business_name: restaurantData.restaurantName,
+          email: normalizedEmail,
+          password_hash: passwordHash,
+          phone: restaurantData.phone,
+          address: restaurantData.address || '',
+          gst_number: restaurantData.gstNumber || '',
+          status: 'active',
+          subscription_status: 'active',
+          created_at: now,
+          updated_at: now,
+        }])
+        .select('id, name, business_name, email, phone, address, gst_number, status, subscription_status, created_at, updated_at')
+        .single();
+
+      if (createRestaurantError || !restaurant) {
+        throw createRestaurantError || new Error('Failed to create restaurant');
+      }
+
+      createdRestaurant = restaurant;
+
+      const { data: ownerUser, error: createOwnerError } = await getSupabase()
+        .from('users')
+        .insert([{
+          id: authData.user.id,
+          restaurant_id: restaurant.id,
+          name: restaurantData.ownerName,
+          email: normalizedEmail,
+          password_hash: passwordHash,
+          phone: restaurantData.phone,
+          role: 'admin',
+          status: 'active',
+          created_at: now,
+          updated_at: now,
+        }])
+        .select('id, restaurant_id, name, email, phone, role, status, created_at, updated_at')
+        .single();
+
+      if (createOwnerError || !ownerUser) {
+        throw createOwnerError || new Error('Failed to create owner user');
+      }
+
+      await this.logAudit({
+        actor,
+        action: 'developer.restaurant_created',
+        targetType: 'restaurant',
+        targetId: restaurant.id,
+        restaurantId: restaurant.id,
+        metadata: {
+          restaurantName: restaurant.name || restaurant.business_name,
+          ownerEmail: normalizedEmail,
+          ownerUserId: ownerUser.id,
+        },
+      });
+
+      this.analyticsCache.expiresAt = 0;
+
+      return {
+        success: true,
+        restaurant: {
+          id: restaurant.id,
+          name: restaurant.name || restaurant.business_name,
+          email: restaurant.email,
+          phone: restaurant.phone || '',
+          address: restaurant.address || '',
+          gstNumber: restaurant.gst_number || '',
+          status: restaurant.status || 'active',
+          subscriptionStatus: restaurant.subscription_status || 'active',
+          createdAt: restaurant.created_at,
+        },
+        ownerCredentials: {
+          ownerName: ownerUser.name,
+          email: ownerUser.email,
+          temporaryPassword,
+          loginPath: '/admin/login',
+          role: this.roleLabel(ownerUser.role),
+        },
+      };
+    } catch (error) {
+      if (createdRestaurant?.id) {
+        await getSupabase().from('users').delete().eq('restaurant_id', createdRestaurant.id);
+        await getSupabase().from('restaurants').delete().eq('id', createdRestaurant.id);
+      }
+
+      try {
+        await getSupabase().auth.admin.deleteUser(authData.user.id);
+      } catch (cleanupError) {
+        logger.warn('Developer restaurant creation cleanup warning', {
+          authUserId: authData.user.id,
+          error: cleanupError?.message,
+        });
+      }
+
+      throw error;
+    }
   }
 
   static async listRestaurants({ limit = 20, offset = 0 } = {}) {
@@ -540,4 +699,3 @@ export class DeveloperService {
 }
 
 export default DeveloperService;
-

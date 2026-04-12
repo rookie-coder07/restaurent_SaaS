@@ -40,6 +40,12 @@ export const menuAPI = {
   createCategory: (data) => api.post('/v1/menu/categories', data),
   updateCategory: (categoryId, data) => api.put(`/v1/menu/categories/${categoryId}`, data),
   deleteCategory: (categoryId) => api.delete(`/v1/menu/categories/${categoryId}`),
+  bulkUpload: (formData) =>
+    api.post('/v1/menu/bulk-upload', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    }),
 
   getItems: (filters) => api.get('/v1/menu/items', { params: filters }),
   createItem: (data) => api.post('/v1/menu/items', data),
@@ -173,6 +179,7 @@ export const developerAPI = {
   getSecurityOverview: () => api.get('/v1/developer/control-center/security'),
   getErrorTracking: (params) => api.get('/v1/developer/control-center/errors', { params }),
   exportData: (resource) => api.get(`/v1/developer/control-center/exports/${resource}`),
+  createRestaurant: (data) => api.post('/v1/developer/restaurants', data),
   getRestaurants: (params) => api.get('/v1/developer/restaurants', { params }),
   updateRestaurantAccess: (restaurantId, data) => api.patch(`/v1/developer/restaurants/${restaurantId}/access`, data),
   forceLogoutRestaurantUsers: (restaurantId) => api.post(`/v1/developer/restaurants/${restaurantId}/force-logout`),

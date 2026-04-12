@@ -1,4 +1,5 @@
 ﻿import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { Activity, AlertTriangle, Download, Loader2, RefreshCw, Send, ShieldCheck, ShieldAlert, Store, UserCog, Users, Zap } from 'lucide-react';
 import Card from '../components/common/Card';
@@ -104,6 +105,7 @@ function TableCard({ title, subtitle, columns, rows, renderRow, emptyTitle, empt
 }
 
 export default function DeveloperConsole({ view = 'overview' }) {
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [actionKey, setActionKey] = useState('');
   const [toast, setToast] = useState({ type: '', message: '' });
@@ -323,7 +325,7 @@ export default function DeveloperConsole({ view = 'overview' }) {
     return (
       <div className="space-y-4">
         {toast.message ? <Toast type={toast.type || 'success'} message={toast.message} onClose={() => setToast({ type: '', message: '' })} /> : null}
-        <SectionHeader title="Restaurant Control Panel" subtitle="Activation, maintenance, performance, and tenant-wide logout" actions={<Button type="button" variant="secondary" onClick={refreshView}><RefreshCw className="h-4 w-4" />Refresh</Button>} />
+        <SectionHeader title="Restaurant Control Panel" subtitle="Activation, maintenance, performance, and tenant-wide logout" actions={<><Button type="button" onClick={() => navigate('/developer/create-restaurant')}>Create Restaurant</Button><Button type="button" variant="secondary" onClick={refreshView}><RefreshCw className="h-4 w-4" />Refresh</Button></>} />
         <TableCard title="Restaurants" subtitle="Full tenant visibility for the developer role" columns={['Restaurant', 'Health', 'Performance', 'Actions']} rows={restaurants.items || []} emptyTitle="No restaurants found" emptyDescription="Restaurants will appear here once tenant records exist." renderRow={(restaurant) => <tr key={restaurant.id}><td className="px-5 py-4"><p className="font-semibold text-[var(--text-primary)]">{restaurant.name}</p><p className="text-[var(--text-secondary)]">{restaurant.email || 'No data'} • {restaurant.city || 'No data'}</p></td><td className="px-5 py-4"><p className="text-[var(--text-primary)]">Status: {restaurant.status}</p><p className="text-[var(--text-secondary)]">Access: {restaurant.accessEnabled ? 'enabled' : 'blocked'} • Maintenance: {restaurant.maintenanceEnabled ? 'on' : 'off'}</p><p className="text-[var(--text-secondary)]">Users: {metricValue(restaurant.activeUsers)} active / {metricValue(restaurant.totalUsers)}</p></td><td className="px-5 py-4"><p className="text-[var(--text-primary)]">Revenue: {metricValue(restaurant.revenue, formatCurrency)}</p><p className="text-[var(--text-secondary)]">Orders: {metricValue(restaurant.orderCount)} total • {metricValue(restaurant.ordersToday)} today</p></td><td className="px-5 py-4"><div className="flex flex-wrap gap-2"><Button type="button" size="sm" variant="secondary" disabled={actionKey === `restaurant:${restaurant.id}:status`} onClick={() => runAction(`restaurant:${restaurant.id}:status`, async () => { await developerAPI.updateRestaurantAccess(restaurant.id, { status: restaurant.status === 'active' ? 'inactive' : 'active' }); await loadRestaurants(); }, 'Restaurant status updated.')}>{restaurant.status === 'active' ? 'Deactivate' : 'Activate'}</Button><Button type="button" size="sm" variant="secondary" disabled={actionKey === `restaurant:${restaurant.id}:access`} onClick={() => runAction(`restaurant:${restaurant.id}:access`, async () => { await developerAPI.updateRestaurantAccess(restaurant.id, { accessEnabled: !restaurant.accessEnabled }); await loadRestaurants(); }, 'Restaurant access updated.')}>{restaurant.accessEnabled ? 'Block Access' : 'Enable Access'}</Button><Button type="button" size="sm" variant="ghost" disabled={actionKey === `restaurant:${restaurant.id}:maintenance`} onClick={() => runAction(`restaurant:${restaurant.id}:maintenance`, async () => { await developerAPI.updateMaintenance({ restaurantId: restaurant.id, enabled: !restaurant.maintenanceEnabled, message: !restaurant.maintenanceEnabled ? 'Maintenance enabled by developer.' : '' }); await loadRestaurants(); }, 'Restaurant maintenance updated.')}>{restaurant.maintenanceEnabled ? 'Disable Maint.' : 'Enable Maint.'}</Button><Button type="button" size="sm" variant="ghost" disabled={actionKey === `restaurant:${restaurant.id}:logout`} onClick={() => runAction(`restaurant:${restaurant.id}:logout`, async () => { await developerAPI.forceLogoutRestaurantUsers(restaurant.id); }, 'Restaurant users logged out.')}>Force Logout</Button></div></td></tr>} />
         <div className="flex items-center justify-end gap-2"><Button type="button" variant="secondary" disabled={restaurantPage === 0} onClick={() => setRestaurantPage((page) => Math.max(0, page - 1))}>Previous</Button><span className="text-sm text-[var(--text-secondary)]">Page {restaurantPage + 1} of {totalRestaurantPages}</span><Button type="button" variant="secondary" disabled={restaurantPage + 1 >= totalRestaurantPages} onClick={() => setRestaurantPage((page) => page + 1)}>Next</Button></div>
       </div>
@@ -362,4 +364,3 @@ export default function DeveloperConsole({ view = 'overview' }) {
     </div>
   );
 }
-

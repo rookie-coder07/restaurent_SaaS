@@ -53,6 +53,7 @@ const managerMenuItems = [
 const developerMenuItems = [
   { icon: BarChart3, label: 'Overview', href: '/developer', roles: ['developer'] },
   { icon: TableProperties, label: 'Restaurants', href: '/developer/restaurants', roles: ['developer'] },
+  { icon: Sparkles, label: 'Create Restaurant', href: '/developer/create-restaurant', roles: ['developer'] },
   { icon: Users, label: 'Users', href: '/developer/users', roles: ['developer'] },
   { icon: Palette, label: 'System', href: '/developer/system', roles: ['developer'] },
   { icon: ClipboardList, label: 'Audit Logs', href: '/developer/audit', roles: ['developer'] },

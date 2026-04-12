@@ -3,6 +3,8 @@ import supabase from '../config/supabase.js';
 import InventoryService from './inventoryService.js';
 
 export class MenuService {
+  static BULK_UPLOAD_DELAY_MS = 50;
+
   static transformCategory(category) {
     if (!category) return null;
 
@@ -82,6 +84,168 @@ export class MenuService {
       logger.error('❌ Create category error:', error);
       throw error;
     }
+  }
+
+  static normalizeCategoryName(name) {
+    return String(name || '').trim().toLowerCase();
+  }
+
+  static buildTagsFromBulkRow(row = {}) {
+    const tags = [];
+
+    if (row.isVeg === true) {
+      tags.push('veg');
+    }
+
+    if (Array.isArray(row.tags)) {
+      row.tags
+        .map((tag) => String(tag || '').trim())
+        .filter(Boolean)
+        .forEach((tag) => tags.push(tag));
+    }
+
+    return Array.from(new Set(tags));
+  }
+
+  static async ensureBulkCategories(restaurantId, rows = []) {
+    const requestedCategories = Array.from(
+      new Set(
+        rows
+          .map((row) => String(row.category || '').trim())
+          .filter(Boolean)
+      )
+    );
+
+    if (requestedCategories.length === 0) {
+      return new Map();
+    }
+
+    const { data: existingCategories, error: existingError } = await supabase
+      .from('menu_categories')
+      .select('id, name')
+      .eq('restaurant_id', restaurantId);
+
+    if (existingError) {
+      throw existingError;
+    }
+
+    const categoryMap = new Map(
+      (existingCategories || []).map((category) => [
+        this.normalizeCategoryName(category.name),
+        category.id,
+      ])
+    );
+
+    const missingCategories = requestedCategories.filter(
+      (categoryName) => !categoryMap.has(this.normalizeCategoryName(categoryName))
+    );
+
+    if (missingCategories.length > 0) {
+      const { data: insertedCategories, error: insertError } = await supabase
+        .from('menu_categories')
+        .insert(
+          missingCategories.map((categoryName, index) => ({
+            restaurant_id: restaurantId,
+            name: categoryName,
+            description: '',
+            display_order: index,
+            status: 'active',
+          }))
+        )
+        .select('id, name');
+
+      if (insertError) {
+        throw insertError;
+      }
+
+      (insertedCategories || []).forEach((category) => {
+        categoryMap.set(this.normalizeCategoryName(category.name), category.id);
+      });
+    }
+
+    return categoryMap;
+  }
+
+  static async bulkUploadMenuItems(restaurantId, rows = []) {
+    if (!Array.isArray(rows) || rows.length === 0) {
+      return {
+        totalRows: 0,
+        inserted: 0,
+        skipped: 0,
+        errors: [],
+      };
+    }
+
+    const categoryMap = await this.ensureBulkCategories(restaurantId, rows);
+    const validRows = [];
+    const errors = [];
+
+    rows.forEach((row, index) => {
+      const categoryId = categoryMap.get(this.normalizeCategoryName(row.category));
+
+      if (!categoryId) {
+        errors.push({ row: row.rowNumber || index + 1, reason: 'Category could not be resolved' });
+        return;
+      }
+
+      validRows.push({
+        restaurant_id: restaurantId,
+        category_id: categoryId,
+        name: row.name,
+        description: row.description || '',
+        price: row.price,
+        image_url: row.imageUrl || '',
+        preparation_time: row.preparationTime ?? 15,
+        tags: this.buildTagsFromBulkRow(row).join(','),
+        status: 'active',
+      });
+    });
+
+    const totalValidRows = validRows.length;
+    const chunkSize =
+      totalValidRows < 500 ? 100 :
+      totalValidRows < 2000 ? 250 :
+      500;
+    const insertedIds = [];
+    let inserted = 0;
+
+    try {
+      for (let index = 0; index < totalValidRows; index += chunkSize) {
+        const chunk = validRows.slice(index, index + chunkSize);
+        const { data, error } = await supabase
+          .from('menu_items')
+          .insert(chunk)
+          .select('id');
+
+        if (error) {
+          throw error;
+        }
+
+        const chunkIds = (data || []).map((item) => item.id).filter(Boolean);
+        insertedIds.push(...chunkIds);
+        inserted += chunkIds.length;
+
+        if (index + chunkSize < totalValidRows) {
+          await new Promise((resolve) => setTimeout(resolve, this.BULK_UPLOAD_DELAY_MS));
+        }
+      }
+    } catch (error) {
+      if (insertedIds.length > 0) {
+        await supabase
+          .from('menu_items')
+          .delete()
+          .in('id', insertedIds)
+          .eq('restaurant_id', restaurantId);
+      }
+      throw error;
+    }
+
+    return {
+      totalRows: rows.length,
+      inserted,
+      skipped: rows.length - inserted,
+      errors,
+    };
   }
 
   static async getCategories(restaurantId) {

@@ -6,6 +6,7 @@ export const getDashboard = asyncHandler(async (req, res) => sendSuccess(res, 20
 export const getControlCenterOverview = asyncHandler(async (req, res) => sendSuccess(res, 200, await DeveloperService.getControlCenterOverview(), 'Control center overview fetched successfully'));
 export const getLiveMonitor = asyncHandler(async (req, res) => sendSuccess(res, 200, await DeveloperService.getLiveMonitor(), 'Live monitor fetched successfully'));
 export const createDeveloperUser = asyncHandler(async (req, res) => sendSuccess(res, 201, await DeveloperService.createDeveloperUser(req.body, req.user), 'Developer user created successfully'));
+export const createRestaurant = asyncHandler(async (req, res) => sendSuccess(res, 201, await DeveloperService.createRestaurant(req.body, req.user), 'Restaurant created successfully'));
 export const getRestaurants = asyncHandler(async (req, res) => sendSuccess(res, 200, await DeveloperService.listRestaurants(req.query), 'Restaurants fetched successfully'));
 export const updateRestaurantAccess = asyncHandler(async (req, res) => sendSuccess(res, 200, await DeveloperService.updateRestaurantAccess(req.params.restaurantId, req.body, req.user), 'Restaurant updated successfully'));
 export const forceLogoutRestaurantUsers = asyncHandler(async (req, res) => sendSuccess(res, 200, await DeveloperService.forceLogoutRestaurantUsers(req.params.restaurantId, req.user), 'Restaurant users logged out successfully'));

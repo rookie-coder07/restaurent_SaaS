@@ -4,6 +4,7 @@ import { requireDeveloperAccess } from '../middleware/tenantIsolation.js';
 import { validateRequest } from '../middleware/validation.js';
 import {
   createBroadcastSchema,
+  createRestaurantSchema,
   createDeveloperUserSchema,
   resetDeveloperUserPasswordSchema,
   updateFeatureFlagSchema,
@@ -33,6 +34,7 @@ router.post('/users/:userId/reset-password', validateRequest(resetDeveloperUserP
 router.post('/users/:userId/force-logout', developerController.forceLogoutUser);
 router.get('/users/:userId/login-history', developerController.getUserLoginHistory);
 
+router.post('/restaurants', validateRequest(createRestaurantSchema), developerController.createRestaurant);
 router.get('/restaurants', developerController.getRestaurants);
 router.patch('/restaurants/:restaurantId/access', validateRequest(updateRestaurantAccessSchema), developerController.updateRestaurantAccess);
 router.post('/restaurants/:restaurantId/force-logout', developerController.forceLogoutRestaurantUsers);

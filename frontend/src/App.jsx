@@ -44,6 +44,7 @@ const UserPasswordManagement = lazy(() => import('./pages/UserPasswordManagement
 const StaffActivity = lazy(() => import('./pages/StaffActivity'));
 const Terms = lazy(() => import('./pages/Terms'));
 const Privacy = lazy(() => import('./pages/Privacy'));
+const CreateRestaurant = lazy(() => import('./pages/developer/CreateRestaurant'));
 import { useAuthStore } from './context/authStore';
 import { useManagerStore } from './context/managerStore';
 import { readPortalSession } from './utils/authStorage';
@@ -174,7 +175,9 @@ function App() {
 
           <Route element={<ProtectedRoute layout={AdminLayout} allowedRoles={['developer']} portal="admin" />}>
             <Route path="/developer" element={withSuspense(<DeveloperConsole view="overview" />)} />
+            <Route path="/developer/create-restaurant" element={withSuspense(<CreateRestaurant />)} />
             <Route path="/developer/restaurants" element={withSuspense(<DeveloperConsole view="restaurants" />)} />
+            <Route path="/dev/create-restaurant" element={<Navigate to="/developer/create-restaurant" replace />} />
             <Route path="/developer/users" element={withSuspense(<DeveloperConsole view="users" />)} />
             <Route path="/developer/system" element={withSuspense(<DeveloperConsole view="system" />)} />
             <Route path="/developer/audit" element={withSuspense(<DeveloperConsole view="audit" />)} />
