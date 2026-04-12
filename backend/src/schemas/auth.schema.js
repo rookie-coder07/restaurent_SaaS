@@ -4,18 +4,24 @@ import Joi from 'joi';
 export const restaurantRegisterSchema = Joi.object({
   name: Joi.string().trim().min(3).max(100).required(),
   email: Joi.string().email().lowercase().required(),
-  phone: Joi.string().pattern(/^\d{10}$/).required(),
+  phone: Joi.string().pattern(/^[+]?[\d\s\-\(\)]{7,20}$/).required().messages({
+    'string.pattern.base': 'Phone must be 7-20 digits (can include +, spaces, dashes, parentheses)'
+  }),
   password: Joi.string().min(8).max(128).required(),
   city: Joi.string().trim().required(),
   address: Joi.string().trim().optional(),
   gstNumber: Joi.string().trim().optional(),
-});
+})
+  .rename('restaurant_name', 'name', { ignoreUndefined: true, override: false })
+  .rename('restaurantName', 'name', { ignoreUndefined: true, override: false });
 
 // Staff registration - requires password confirmation
 export const staffRegisterSchema = Joi.object({
   name: Joi.string().trim().min(3).max(100).required(),
   email: Joi.string().email().lowercase().required(),
-  phone: Joi.string().pattern(/^\d{10}$/).required(),
+  phone: Joi.string().pattern(/^[+]?[\d\s\-\(\)]{7,20}$/).required().messages({
+    'string.pattern.base': 'Phone must be 7-20 digits (can include +, spaces, dashes, parentheses)'
+  }),
   password: Joi.string().required(),
   confirmPassword: Joi.string().valid(Joi.ref('password')).required(),
   role: Joi.string().valid('manager', 'kitchen_staff', 'staff').required(),

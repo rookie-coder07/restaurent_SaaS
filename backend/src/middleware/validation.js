@@ -13,11 +13,12 @@ export const validateRequest = (schema) => {
       if (error) {
         const details = error.details.map(d => ({
           field: d.path.join('.'),
-          message: d.message,
+          message: d.message.replace(/"/g, ''),
         }));
         
         logger.warn('Validation failed:', { details });
-        return sendError(res, 400, 'Validation error: does not meet security requirements', { details });
+        const errorMessage = details.map(d => `${d.field}: ${d.message}`).join('; ');
+        return sendError(res, 400, `Validation failed: ${errorMessage}`, { details });
       }
 
       // Replace body with validated data
