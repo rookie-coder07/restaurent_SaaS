@@ -106,7 +106,13 @@ function getSupabase() {
   const anonKey = process.env.SUPABASE_ANON_KEY;
 
   if (!supabaseUrl || !anonKey) {
-    throw new Error('Supabase not initialized - missing SUPABASE_URL or SUPABASE_ANON_KEY');
+    // Return null client that will fail at connectSupabase() validation time
+    // This allows module loading to complete even if env vars aren't set yet
+    logger.warn('Supabase configuration incomplete during module load - will validate at startup');
+    return {
+      from: () => ({ insert: async () => ({ error: new Error('Supabase not initialized') }) }),
+      auth: { signInWithPassword: async () => ({ error: new Error('Supabase not initialized') }) },
+    };
   }
 
   supabaseSingleton = createClient(supabaseUrl, anonKey, {
@@ -157,4 +163,5 @@ export const createTables = async () => {
   }
 };
 
+export { getSupabase };
 export default getSupabase();

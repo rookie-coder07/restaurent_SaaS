@@ -1,5 +1,5 @@
 import logger from '../utils/logger.js';
-import supabase, { supabaseAdmin } from '../config/supabase.js';
+import supabase, { getSupabaseAdmin } from '../config/supabase.js';
 import AuthService from './authService.js';
 import InvoiceService from './invoiceService.js';
 import { validateRestaurantGSTContext, validateInvoiceCounterRestaurant } from '../middleware/multiTenantValidation.js';
@@ -865,7 +865,7 @@ export class RestaurantService {
           if (duplicateUser) throw new Error('Staff email already exists for this restaurant');
 
           // Keep Supabase Auth in sync so login uses the new email
-          const { error: authEmailError } = await supabaseAdmin.auth.admin.updateUserById(
+          const { error: authEmailError } = await getSupabaseAdmin().auth.admin.updateUserById(
             staffId,
             { email: normalizedEmail, email_confirm: true }
           );
@@ -878,7 +878,7 @@ export class RestaurantService {
 
       if (updateData.password) {
         // Update password via Supabase Auth (not in database)
-        const { error: authError } = await supabaseAdmin.auth.admin.updateUserById(
+        const { error: authError } = await getSupabaseAdmin().auth.admin.updateUserById(
           staffId,
           { password: updateData.password }
         );
@@ -1103,7 +1103,7 @@ export class RestaurantService {
 
       if (error || !user) {
         if (emailWasUpdatedInAuth) {
-          await supabaseAdmin.auth.admin.updateUserById(staffId, {
+          await getSupabaseAdmin().auth.admin.updateUserById(staffId, {
             email: existingUser.email,
             email_confirm: true,
           });
@@ -1136,7 +1136,7 @@ export class RestaurantService {
       }
 
       // Update password via Supabase Auth (not in database)
-      const { error: authError } = await supabaseAdmin.auth.admin.updateUserById(
+      const { error: authError } = await getSupabaseAdmin().auth.admin.updateUserById(
         staffId,
         { password: newPassword }
       );

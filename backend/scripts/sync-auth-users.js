@@ -1,12 +1,12 @@
 import 'dotenv/config';
-import supabase, { supabaseAdmin } from '../src/config/supabase.js';
+import supabase, { getSupabaseAdmin } from '../src/config/supabase.js';
 
 const PAGE_SIZE = 200;
 
 async function getAllAuthUsers() {
   const all = [];
   for (let page = 1; page <= 20; page += 1) {
-    const { data, error } = await supabaseAdmin.auth.admin.listUsers({ page, perPage: PAGE_SIZE });
+    const { data, error } = await getSupabaseAdmin().auth.admin.listUsers({ page, perPage: PAGE_SIZE });
     if (error) throw error;
     all.push(...(data?.users || []));
     if (!data || (data.users || []).length < PAGE_SIZE) break;
