@@ -42,6 +42,8 @@ const DeveloperConsole = lazy(() => import('./pages/DeveloperConsole'));
 const ChangePassword = lazy(() => import('./pages/ChangePassword'));
 const UserPasswordManagement = lazy(() => import('./pages/UserPasswordManagement'));
 const StaffActivity = lazy(() => import('./pages/StaffActivity'));
+const Terms = lazy(() => import('./pages/Terms'));
+const Privacy = lazy(() => import('./pages/Privacy'));
 import { useAuthStore } from './context/authStore';
 import { useManagerStore } from './context/managerStore';
 import { readPortalSession } from './utils/authStorage';
@@ -134,6 +136,8 @@ function App() {
           <Route path="/register" element={withSuspense(<Register />)} />
           <Route path="/menu" element={withSuspense(<CustomerMenu />)} />
           <Route path="/order-status" element={withSuspense(<OrderStatus />)} />
+          <Route path="/terms" element={withSuspense(<Terms />)} />
+          <Route path="/privacy" element={withSuspense(<Privacy />)} />
 
           {/* Protected Routes */}
           <Route element={<ProtectedRoute layout={AdminLayout} allowedRoles={['owner']} portal="admin" />}>
