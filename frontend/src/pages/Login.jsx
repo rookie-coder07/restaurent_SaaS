@@ -155,7 +155,7 @@ export default function Login({ portal = 'admin', initialModeKey = '' }) {
       success: '',
     });
 
-    const redirectTo = `${window.location.origin}/admin/reset-password`;
+    const redirectTo = `${window.location.origin}/reset-password`;
     
     try {
       const { error, data } = await supabase.auth.resetPasswordForEmail(emailToReset, {
