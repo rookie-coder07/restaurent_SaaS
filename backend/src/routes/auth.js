@@ -89,8 +89,8 @@ router.post('/staff/register', authLimiter, validateRequest(staffRegisterSchema)
 router.post('/refresh-token', validateRequest(refreshTokenSchema), authController.refreshToken);
 // OTP-BASED PASSWORD RESET (for staff)
 router.post('/request-password-reset-otp', authLimiter, validateRequest(requestPasswordResetSchema), passwordResetController.requestPasswordResetOTP);
-router.post('/verify-otp', authLimiter, passwordResetController.verifyPasswordResetOTP);
-router.post('/set-password-with-otp', authLimiter, passwordResetController.setPasswordWithOTP);
+router.post('/verify-otp', passwordResetController.verifyPasswordResetOTP);
+router.post('/set-password-with-otp', passwordResetController.setPasswordWithOTP);
 
 // Token expiry information endpoint (PUBLIC - used by frontend to determine refresh timing)
 router.get('/token-info', (req, res) => {

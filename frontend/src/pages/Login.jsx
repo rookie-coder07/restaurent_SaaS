@@ -84,45 +84,6 @@ export default function Login({ portal = 'admin', initialModeKey = '' }) {
     return () => clearInterval(timer);
   }, [forgotCooldown]);
 
-  // Initialize cooldown from localStorage and check for persistent rate limit
-  useEffect(() => {
-    const checkRateLimitStatus = () => {
-      const storedResetTime = localStorage.getItem('lastPasswordResetTime');
-      if (storedResetTime) {
-        const lastResetTime = parseInt(storedResetTime, 10);
-        const elapsedSeconds = Math.floor((Date.now() - lastResetTime) / 1000);
-        const remainingCooldown = Math.max(0, 60 - elapsedSeconds);
-        
-        if (remainingCooldown > 0) {
-          const retryTime = new Date(lastResetTime + 60000).toLocaleTimeString();
-          console.log(`[Login] Password reset rate limit active: ${remainingCooldown}s remaining (retry at ${retryTime})`);
-          setForgotCooldown(remainingCooldown);
-          return true; // Rate limit is active
-        } else {
-          console.log('[Login] Password reset rate limit has expired, clearing cache');
-          localStorage.removeItem('lastPasswordResetTime');
-          setForgotCooldown(0);
-          return false; // Rate limit expired
-        }
-      }
-      return false; // No rate limit
-    };
-    
-    checkRateLimitStatus();
-    
-    // Re-check when window regains focus (user switches tabs)
-    const handleFocus = () => checkRateLimitStatus();
-    window.addEventListener('focus', handleFocus);
-    return () => window.removeEventListener('focus', handleFocus);
-  }, []);
-
-  // Clear localStorage when cooldown expires
-  useEffect(() => {
-    if (forgotCooldown === 0) {
-      localStorage.removeItem('lastPasswordResetTime');
-    }
-  }, [forgotCooldown]);
-
   // Clear auth error when switching modes to show fresh state
   useEffect(() => {
     setError(null);
@@ -207,8 +168,6 @@ export default function Login({ portal = 'admin', initialModeKey = '' }) {
         const isRateLimit = message.toLowerCase().includes('rate limit') || status === 429;
         
         if (isRateLimit) {
-          // Store reset time in localStorage for persistence across reloads
-          localStorage.setItem('lastPasswordResetTime', String(Date.now()));
           setForgotCooldown(60);
         }
 
@@ -237,8 +196,7 @@ export default function Login({ portal = 'admin', initialModeKey = '' }) {
         success: 'Reset link sent to your email. Check your inbox.',
       });
       
-      // Store reset time and set cooldown to prevent spamming
-      localStorage.setItem('lastPasswordResetTime', String(Date.now()));
+      // Cooldown only applies to sending a new reset request from this screen.
       setForgotCooldown(60);
       setSubmittingReset(false);
     } catch (unexpectedError) {
@@ -396,57 +354,11 @@ export default function Login({ portal = 'admin', initialModeKey = '' }) {
                   />
                 </div>
                 
-                {forgotPasswordState.error?.includes('rate limit') && (
-                  <div className="mt-3 p-3 rounded-lg bg-red-50 border border-red-200">
-                    <p className="text-xs font-semibold text-red-700 mb-2">{forgotPasswordState.error}</p>
-                    {forgotCooldown > 0 && (
-                      <p className="text-xs text-red-600 mb-2">
-                        You can retry in <strong>{forgotCooldown} seconds</strong>
-                        {forgotCooldown <= 60 && (
-                          <span className="block text-xs mt-1">
-                            Retry time: {new Date(Date.now() + forgotCooldown * 1000).toLocaleTimeString()}
-                          </span>
-                        )}
-                      </p>
-                    )}
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const storedTime = localStorage.getItem('lastPasswordResetTime');
-                          if (storedTime) {
-                            const elapsed = Math.floor((Date.now() - parseInt(storedTime, 10)) / 1000);
-                            console.log(`[Rate Limit Debug] Elapsed: ${elapsed}s/60s, Remaining: ${Math.max(0, 60 - elapsed)}s`);
-                            if (elapsed >= 60) {
-                              console.log('[Rate Limit Debug] 60s has passed! Clearing cache.');
-                              localStorage.removeItem('lastPasswordResetTime');
-                              setForgotCooldown(0);
-                              setForgotPasswordState({ isLoading: false, error: '', success: '' });
-                            } else {
-                              alert(`Still rate limited. Wait ${60 - elapsed} more seconds.`);
-                            }
-                          }
-                        }}
-                        className="text-xs font-semibold text-red-600 hover:text-red-800 underline flex-1"
-                      >
-                        Check Status
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (confirm('Force clear the rate limit cache? (Only do this if you\'re sure 60 seconds have passed)')) {
-                            localStorage.removeItem('lastPasswordResetTime');
-                            setForgotCooldown(0);
-                            setForgotPasswordState({ isLoading: false, error: '', success: '' });
-                          }
-                        }}
-                        className="text-xs font-semibold text-red-600 hover:text-red-800 underline flex-1"
-                      >
-                        Force Clear
-                      </button>
-                    </div>
-                  </div>
-                )}
+                {forgotCooldown > 0 ? (
+                  <p className="mt-3 text-xs font-medium text-[var(--color-text-muted)]">
+                    You can request another reset link in {forgotCooldown} seconds.
+                  </p>
+                ) : null}
                 
                 <div className="mt-4 flex flex-col-reverse gap-3 sm:flex-row">
                   <Button
@@ -510,7 +422,7 @@ export default function Login({ portal = 'admin', initialModeKey = '' }) {
               </div>
             ) : null}
 
-            {portal === 'admin' ? (
+            {portal === 'admin' && selectedModeKey === 'owner' ? (
               <div className="mt-6 rounded-[1.5rem] border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-4 text-center">
                 <p className="text-sm text-[var(--color-text-muted)]">New to the platform?</p>
                 <Link to="/register" className="mt-2 inline-flex text-sm font-semibold text-[var(--color-primary)]">

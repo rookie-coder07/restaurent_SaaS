@@ -8,10 +8,30 @@ import { TOKEN_CONFIG, rotateRefreshToken } from '../utils/tokenManager.js';
 import supabase from '../config/supabase.js';
 
 export const registerRestaurant = asyncHandler(async (req, res) => {
-  const { name, email, phone, password, city, address, gstNumber } = req.body;
+  const {
+    name,
+    email,
+    phone,
+    password,
+    city,
+    address,
+    gstNumber,
+    restaurant_name,
+    restaurantName,
+  } = req.body;
+
+  const finalRestaurantName = name || restaurant_name || restaurantName;
+
+  if (!finalRestaurantName || !email || !password) {
+    return res.status(400).json({
+      success: false,
+      message: 'Invalid request data',
+      received: req.body,
+    });
+  }
 
   const result = await AuthService.registerRestaurant({
-    name,
+    name: finalRestaurantName,
     email,
     phone,
     password,

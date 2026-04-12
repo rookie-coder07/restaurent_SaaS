@@ -17,12 +17,31 @@ const HEADER_ALIASES = {
   preparation_time: ['preparation_time', 'prep_time', 'prep time', 'time', 'cook_time', 'cooking_time'],
 };
 
+const REQUIRED_FIELDS = ['name', 'price', 'category'];
+
 const normalizeHeader = (value) =>
   String(value || '')
     .trim()
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '_')
     .replace(/^_+|_+$/g, '');
+
+const parseNumericValue = (value) => {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : NaN;
+  }
+
+  const normalized = String(value || '').replace(/[^0-9.-]/g, '').trim();
+  return normalized ? Number(normalized) : NaN;
+};
+
+const parseBooleanValue = (value) => {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (!normalized) return undefined;
+  if (['true', 'yes', 'y', '1', 'veg', 'vegetarian'].includes(normalized)) return true;
+  if (['false', 'no', 'n', '0', 'non-veg', 'non veg'].includes(normalized)) return false;
+  return undefined;
+};
 
 const detectMapping = (headers = []) => {
   const normalizedHeaders = headers.map((header) => ({
@@ -59,6 +78,100 @@ const parsePreviewRows = async (file) => {
   };
 };
 
+const normalizeCategoryName = (value) => String(value || '').trim().toLowerCase();
+
+const normalizeRowsForFallback = (rows = [], mapping = {}) => {
+  const normalizedRows = [];
+  const errors = [];
+
+  rows.forEach((row, index) => {
+    const rowNumber = index + 2;
+    const name = String(mapping.name ? row[mapping.name] || '' : '').trim();
+    const category = String(mapping.category ? row[mapping.category] || '' : '').trim();
+    const price = parseNumericValue(mapping.price ? row[mapping.price] : '');
+
+    if (!name) {
+      errors.push({ row: rowNumber, reason: 'Missing name' });
+      return;
+    }
+
+    if (!category) {
+      errors.push({ row: rowNumber, reason: 'Missing category' });
+      return;
+    }
+
+    if (!Number.isFinite(price) || price <= 0) {
+      errors.push({ row: rowNumber, reason: 'Missing price' });
+      return;
+    }
+
+    const preparationTime = parseNumericValue(mapping.preparation_time ? row[mapping.preparation_time] : '');
+    const isVeg = parseBooleanValue(mapping.is_veg ? row[mapping.is_veg] : '');
+    const tags = isVeg === true ? ['veg'] : [];
+
+    normalizedRows.push({
+      rowNumber,
+      name,
+      category,
+      price,
+      description: String(mapping.description ? row[mapping.description] || '' : '').trim(),
+      preparationTime: Number.isFinite(preparationTime) && preparationTime > 0 ? Math.round(preparationTime) : 15,
+      tags,
+    });
+  });
+
+  return { normalizedRows, rowErrors: errors };
+};
+
+const buildFallbackItemPayload = (row, categoryId) => {
+  const normalizedName = String(row.name || '').trim();
+  const normalizedDescription = String(row.description || '').trim();
+  const numericPrice = Number(row.price);
+  const numericPreparationTime = Number(row.preparationTime);
+
+  if (!categoryId) {
+    return { error: 'Missing category' };
+  }
+
+  if (normalizedName.length < 2) {
+    return { error: 'Name must be at least 2 characters' };
+  }
+
+  if (normalizedName.length > 100) {
+    return { error: 'Name is too long' };
+  }
+
+  if (!Number.isFinite(numericPrice) || numericPrice <= 0) {
+    return { error: 'Invalid price' };
+  }
+
+  const payload = {
+    name: normalizedName,
+    price: Number(numericPrice.toFixed(2)),
+    categoryId,
+    preparationTime:
+      Number.isFinite(numericPreparationTime) && numericPreparationTime >= 1
+        ? Math.min(120, Math.round(numericPreparationTime))
+        : 15,
+    tags: Array.isArray(row.tags) ? row.tags.filter(Boolean) : [],
+  };
+
+  if (normalizedDescription) {
+    payload.description = normalizedDescription.slice(0, 500);
+  }
+
+  return { payload };
+};
+
+const getFallbackItemErrorMessage = (error) => {
+  const details = error?.response?.data?.errors?.details;
+  if (Array.isArray(details) && details.length > 0) {
+    return details.map((detail) => detail.message).join(' ');
+  }
+
+  return error?.response?.data?.message || 'Failed to create item';
+};
+
 export default function MenuBulkUpload({ onUploaded }) {
   const [isOpen, setIsOpen] = useState(false);
   const [file, setFile] = useState(null);
@@ -69,7 +182,7 @@ export default function MenuBulkUpload({ onUploaded }) {
   const [uploadResult, setUploadResult] = useState(null);
 
   const missingRequiredMappings = useMemo(
-    () => ['name', 'price', 'category'].filter((field) => !preview.mapping?.[field]),
+    () => REQUIRED_FIELDS.filter((field) => !preview.mapping?.[field]),
     [preview.mapping]
   );
 
@@ -129,6 +242,84 @@ export default function MenuBulkUpload({ onUploaded }) {
       setToast({ type: 'success', message: 'Menu uploaded successfully' });
       await onUploaded?.();
     } catch (error) {
+      if (error.response?.status === 404) {
+        try {
+          const { normalizedRows, rowErrors } = normalizeRowsForFallback(preview.rows, preview.mapping);
+          const categoriesResponse = await menuAPI.getCategories();
+          const existingCategories = categoriesResponse.data?.data?.categories || [];
+          const categoryMap = new Map(
+            existingCategories.map((category) => [normalizeCategoryName(category.name), category.id])
+          );
+
+          const missingCategories = Array.from(
+            new Set(
+              normalizedRows
+                .map((row) => row.category)
+                .filter(Boolean)
+                .filter((category) => !categoryMap.has(normalizeCategoryName(category)))
+            )
+          );
+
+          for (const categoryName of missingCategories) {
+            const createResponse = await menuAPI.createCategory({ name: categoryName });
+            const createdCategory = createResponse.data?.data;
+            if (createdCategory?.id) {
+              categoryMap.set(normalizeCategoryName(categoryName), createdCategory.id);
+            }
+          }
+
+          let inserted = 0;
+          const uploadErrors = [...rowErrors];
+
+          for (const row of normalizedRows) {
+            const categoryId = categoryMap.get(normalizeCategoryName(row.category));
+
+            if (!categoryId) {
+              uploadErrors.push({ row: row.rowNumber, reason: 'Category could not be resolved' });
+              continue;
+            }
+
+            const { payload, error: payloadError } = buildFallbackItemPayload(row, categoryId);
+            if (payloadError) {
+              uploadErrors.push({ row: row.rowNumber, reason: payloadError });
+              continue;
+            }
+
+            try {
+              await menuAPI.createItem(payload);
+              inserted += 1;
+            } catch (itemError) {
+              uploadErrors.push({
+                row: row.rowNumber,
+                reason: getFallbackItemErrorMessage(itemError),
+              });
+            }
+          }
+
+          const fallbackResult = {
+            success: true,
+            totalRows: preview.rows.length,
+            inserted,
+            skipped: preview.rows.length - inserted,
+            errors: uploadErrors,
+          };
+
+          setUploadResult(fallbackResult);
+          setToast({
+            type: 'success',
+            message: 'Menu uploaded successfully using compatibility mode',
+          });
+          await onUploaded?.();
+          return;
+        } catch (fallbackError) {
+          setToast({
+            type: 'error',
+            message: fallbackError.response?.data?.message || 'Bulk upload compatibility mode failed',
+          });
+          return;
+        }
+      }
+
       setToast({
         type: 'error',
         message: error.response?.data?.message || 'Bulk upload failed',
@@ -177,7 +368,7 @@ export default function MenuBulkUpload({ onUploaded }) {
               Drop CSV or XLSX here
             </p>
             <p className="mt-1 text-sm text-[var(--text-secondary)]">
-              Flexible columns supported. Extra columns are ignored automatically.
+              Only `name`, `category`, and `price` are required. Extra columns are ignored automatically.
             </p>
             <label className="mt-4 inline-flex cursor-pointer">
               <span className="inline-flex min-h-[2.875rem] items-center justify-center rounded-[var(--radius-control)] bg-[var(--color-primary)] px-4 py-2.5 text-sm font-semibold text-white shadow-[0_10px_24px_rgba(37,99,235,0.22)]">
@@ -217,9 +408,20 @@ export default function MenuBulkUpload({ onUploaded }) {
               <div className="mt-4 space-y-3">
                 {Object.entries(preview.mapping || {}).map(([field, value]) => (
                   <div key={field} className="flex items-center justify-between gap-3 rounded-2xl border border-[var(--border-color)] px-4 py-3">
-                    <span className="text-sm font-medium capitalize text-[var(--text-primary)]">
-                      {field.replace('_', ' ')}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium capitalize text-[var(--text-primary)]">
+                        {field.replace('_', ' ')}
+                      </span>
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] ${
+                          REQUIRED_FIELDS.includes(field)
+                            ? 'bg-rose-500/10 text-rose-300'
+                            : 'bg-[var(--bg-card-muted)] text-[var(--text-secondary)]'
+                        }`}
+                      >
+                        {REQUIRED_FIELDS.includes(field) ? 'Required' : 'Optional'}
+                      </span>
+                    </div>
                     <span className={`text-sm ${value ? 'text-[var(--text-primary)]' : 'text-amber-400'}`}>
                       {value || 'Not detected'}
                     </span>
@@ -229,7 +431,7 @@ export default function MenuBulkUpload({ onUploaded }) {
               {missingRequiredMappings.length > 0 ? (
                 <div className="mt-4 flex items-start gap-2 rounded-2xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
                   <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-                  <span>Missing required mapping: {missingRequiredMappings.join(', ')}</span>
+                  <span>Before upload, detect these required columns: {missingRequiredMappings.join(', ')}</span>
                 </div>
               ) : null}
             </Card>
@@ -324,7 +526,7 @@ Veg Biryani,320,Main Course,Fragrant rice bowl,,true,25
             <Button
               type="button"
               onClick={handleUpload}
-              disabled={!file || submitting}
+              disabled={!file || submitting || missingRequiredMappings.length > 0}
             >
               {submitting ? <Loader className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
               Upload Menu

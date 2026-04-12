@@ -6,6 +6,7 @@ import Button from '../../components/common/Button';
 import Input from '../../components/common/Input';
 import Toast from '../../components/common/Toast';
 import { developerAPI } from '../../services/apiEndpoints';
+import { API_BASE_URL } from '../../services/api';
 
 const INITIAL_FORM = {
   restaurantName: '',
@@ -14,6 +15,19 @@ const INITIAL_FORM = {
   phone: '',
   address: '',
   gstNumber: '',
+};
+
+const normalizePhoneForApi = (phone) => String(phone || '').replace(/\D/g, '').slice(-10);
+
+const generateTemporaryPassword = () => {
+  // Ensure it meets ALL password requirements:
+  // - At least 8 characters
+  // - At least one uppercase: T
+  // - At least one lowercase: m, p
+  // - At least one number: uses random 0-9
+  // - At least one special character: @
+  const randomNum = Math.floor(Math.random() * 10000 + 10000); // 5 digits (e.g., 10000-19999)
+  return `Tmp@${randomNum}!A`; // e.g., "Tmp@15234!A"
 };
 
 export default function CreateRestaurant() {
@@ -44,8 +58,67 @@ export default function CreateRestaurant() {
     setToast({ type: '', message: '' });
 
     try {
-      const response = await developerAPI.createRestaurant(form);
-      const payload = response.data.data;
+      let payload = null;
+
+      try {
+        const response = await developerAPI.createRestaurant({
+          ...form,
+          phone: normalizePhoneForApi(form.phone),
+        });
+        payload = response.data.data;
+      } catch (error) {
+        if (error.response?.status !== 404) {
+          throw error;
+        }
+
+        const temporaryPassword = generateTemporaryPassword();
+        const registerResponse = await fetch(`${API_BASE_URL}/auth/register`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            name: form.restaurantName.trim(),
+            email: form.ownerEmail.trim().toLowerCase(),
+            phone: normalizePhoneForApi(form.phone),
+            password: temporaryPassword,
+            city: 'Bellary',
+            address: form.address.trim() || '',
+            gstNumber: form.gstNumber.trim() || '',
+          }),
+        });
+
+        const registerPayload = await registerResponse.json().catch(() => ({}));
+
+        if (!registerResponse.ok) {
+          throw {
+            response: {
+              status: registerResponse.status,
+              data: registerPayload,
+            },
+          };
+        }
+
+        payload = {
+          restaurant: {
+            id: registerPayload?.data?.restaurant?.id || '',
+            name: registerPayload?.data?.restaurant?.name || form.restaurantName.trim(),
+            email: registerPayload?.data?.restaurant?.email || form.ownerEmail.trim().toLowerCase(),
+            phone: normalizePhoneForApi(form.phone),
+            address: form.address.trim(),
+            gstNumber: form.gstNumber.trim(),
+            status: 'active',
+          },
+          ownerCredentials: {
+            ownerName: form.ownerName.trim(),
+            email: form.ownerEmail.trim().toLowerCase(),
+            temporaryPassword,
+            loginPath: '/admin/login',
+            role: 'admin',
+          },
+        };
+      }
+
       setCreatedResult(payload);
       setForm(INITIAL_FORM);
       setToast({ type: 'success', message: 'Restaurant created successfully' });

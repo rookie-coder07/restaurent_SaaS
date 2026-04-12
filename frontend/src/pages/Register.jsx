@@ -8,6 +8,36 @@ import Input from '../components/common/Input';
 import Button from '../components/common/Button';
 import Toast from '../components/common/Toast';
 
+const normalizePhoneForApi = (phone) => String(phone || '').replace(/\D/g, '').slice(-10);
+
+const validateRegisterPassword = (password) => {
+  if (!password) {
+    return 'Password is required';
+  }
+
+  if (password.length < 8) {
+    return 'Password must be at least 8 characters';
+  }
+
+  if (!/[A-Z]/.test(password)) {
+    return 'Password must include an uppercase letter';
+  }
+
+  if (!/[a-z]/.test(password)) {
+    return 'Password must include a lowercase letter';
+  }
+
+  if (!/[0-9]/.test(password)) {
+    return 'Password must include a number';
+  }
+
+  if (!/[!@#$%^&*]/.test(password)) {
+    return 'Password must include a special character (!@#$%^&*)';
+  }
+
+  return '';
+};
+
 export default function Register() {
   const navigate = useNavigate();
   const { register, isLoading, error: authError } = useAuth();
@@ -26,13 +56,17 @@ export default function Register() {
 
   const validateForm = () => {
     const newErrors = {};
+    const normalizedPhone = normalizePhoneForApi(formData.phone);
+
     if (!formData.name.trim()) newErrors.name = 'Restaurant name is required';
-    if (!formData.email) newErrors.email = 'Email is required';
-    else if (!validateEmail(formData.email)) newErrors.email = 'Enter a valid email';
-    if (!formData.phone) newErrors.phone = 'Phone number is required';
-    else if (!validatePhone(formData.phone)) newErrors.phone = 'Phone must be 10 digits';
+    if (!formData.email.trim()) newErrors.email = 'Email is required';
+    else if (!validateEmail(formData.email.trim())) newErrors.email = 'Enter a valid email';
+    if (!formData.phone.trim()) newErrors.phone = 'Phone number is required';
+    else if (!validatePhone(normalizedPhone)) newErrors.phone = 'Phone must be 10 digits';
     if (!formData.city.trim()) newErrors.city = 'City is required';
-    if (!formData.password) newErrors.password = 'Password is required';
+
+    const passwordError = validateRegisterPassword(formData.password);
+    if (passwordError) newErrors.password = passwordError;
     if (formData.password !== formData.confirmPassword) newErrors.confirmPassword = 'Passwords do not match';
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -43,10 +77,10 @@ export default function Register() {
     if (!validateForm()) return;
 
     const success = await register({
-      name: formData.name,
-      email: formData.email,
-      phone: formData.phone,
-      city: formData.city,
+      name: formData.name.trim(),
+      email: formData.email.trim(),
+      phone: normalizePhoneForApi(formData.phone),
+      city: formData.city.trim(),
       password: formData.password,
       confirmPassword: formData.confirmPassword,
     });
@@ -177,6 +211,11 @@ export default function Register() {
                       </div>
                     </label>
                     {errors.password ? <p className="mt-2 text-sm text-red-500">{errors.password}</p> : null}
+                    {!errors.password ? (
+                      <p className="mt-2 text-xs text-[var(--color-text-muted)]">
+                        Use 8+ characters with uppercase, lowercase, number, and special character.
+                      </p>
+                    ) : null}
                   </div>
 
                   <div>

@@ -15,8 +15,17 @@ export const requestPasswordResetOTP = asyncHandler(async (req, res) => {
     return sendError(res, 400, 'Email and role are required');
   }
 
-  const result = await PasswordResetService.requestPasswordResetOTP(email, role);
-  return sendSuccess(res, 200, result, 'OTP sent to email');
+  try {
+    const result = await PasswordResetService.requestPasswordResetOTP(email, role);
+    return sendSuccess(res, 200, result, 'Reset link sent');
+  } catch (error) {
+    if (error.statusCode === 429) {
+      return sendError(res, 429, error.message, {
+        retryAfter: error.retryAfter || 60,
+      });
+    }
+    throw error;
+  }
 });
 
 /**
@@ -51,5 +60,5 @@ export const setPasswordWithOTP = asyncHandler(async (req, res) => {
   }
 
   const result = await PasswordResetService.setPasswordWithOTP(email, newPassword);
-  return sendSuccess(res, 200, result, 'Password reset successfully');
+  return sendSuccess(res, 200, result, 'Password updated successfully');
 });

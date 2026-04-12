@@ -8,7 +8,6 @@ import { clearFeatureFlagCache } from '../middleware/featureFlags.js';
 import { metricsInstance } from '../middleware/monitoring.js';
 import { revokeAllUserTokens } from '../utils/tokenManager.js';
 import { broadcastRestaurantEvent } from '../utils/realtimeEvents.js';
-import AuthService from './authService.js';
 
 let injectedSupabase = null;
 const getSupabase = () => injectedSupabase || supabaseImport;
@@ -217,7 +216,6 @@ export class DeveloperService {
     const normalizedEmail = String(restaurantData.ownerEmail || '').trim().toLowerCase();
     const now = new Date().toISOString();
     const temporaryPassword = this.generateTemporaryPassword();
-    const passwordHash = await AuthService.hashPassword(temporaryPassword);
 
     const { data: existingRestaurant, error: restaurantLookupError } = await getSupabase()
       .from('restaurants')
@@ -259,10 +257,11 @@ export class DeveloperService {
       const { data: restaurant, error: createRestaurantError } = await getSupabase()
         .from('restaurants')
         .insert([{
+          id: authData.user.id,
           name: restaurantData.restaurantName,
           business_name: restaurantData.restaurantName,
           email: normalizedEmail,
-          password_hash: passwordHash,
+          password_hash: '',
           phone: restaurantData.phone,
           address: restaurantData.address || '',
           gst_number: restaurantData.gstNumber || '',
@@ -280,27 +279,6 @@ export class DeveloperService {
 
       createdRestaurant = restaurant;
 
-      const { data: ownerUser, error: createOwnerError } = await getSupabase()
-        .from('users')
-        .insert([{
-          id: authData.user.id,
-          restaurant_id: restaurant.id,
-          name: restaurantData.ownerName,
-          email: normalizedEmail,
-          password_hash: passwordHash,
-          phone: restaurantData.phone,
-          role: 'admin',
-          status: 'active',
-          created_at: now,
-          updated_at: now,
-        }])
-        .select('id, restaurant_id, name, email, phone, role, status, created_at, updated_at')
-        .single();
-
-      if (createOwnerError || !ownerUser) {
-        throw createOwnerError || new Error('Failed to create owner user');
-      }
-
       await this.logAudit({
         actor,
         action: 'developer.restaurant_created',
@@ -310,7 +288,7 @@ export class DeveloperService {
         metadata: {
           restaurantName: restaurant.name || restaurant.business_name,
           ownerEmail: normalizedEmail,
-          ownerUserId: ownerUser.id,
+          ownerUserId: authData.user.id,
         },
       });
 
@@ -330,16 +308,15 @@ export class DeveloperService {
           createdAt: restaurant.created_at,
         },
         ownerCredentials: {
-          ownerName: ownerUser.name,
-          email: ownerUser.email,
+          ownerName: restaurantData.ownerName,
+          email: normalizedEmail,
           temporaryPassword,
           loginPath: '/admin/login',
-          role: this.roleLabel(ownerUser.role),
+          role: this.roleLabel('admin'),
         },
       };
     } catch (error) {
       if (createdRestaurant?.id) {
-        await getSupabase().from('users').delete().eq('restaurant_id', createdRestaurant.id);
         await getSupabase().from('restaurants').delete().eq('id', createdRestaurant.id);
       }
 

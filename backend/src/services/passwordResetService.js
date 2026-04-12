@@ -55,8 +55,16 @@ class PasswordResetService {
         throw new Error('User not found with this email');
       }
 
-      // Generate OTP
-      const { otp } = await OTPService.createOTP(normalizedEmail);
+      // Generate OTP with request-only cooldown
+      const otpResult = await OTPService.createOTP(normalizedEmail);
+      if (!otpResult.success) {
+        const cooldownError = new Error(otpResult.error || 'Please wait before requesting another reset.');
+        cooldownError.statusCode = 429;
+        cooldownError.retryAfter = otpResult.retryAfter || 60;
+        throw cooldownError;
+      }
+
+      const { otp } = otpResult;
 
       // Send OTP email
       const emailResult = await EmailService.sendOTPEmail(
@@ -139,6 +147,11 @@ class PasswordResetService {
         throw new Error('Password must be at least 8 characters');
       }
 
+      const verifiedReset = await OTPService.requireVerifiedReset(normalizedEmail);
+      if (!verifiedReset.success) {
+        throw new Error(verifiedReset.error || 'Reset session not verified');
+      }
+
       let user = null;
       let isRestaurant = false;
       let userId = null;
@@ -195,7 +208,7 @@ class PasswordResetService {
 
       if (updateError) throw updateError;
 
-      // Invalidate OTP
+      // Clear verified reset state after successful password update
       await OTPService.invalidateOTP(normalizedEmail);
 
       logger.info(`✅ Password reset completed for ${normalizedEmail} via OTP`);

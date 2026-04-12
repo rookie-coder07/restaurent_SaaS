@@ -77,63 +77,6 @@ const parseSpreadsheetBuffer = async (file) => {
   return XLSX.utils.sheet_to_json(firstSheet, { defval: '' });
 };
 
-const normalizeBulkRows = (rows = []) => {
-  const headers = Array.from(
-    rows.reduce((set, row) => {
-      Object.keys(row || {}).forEach((header) => set.add(header));
-      return set;
-    }, new Set())
-  );
-
-  const headerMap = buildHeaderMap(headers);
-  const normalizedRows = [];
-  const errors = [];
-
-  rows.forEach((row, index) => {
-    const rowNumber = index + 2;
-    const rawName = headerMap.name ? row[headerMap.name] : '';
-    const rawPrice = headerMap.price ? row[headerMap.price] : '';
-    const rawCategory = headerMap.category ? row[headerMap.category] : '';
-    const name = String(rawName || '').trim();
-    const category = String(rawCategory || '').trim();
-    const price = parseNumericValue(rawPrice);
-
-    if (!name) {
-      errors.push({ row: rowNumber, reason: 'Missing name' });
-      return;
-    }
-
-    if (!Number.isFinite(price) || price <= 0) {
-      errors.push({ row: rowNumber, reason: 'Missing price' });
-      return;
-    }
-
-    if (!category) {
-      errors.push({ row: rowNumber, reason: 'Missing category' });
-      return;
-    }
-
-    const preparationTime = parseNumericValue(headerMap.preparationTime ? row[headerMap.preparationTime] : '');
-    normalizedRows.push({
-      rowNumber,
-      name,
-      price,
-      category,
-      description: headerMap.description ? String(row[headerMap.description] || '').trim() : '',
-      imageUrl: headerMap.imageUrl ? String(row[headerMap.imageUrl] || '').trim() : '',
-      isVeg: parseBooleanValue(headerMap.isVeg ? row[headerMap.isVeg] : ''),
-      preparationTime: Number.isFinite(preparationTime) && preparationTime > 0 ? Math.round(preparationTime) : 15,
-    });
-  });
-
-  return {
-    headers,
-    mapping: headerMap,
-    normalizedRows,
-    rowErrors: errors,
-  };
-};
-
 // Categories
 export const createCategory = asyncHandler(async (req, res) => {
   const category = await MenuService.createCategory(req.restaurantId, req.body);
@@ -277,16 +220,167 @@ export const bulkUploadMenu = asyncHandler(async (req, res) => {
   }
 
   const parsedRows = await parseSpreadsheetBuffer(req.file);
-  const { normalizedRows, rowErrors } = normalizeBulkRows(parsedRows);
-  const uploadResult = await MenuService.bulkUploadMenuItems(req.restaurantId, normalizedRows);
+  const headers = Array.from(
+    parsedRows.reduce((set, row) => {
+      Object.keys(row || {}).forEach((header) => set.add(header));
+      return set;
+    }, new Set())
+  );
+  const headerMap = buildHeaderMap(headers);
+  const errors = [];
 
-  const result = {
-    success: true,
-    totalRows: parsedRows.length,
-    inserted: uploadResult.inserted,
-    skipped: rowErrors.length + uploadResult.errors.length,
-    errors: [...rowErrors, ...uploadResult.errors],
+  const { data: existingCategories, error: categoryFetchError } = await supabase
+    .from('menu_categories')
+    .select('id, name')
+    .eq('restaurant_id', req.restaurantId);
+
+  if (categoryFetchError) {
+    throw categoryFetchError;
+  }
+
+  const categoryMap = new Map(
+    (existingCategories || []).map((category) => [
+      String(category.name || '').trim().toLowerCase(),
+      category.id,
+    ])
+  );
+
+  const resolveCategoryId = async (categoryName) => {
+    const normalizedCategory = String(categoryName || '').trim().toLowerCase();
+    if (!normalizedCategory) {
+      return null;
+    }
+
+    if (categoryMap.has(normalizedCategory)) {
+      return categoryMap.get(normalizedCategory);
+    }
+
+    const { data: createdCategory, error: createCategoryError } = await supabase
+      .from('menu_categories')
+      .insert([{
+        restaurant_id: req.restaurantId,
+        name: String(categoryName || '').trim(),
+        description: '',
+        status: 'active',
+      }])
+      .select('id, name')
+      .single();
+
+    if (createCategoryError) {
+      throw createCategoryError;
+    }
+
+    categoryMap.set(normalizedCategory, createdCategory.id);
+    return createdCategory.id;
   };
 
-  return sendSuccess(res, 200, result, 'Menu uploaded successfully');
+  const menuItems = [];
+
+  for (const row of parsedRows) {
+    console.log('ROW DATA:', row);
+
+    const name =
+      row.name ||
+      row['Item Name'] ||
+      row.item ||
+      row.dish ||
+      (headerMap.name ? row[headerMap.name] : '');
+
+    const priceRaw =
+      row.price ||
+      row.Price ||
+      row['Price'] ||
+      row.cost ||
+      (headerMap.price ? row[headerMap.price] : '');
+
+    const category =
+      row.category ||
+      row.Category ||
+      row['Category'] ||
+      (headerMap.category ? row[headerMap.category] : '');
+
+    const price = Number(
+      String(priceRaw ?? '').replace(/[^\d.]/g, '')
+    );
+
+    if (Number.isNaN(price)) {
+      errors.push({ row, reason: 'Invalid price' });
+      continue;
+    }
+
+    if (!name || !category) {
+      errors.push({ row, reason: 'Missing name/category' });
+      continue;
+    }
+
+    const category_id = await resolveCategoryId(category);
+
+    if (!category_id) {
+      errors.push({ row, reason: 'Category could not be resolved' });
+      continue;
+    }
+
+    menuItems.push({
+      name: String(name).trim(),
+      price,
+      category_id,
+      restaurant_id: req.restaurantId,
+      description: String(
+        row.description ||
+        row.Description ||
+        row.details ||
+        row.about ||
+        (headerMap.description ? row[headerMap.description] : '') ||
+        ''
+      ).trim(),
+      image_url: String(
+        row.image_url ||
+        row.image ||
+        row.imageurl ||
+        row.photo ||
+        row.photo_url ||
+        (headerMap.imageUrl ? row[headerMap.imageUrl] : '') ||
+        ''
+      ).trim(),
+      preparation_time: (() => {
+        const preparationTime = parseNumericValue(
+          row.preparation_time ||
+          row.prep_time ||
+          row['prep time'] ||
+          row.time ||
+          row.cook_time ||
+          row.cooking_time ||
+          (headerMap.preparationTime ? row[headerMap.preparationTime] : '')
+        );
+        return Number.isFinite(preparationTime) && preparationTime > 0 ? Math.round(preparationTime) : 15;
+      })(),
+      tags: parseBooleanValue(
+        row.is_veg ||
+        row.veg ||
+        row.isveg ||
+        row.vegetarian ||
+        row.veg_flag ||
+        (headerMap.isVeg ? row[headerMap.isVeg] : '')
+      ) === true ? 'veg' : '',
+      status: 'active',
+    });
+  }
+
+  if (menuItems.length > 0) {
+    const { error } = await supabase
+      .from('menu_items')
+      .insert(menuItems);
+
+    if (error) {
+      console.error('INSERT ERROR:', error);
+      throw error;
+    }
+  }
+
+  return res.json({
+    success: true,
+    inserted: menuItems.length,
+    skipped: errors.length,
+    errors,
+  });
 });
