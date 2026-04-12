@@ -1848,17 +1848,14 @@ export class OrderService {
       });
 
       // ✅ Update table status ONLY after order AND items are successfully created
+      // ⚡ Fire-and-forget: Don't await table update - it shouldn't block order response
       if (resolvedTableId) {
-        try {
-          await TableService.syncTableLifecycle(finalRestaurantId, resolvedTableId);
-          logger.info(`✅ Table ${resolvedTableId} status updated to occupied for order ${order.id}`);
-        } catch (tableError) {
-          logger.warn(`Failed to update table status`, {
+        TableService.syncTableLifecycle(finalRestaurantId, resolvedTableId)
+          .then(() => logger.info(`✅ Table ${resolvedTableId} status updated to occupied for order ${order.id}`))
+          .catch(tableError => logger.warn(`Failed to update table status`, {
             orderId: order.id,
             message: tableError.message,
-          });
-          // Don't throw - order was successfully created, just the table update failed
-        }
+          }));
       }
 
       this.emitOrderEvent(finalRestaurantId, 'order.created', completeOrder, {
@@ -3611,45 +3608,44 @@ export class OrderService {
 
       const orphanIds = Array.from(orphanOrders);
 
-      // Hard delete dependent records first
-      for (const id of orphanIds) {
+      // ⚡ BATCH DELETE dependent records (instead of per-order loops) for performance
+      if (orphanIds.length > 0) {
+        // Batch delete order_items
         const { error: deleteItemsError, count: itemsDeletedCount } = await supabase
           .from('order_items')
           .delete()
-          .eq('order_id', id);
+          .in('order_id', orphanIds);
 
         if (deleteItemsError) {
-          logger.error(`Failed to delete order_items for ${id}:`, deleteItemsError);
+          logger.error(`Failed to delete order_items:`, deleteItemsError);
           throw new Error(`Cannot delete order - failed to remove order items: ${deleteItemsError.message}`);
         }
 
-        logger.info(`Deleted ${itemsDeletedCount || 0} items for order ${id}`);
-
+        // Batch delete kitchen_tickets
         const { error: deleteKotError } = await supabase
           .from('kitchen_tickets')
           .delete()
-          .eq('order_id', id);
+          .in('order_id', orphanIds);
 
         if (deleteKotError) {
-          logger.warn(`Failed to delete kitchen_tickets for ${id}:`, deleteKotError);
+          logger.warn(`Failed to delete kitchen_tickets:`, deleteKotError);
           // Continue anyway - KOT records are less critical
         }
 
-        // Remove any bill/meta records stored alongside orders (if present in future migrations)
+        // Batch delete order_bills
         try {
           await supabase
             .from('order_bills')
             .delete()
-            .eq('order_id', id);
+            .in('order_id', orphanIds);
         } catch (err) {
           // Table may not exist; ignore if missing
         }
       }
 
-      // Mark orders as deleted using soft-delete flag
-      // This approach works because UPDATE with simple flag is more likely to succeed than DELETE
-      for (const id of orphanIds) {
-        const { error: softDeleteError, data: updatedRows } = await supabase
+      // ⚡ BATCH UPDATE orders instead of looping - no .select() to avoid data fetching
+      if (orphanIds.length > 0) {
+        const { error: softDeleteError } = await supabase
           .from('orders')
           .update({
             is_deleted: true,
@@ -3657,21 +3653,15 @@ export class OrderService {
             delete_reason: trimmedReason,
             notes: this.appendOrderNote(existingOrder.notes, auditNote),
           })
-          .eq('id', id)
-          .eq('restaurant_id', effectiveRestaurantId)
-          .select('id');
+          .in('id', orphanIds)
+          .eq('restaurant_id', effectiveRestaurantId);
 
         if (softDeleteError) {
-          logger.warn(`Failed to soft-delete order ${id}:`, softDeleteError);
-          throw new Error(`Unable to delete order ${id}: ${softDeleteError.message}`);
+          logger.warn(`Failed to soft-delete orders:`, softDeleteError);
+          throw new Error(`Unable to delete orders: ${softDeleteError.message}`);
         }
 
-        if (!updatedRows || updatedRows.length === 0) {
-          logger.error(`Update query returned no rows for order ${id}`);
-          throw new Error(`Order ${id} could not be marked as deleted - no rows updated`);
-        }
-
-        logger.info(`Soft-deleted order ${id}: ${auditNote}`);
+        logger.info(`Soft-deleted ${orphanIds.length} order(s): ${auditNote}`);
       }
 
       // Update table status if orders were tied to a table
