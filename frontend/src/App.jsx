@@ -129,11 +129,13 @@ function App() {
           <Route path="/" element={withSuspense(<HomeAccess />)} />
           <Route path="/login" element={<Navigate to="/" replace />} />
           <Route path="/admin/login" element={withSuspense(<Login portal="admin" />)} />
+          <Route path="/reset-password" element={withSuspense(<ResetPassword />)} />
           <Route path="/admin/reset-password" element={withSuspense(<ResetPassword />)} />
           <Route path="/manager/login" element={withSuspense(<Login portal="admin" initialModeKey="manager" />)} />
           <Route path="/developer/login" element={withSuspense(<Login portal="admin" initialModeKey="developer" />)} />
           <Route path="/pos/login" element={withSuspense(<PosLogin />)} />
           <Route path="/staff/login" element={withSuspense(<PosLogin />)} />
+          <Route path="/pos/reset-password" element={withSuspense(<StaffPasswordResetOTP />)} />
           <Route path="/register" element={withSuspense(<Register />)} />
           <Route path="/menu" element={withSuspense(<CustomerMenu />)} />
           <Route path="/order-status" element={withSuspense(<OrderStatus />)} />
