@@ -3,6 +3,7 @@ import { sendSuccess, sendError } from '../utils/apiResponse.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import OrderService from '../services/orderService.js';
 import { ActivityService } from '../services/activityService.js';
+import { AuthService } from '../services/authService.js';
 import supabase from '../config/supabase.js';
 import { safetyEngine } from '../utils/productionSafety.js';
 import {
@@ -700,11 +701,46 @@ export const softDeleteOrder = asyncHandler(async (req, res) => {
       return sendError(res, 400, 'Order ID is required');
     }
 
+    // ✅ STRICT PASSWORD VERIFICATION BEFORE DELETION
+    console.log('[ORDER_DELETE] 🔐 Enforcing password verification');
+    
+    if (!currentPassword || currentPassword.trim().length === 0) {
+      console.log('[ORDER_DELETE] ❌ Password required but not provided');
+      return sendError(res, 401, 'Current password is required for order deletion');
+    }
+
+    // Get user's hashed password from database
+    const { data: user, error: userError } = await supabase
+      .from('users')
+      .select('password_hash')
+      .eq('id', req.user?.userId)
+      .eq('restaurant_id', req.restaurantId)
+      .single();
+
+    if (userError || !user) {
+      console.log('[ORDER_DELETE] ❌ User password record not found');
+      return sendError(res, 401, 'Unable to verify password');
+    }
+
+    // ✅ Verify password using bcrypt
+    const isPasswordValid = await AuthService.comparePassword(
+      currentPassword.trim(),
+      user.password_hash
+    );
+
+    if (!isPasswordValid) {
+      console.log('[ORDER_DELETE] ❌ PASSWORD INCORRECT - BLOCKING DELETION');
+      return sendError(res, 401, 'Current password is incorrect');
+    }
+
+    console.log('[ORDER_DELETE] ✅ Password verified - proceeding with deletion');
+
+    // ✅ ONLY PROCEED IF PASSWORD IS VALID
     const deletedOrder = await OrderService.softDeleteOrder(req.restaurantId || req.user?.restaurantId || null, orderId, req.body.reason, {
       actorRole: req.user?.role,
       actorUserId: req.user?.userId,
       actorName: req.user?.name || req.user?.email || 'Unknown user',
-      currentPassword,
+      currentPassword: '', // Don't pass password to service
     });
 
     console.log('[ORDER_DELETE] ✅ Deletion successful');
