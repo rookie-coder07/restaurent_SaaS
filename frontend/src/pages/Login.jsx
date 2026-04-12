@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { ArrowLeft, Eye, EyeOff, Loader, ShieldCheck, Sparkles } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
@@ -64,6 +64,9 @@ export default function Login({ portal = 'admin', initialModeKey = '' }) {
   });
   const [forgotCooldown, setForgotCooldown] = useState(0);
   const [submittingReset, setSubmittingReset] = useState(false);
+
+  // Ref to prevent duplicate password reset requests (React Strict Mode + async safety)
+  const resetRequestInProgressRef = useRef(false);
 
   const selectedMode = useMemo(
     () => config.modes.find((mode) => mode.key === selectedModeKey) || config.modes[0],
@@ -135,11 +138,21 @@ export default function Login({ portal = 'admin', initialModeKey = '' }) {
   const handleForgotPassword = async (event) => {
     event.preventDefault();
     
-    // Double-check cooldown to prevent rapid clicks
-    if (forgotCooldown > 0 || submittingReset) return;
+    // CRITICAL: Prevent duplicate API calls from React Strict Mode or double-click
+    if (resetRequestInProgressRef.current) {
+      console.warn('[Forgot Password] Request already in progress, ignoring duplicate call');
+      return;
+    }
+    
+    // Guard against rapid re-clicks
+    if (forgotCooldown > 0 || submittingReset) {
+      console.warn('[Forgot Password] In cooldown or already submitting, ignoring click');
+      return;
+    }
 
     const emailToReset = String(forgotEmail || formData.email || '').trim().toLowerCase();
     if (!validateEmail(emailToReset)) {
+      console.log('[Forgot Password] Invalid email:', emailToReset);
       setForgotPasswordState({
         isLoading: false,
         error: 'Enter a valid admin email address.',
@@ -148,12 +161,16 @@ export default function Login({ portal = 'admin', initialModeKey = '' }) {
       return;
     }
 
+    // Set the ref FIRST to block any duplicate calls
+    resetRequestInProgressRef.current = true;
     setSubmittingReset(true);
     setForgotPasswordState({
       isLoading: true,
       error: '',
       success: '',
     });
+
+    console.log('[Forgot Password] Initiating password reset request for:', emailToReset);
 
     const redirectTo = `${window.location.origin}/reset-password`;
     
@@ -162,16 +179,18 @@ export default function Login({ portal = 'admin', initialModeKey = '' }) {
         redirectTo,
       });
 
+      console.log('[Forgot Password] API Response:', { error: error?.message, hasData: !!data });
+
       if (error) {
         const message = error.message || 'Unable to send reset link right now.';
         const status = error.status || 0;
         const isRateLimit = message.toLowerCase().includes('rate limit') || status === 429;
         
         if (isRateLimit) {
+          console.warn('[Forgot Password] Rate limit detected, setting 60s cooldown');
           setForgotCooldown(60);
         }
 
-        // Log detailed error for debugging
         console.error('[Forgot Password] Error:', {
           message,
           status,
@@ -186,17 +205,16 @@ export default function Login({ portal = 'admin', initialModeKey = '' }) {
             : message,
           success: '',
         });
-        setSubmittingReset(false);
         return;
       }
 
+      console.log('[Forgot Password] Success! Setting 60s cooldown and showing success message');
       setForgotPasswordState({
         isLoading: false,
         error: '',
         success: 'Reset link sent to your email. Check your inbox.',
       });
       
-      // Cooldown only applies to sending a new reset request from this screen.
       setForgotCooldown(60);
       setSubmittingReset(false);
     } catch (unexpectedError) {
@@ -207,6 +225,9 @@ export default function Login({ portal = 'admin', initialModeKey = '' }) {
         success: '',
       });
       setSubmittingReset(false);
+    } finally {
+      // IMPORTANT: Clear the ref ONLY after all state updates are complete
+      resetRequestInProgressRef.current = false;
     }
   };
 
