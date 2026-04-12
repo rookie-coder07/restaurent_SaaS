@@ -123,7 +123,7 @@ export default function Login({ portal = 'admin', initialModeKey = '' }) {
     e.preventDefault();
     if (!validateForm()) return;
 
-    const success = await login(formData.email, formData.password, selectedMode?.isStaff, portal);
+    const success = await login(formData.email, formData.password, selectedModeKey, portal);
     if (success) {
       const loggedInRole = getValidPortalSession(portal)?.user?.role;
       if (canAccessPortal(loggedInRole, portal)) {

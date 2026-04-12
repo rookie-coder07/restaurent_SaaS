@@ -70,9 +70,10 @@ export const enforceRBAC = (req, res, next) => {
   const restrictedPaths = ['/api/order', '/api/table', '/api/kitchen'];
 
   const userRole = req.user?.role;
+  console.log('[SECURITY_ENFORCE] RBAC Check:', { userRole, path: req.path });
 
   if (adminOnlyPaths.some(path => req.path.startsWith(path))) {
-    if (!['admin'].includes(userRole)) {
+    if (!['admin', 'developer'].includes(userRole)) {
       logger.warn('Admin access denied', {
         userId: req.user?.id,
         role: userRole,

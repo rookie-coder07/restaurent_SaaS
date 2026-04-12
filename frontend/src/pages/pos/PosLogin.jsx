@@ -55,7 +55,7 @@ export default function PosLogin() {
     e.preventDefault();
     if (!validateForm()) return;
 
-    const success = await login(email, password, true, 'pos');
+    const success = await login(email, password, 'staff', 'pos');
     if (success) {
       // ActivePortal effect above will trigger navigation
     }

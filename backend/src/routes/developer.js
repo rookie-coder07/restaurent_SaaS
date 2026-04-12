@@ -17,11 +17,40 @@ import {
 import * as developerController from '../controllers/developerController.js';
 
 const router = express.Router();
-router.use(authMiddleware, requireDeveloperAccess());
 
-router.get('/dashboard', developerController.getDashboard);
-router.get('/control-center/overview', developerController.getControlCenterOverview);
-router.get('/control-center/live', developerController.getLiveMonitor);
+// DEBUG: Log all developer requests
+router.use((req, res, next) => {
+  console.log('[DEVELOPER_ROUTE] Incoming request:', {
+    path: req.path,
+    method: req.method,
+    hasUser: !!req.user,
+    userRole: req.user?.role,
+    userId: req.user?.id,
+  });
+  next();
+});
+
+router.use(authMiddleware, (req, res, next) => {
+  console.log('[DEVELOPER_ROUTE] After authMiddleware:', {
+    path: req.path,
+    userRole: req.user?.role,
+    userId: req.user?.id,
+  });
+  next();
+}, requireDeveloperAccess());
+
+router.get('/dashboard', (req, res, next) => {
+  console.log('[DEVELOPER_API] getDashboard:', { userId: req.user?.id, role: req.user?.role, restaurantId: req.user?.restaurantId });
+  next();
+}, developerController.getDashboard);
+router.get('/control-center/overview', (req, res, next) => {
+  console.log('[DEVELOPER_API] getControlCenterOverview:', { userId: req.user?.id, role: req.user?.role, restaurantId: req.user?.restaurantId });
+  next();
+}, developerController.getControlCenterOverview);
+router.get('/control-center/live', (req, res, next) => {
+  console.log('[DEVELOPER_API] getLiveMonitor:', { userId: req.user?.id, role: req.user?.role, restaurantId: req.user?.restaurantId });
+  next();
+}, developerController.getLiveMonitor);
 router.get('/control-center/security', developerController.getSecurityOverview);
 router.get('/control-center/errors', developerController.getErrorTracking);
 router.get('/control-center/exports/:resource', developerController.exportData);

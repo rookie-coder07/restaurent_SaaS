@@ -245,6 +245,14 @@ api.interceptors.request.use(
 
       const isDeveloper = tokenRole === 'developer';
 
+      console.log('[API_INTERCEPTOR] Token info:', {
+        url: config.url,
+        tokenRole,
+        isDeveloper,
+        rawRole: tokenPayload?.role,
+        restaurantId: tokenPayload?.restaurantId,
+      });
+
       if ((!tokenPayload?.restaurantId && !isDeveloper) || !tokenRole) {
         // fallback to stored restaurantId if present
         const storedRestaurantId = localStorage.getItem('restaurantId') || sessionStorage.getItem('restaurantId');

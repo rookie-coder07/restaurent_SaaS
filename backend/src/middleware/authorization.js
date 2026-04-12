@@ -1,4 +1,5 @@
 import { logWarn, logError } from '../utils/logger.js';
+import { normalizeRole } from '../constants/index.js';
 
 export const authorize = (allowedRoles) => {
   return (req, res, next) => {
@@ -11,15 +12,17 @@ export const authorize = (allowedRoles) => {
       return res.status(401).json({
         success: false,
         message: 'Unauthorized access',
+        role: null,
       });
     }
 
-    const userRole = req.user.role?.toLowerCase();
+    const normalizedRole = normalizeRole(req.user.role);
 
-    if (!allowedRoles.map(r => r.toLowerCase()).includes(userRole)) {
+    if (!allowedRoles.map(normalizeRole).includes(normalizedRole)) {
       logWarn('Unauthorized access attempt', {
         userId: req.user.id,
-        userRole,
+        userRole: req.user.role,
+        normalizedRole,
         allowedRoles,
         path: req.path,
         method: req.method,
@@ -29,6 +32,7 @@ export const authorize = (allowedRoles) => {
       return res.status(403).json({
         success: false,
         message: 'Access denied',
+        role: normalizedRole,
       });
     }
 
@@ -45,21 +49,13 @@ export const requireAnyRole = (roles) => {
 };
 
 export const requireAdmin = (req, res, next) => {
-  // 🔥 CRITICAL: Normalize role (owner → admin)
-  const normalizeRole = (role) => {
-    if (!role) return null;
-    const r = String(role).toLowerCase();
-    if (r === "owner") return "admin";
-    return r;
-  };
-  
   const normalizedRole = normalizeRole(req.user?.role);
   
   if (!['admin'].includes(normalizedRole)) {
     logWarn('Admin access denied', {
       userId: req.user?.id,
       userRole: req.user?.role,
-      normalizedRole: normalizedRole,
+      normalizedRole,
       path: req.path,
       ip: req.ip,
     });
@@ -67,6 +63,7 @@ export const requireAdmin = (req, res, next) => {
     return res.status(403).json({
       success: false,
       message: 'Access denied',
+      role: normalizedRole,
     });
   }
 
@@ -74,21 +71,14 @@ export const requireAdmin = (req, res, next) => {
 };
 
 export const requireManager = (req, res, next) => {
-  // 🔥 CRITICAL: Normalize role (owner → admin)
-  const normalizeRole = (role) => {
-    if (!role) return null;
-    const r = String(role).toLowerCase();
-    if (r === "owner") return "admin";
-    return r;
-  };
-  
-  const role = normalizeRole(req.user?.role);
+  const normalizedRole = normalizeRole(req.user?.role);
+  console.log('[REQUIRE_MANAGER]', { userRole: req.user?.role, normalizedRole });
 
-  if (!['admin', 'manager'].includes(role)) {
+  if (!['admin', 'manager', 'developer'].includes(normalizedRole)) {
     logWarn('Manager access denied', {
       userId: req.user?.id,
       userRole: req.user?.role,
-      normalizedRole: role,
+      normalizedRole,
       path: req.path,
       ip: req.ip,
     });
@@ -96,6 +86,29 @@ export const requireManager = (req, res, next) => {
     return res.status(403).json({
       success: false,
       message: 'Access denied',
+      role: normalizedRole,
+    });
+  }
+
+  next();
+};
+
+export const requireDeveloper = (req, res, next) => {
+  const normalizedRole = normalizeRole(req.user?.role);
+  
+  if (normalizedRole !== 'developer') {
+    logWarn('Developer access denied', {
+      userId: req.user?.id,
+      userRole: req.user?.role,
+      normalizedRole,
+      path: req.path,
+      ip: req.ip,
+    });
+
+    return res.status(403).json({
+      success: false,
+      message: 'Access denied',
+      role: normalizedRole,
     });
   }
 
@@ -103,16 +116,29 @@ export const requireManager = (req, res, next) => {
 };
 
 export const requireRestaurant = (req, res, next) => {
+  const normalizedRole = normalizeRole(req.user?.role);
+  const isDeveloper = normalizedRole === 'developer';
+
+  console.log('[REQUIRE_RESTAURANT]', { userId: req.user?.id, role: req.user?.role, isDeveloper, hasRestaurantId: !!req.user?.restaurantId, path: req.path });
+
+  // Developers don't need a restaurant_id
+  if (isDeveloper) {
+    req.restaurantId = null;
+    return next();
+  }
+
   if (!req.user?.restaurantId) {
-    logWarn('Restaurant ID missing', {
+    logWarn('Restaurant ID missing for non-developer', {
       userId: req.user?.id,
+      role: normalizedRole,
       path: req.path,
       ip: req.ip,
     });
 
     return res.status(403).json({
       success: false,
-      message: 'Access denied',
+      message: 'Restaurant access required',
+      role: normalizedRole,
     });
   }
 
@@ -122,25 +148,24 @@ export const requireRestaurant = (req, res, next) => {
 
 export const validateRestaurantAccess = (req, res, next) => {
   const requestedRestaurantId = req.params.restaurantId || req.body?.restaurantId;
+  const normalizedRole = normalizeRole(req.user?.role);
+  const isDeveloper = normalizedRole === 'developer';
+
+  console.log('[VALIDATE_ACCESS]', { userId: req.user?.id, role: normalizedRole, isDeveloper, userRestaurantId: req.user?.restaurantId, requestedRestaurantId, path: req.path });
+
+  // Developers can access any restaurant
+  if (isDeveloper) {
+    return next();
+  }
 
   if (requestedRestaurantId && req.user?.restaurantId && requestedRestaurantId !== req.user.restaurantId) {
-    // 🔥 CRITICAL: Normalize role (owner → admin)
-    const normalizeRole = (role) => {
-      if (!role) return null;
-      const r = String(role).toLowerCase();
-      if (r === "owner") return "admin";
-      return r;
-    };
-    
-    const normalizedRole = normalizeRole(req.user?.role);
-    
     if (!['admin'].includes(normalizedRole)) {
       logWarn('Cross-restaurant access denied', {
         userId: req.user.id,
         userRestaurantId: req.user.restaurantId,
         requestedRestaurantId,
         userRole: req.user?.role,
-        normalizedRole: normalizedRole,
+        normalizedRole,
         path: req.path,
         ip: req.ip,
       });
@@ -148,6 +173,7 @@ export const validateRestaurantAccess = (req, res, next) => {
       return res.status(403).json({
         success: false,
         message: 'Access denied',
+        role: normalizedRole,
       });
     }
   }
@@ -157,22 +183,22 @@ export const validateRestaurantAccess = (req, res, next) => {
 
 export const checkResourceOwnership = (resourceOwnerId) => {
   return (req, res, next) => {
-    // 🔥 CRITICAL: Normalize role (owner → admin)
-    const normalizeRole = (role) => {
-      if (!role) return null;
-      const r = String(role).toLowerCase();
-      if (r === "owner") return "admin";
-      return r;
-    };
-    
     const normalizedRole = normalizeRole(req.user?.role);
+    const isDeveloper = normalizedRole === 'developer';
+
+    console.log('[CHECK_OWNERSHIP]', { userId: req.user?.id, role: normalizedRole, isDeveloper, resourceOwnerId, path: req.path });
+    
+    // Developers can access any resource
+    if (isDeveloper) {
+      return next();
+    }
     
     if (!['admin'].includes(normalizedRole) && resourceOwnerId !== req.user?.id) {
       logWarn('Resource access denied', {
         userId: req.user?.id,
         resourceOwnerId,
         userRole: req.user?.role,
-        normalizedRole: normalizedRole,
+        normalizedRole,
         path: req.path,
         ip: req.ip,
       });
@@ -180,6 +206,7 @@ export const checkResourceOwnership = (resourceOwnerId) => {
       return res.status(403).json({
         success: false,
         message: 'Access denied',
+        role: normalizedRole,
       });
     }
 

@@ -125,20 +125,36 @@ export const requireRole = (allowedRoles = []) => {
       const userRole = req.user?.role;
       const normalizedRole = normalizeRole(userRole);
 
+      console.log('[REQUIRE_ROLE] DEBUG:', {
+        path: req.path,
+        userRole,
+        normalizedRole,
+        allowedRoles,
+        allowedRolesNormalized: allowedRoles.map(normalizeRole),
+        isAllowed: allowedRoles.map(normalizeRole).includes(normalizedRole),
+        userId: req.user?.id,
+        email: req.user?.email,
+      });
+
       if (!normalizedRole) {
+        console.log('[REQUIRE_ROLE] ❌ NO ROLE FOUND');
         return sendError(res, 401, 'User role not found');
       }
 
       if (!allowedRoles.map(normalizeRole).includes(normalizedRole)) {
+        console.log('[REQUIRE_ROLE] ❌ ROLE NOT ALLOWED:', { normalizedRole, allowedRoles });
         logger.warn(`Role denied for user ${req.user.email} with role ${normalizedRole}`);
         return sendError(res, 403, 'This action is restricted to a different account role', {
           allowedRoles,
           userRole: normalizedRole,
+          currentRole: normalizedRole,
         });
       }
 
+      console.log('[REQUIRE_ROLE] ✅ ROLE ALLOWED:', { normalizedRole });
       next();
     } catch (error) {
+      console.log('[REQUIRE_ROLE] ❌ ERROR:', error.message);
       logger.error('Role check error:', error);
       return sendError(res, 500, 'Role check failed');
     }
@@ -153,12 +169,13 @@ export const requireBillingRole = () => {
   return (req, res, next) => {
     try {
       const normalizedRole = normalizeRole(req.user?.role);
+      console.log('[REQUIRE_BILLING]', { userEmail: req.user?.email, normalizedRole });
 
       // 🔥 CRITICAL: After normalization, owner becomes admin
       // So we only need to check for the normalized roles
-      if (!['admin', 'manager'].includes(normalizedRole)) {
+      if (!['admin', 'manager', 'developer'].includes(normalizedRole)) {
         logger.warn(`Billing action denied for user ${req.user?.email} with role ${normalizedRole}`);
-        return sendError(res, 403, 'Unauthorized: Only manager or admin can perform billing actions');
+        return sendError(res, 403, 'Unauthorized: Only manager, admin, or developer can perform billing actions');
       }
 
       next();

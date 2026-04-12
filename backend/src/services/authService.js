@@ -394,21 +394,25 @@ export class AuthService {
           .select()
           .single());
 
-        // Retry with fallback restaurant if NOT NULL constraint hits
-        if (createError && restaurantId === null) {
+        // Retry with fallback restaurant if NOT NULL constraint hits (but NOT for developers)
+        if (createError && restaurantId === null && inferredRole !== ROLES.DEVELOPER) {
+          console.log('[AUTH_PROVISION] Retrying with fallback restaurant for non-developer role:', inferredRole);
           const { data: anyRestaurant } = await supabase.from('restaurants').select('id').limit(1);
           const fallbackRestaurantId = anyRestaurant?.[0]?.id || null;
           if (fallbackRestaurantId) {
+            console.log('[AUTH_PROVISION] Using fallback restaurant:', fallbackRestaurantId);
             ({ data: newUser, error: createError } = await supabase
               .from('users')
               .insert([{ ...provisionPayload, restaurant_id: fallbackRestaurantId }])
               .select()
               .single());
           }
+        } else if (createError && inferredRole === ROLES.DEVELOPER) {
+          console.log('[AUTH_PROVISION] Developer role attempted with null restaurant_id - NOT retrying with fallback');
         }
 
         if (createError) {
-          logger.error(`Auto-provisioning failed: ${createError.message}`);
+          logger.error(`Auto-provisioning failed: ${createError.message}`, { email, role: inferredRole, portal });
           throw new Error(createError.message || 'Failed to create user profile');
         }
         user = newUser;
@@ -430,6 +434,14 @@ export class AuthService {
       if (!VALID_ROLES.includes(normalizedRole)) {
         throw new Error('User account has an unsupported role');
       }
+
+      console.log('[AUTH_LOGIN] User authenticated:', {
+        userId: user.id,
+        email: user.email,
+        rawRole: user.role,
+        normalizedRole,
+        portal,
+      });
 
       logger.info('Login user profile', {
         userId: user.id,

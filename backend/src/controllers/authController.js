@@ -131,6 +131,14 @@ export const login = asyncHandler(async (req, res) => {
     const redirectTo = result.redirectTo;
     const userIdForActivity = result.userId;
 
+    console.log('[AUTH_CONTROLLER] Login result:', {
+      userId: result.userId,
+      email,
+      role: userRole,
+      portal,
+      redirectTo,
+    });
+
     res.cookie('accessToken', result.accessToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',

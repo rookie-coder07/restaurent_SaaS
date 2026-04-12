@@ -2,7 +2,13 @@
 import { sendSuccess } from '../utils/apiResponse.js';
 import DeveloperService from '../services/developerService.js';
 
-export const getDashboard = asyncHandler(async (req, res) => sendSuccess(res, 200, await DeveloperService.getDashboard(), 'Developer dashboard fetched successfully'));
+export const getDashboard = asyncHandler(async (req, res) => {
+  console.log('[DEVELOPER_API] getDashboard called', {
+    userId: req.user?.id,
+    role: req.user?.role,
+  });
+  return sendSuccess(res, 200, await DeveloperService.getDashboard(), 'Developer dashboard fetched successfully')
+});
 export const getControlCenterOverview = asyncHandler(async (req, res) => sendSuccess(res, 200, await DeveloperService.getControlCenterOverview(), 'Control center overview fetched successfully'));
 export const getLiveMonitor = asyncHandler(async (req, res) => sendSuccess(res, 200, await DeveloperService.getLiveMonitor(), 'Live monitor fetched successfully'));
 export const createDeveloperUser = asyncHandler(async (req, res) => sendSuccess(res, 201, await DeveloperService.createDeveloperUser(req.body, req.user), 'Developer user created successfully'));

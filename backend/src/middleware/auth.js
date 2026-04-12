@@ -28,14 +28,32 @@ export const verifyAccessToken = (token) => {
   const decoded = jwt.verify(token, process.env.JWT_SECRET);
   const normalizedRole = normalizeRole(decoded.role);
 
+  console.log('[VERIFY_TOKEN] Raw token:', {
+    role: decoded.role,
+    userId: decoded.userId,
+    email: decoded.email,
+  });
+
+  console.log('[VERIFY_TOKEN] After normalization:', {
+    normalizedRole,
+    role: decoded.role,
+    isValid: VALID_ROLES.includes(normalizedRole),
+  });
+
   if (!VALID_ROLES.includes(normalizedRole)) {
-    throw new AppError('UNAUTHORIZED', 'Invalid role in token');
+    console.log('[VERIFY_TOKEN] ❌ Invalid role:', { normalizedRole, validRoles: VALID_ROLES });
+    throw new AppError('UNAUTHORIZED', `Invalid role in token: ${normalizedRole}`);
   }
 
   // DEBUG: Log normalization
   if (decoded.role !== normalizedRole) {
-    logger.info(`[ROLE_NORMALIZATION] ${decoded.role} → ${normalizedRole}`);
+    logger.info(`[ROLE_NORMALIZATION] ${decoded.role} → ${normalizedRole}`, {
+      userId: decoded.userId,
+      role: normalizedRole,
+    });
   }
+
+  console.log('[VERIFY_TOKEN] ✅ Token verified with role:', normalizedRole);
 
   return {
     userId: decoded.userId,

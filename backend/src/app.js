@@ -165,9 +165,15 @@ app.use((req, res, next) => {
   authMiddleware(req, res, next);
 });
 
-// 2. Data Isolation (restaurant context) - skip for public endpoints and stream
+// 2. Data Isolation (restaurant context) - skip for public endpoints, stream, and developer routes
 app.use((req, res, next) => {
   if (isPublicApiPath(req.path)) {
+    return next();
+  }
+  
+  // Skip data isolation for developer routes - developers don't have restaurant_id
+  if (req.path.startsWith('/api/v1/developer')) {
+    console.log('[APP_MIDDLEWARE] Skipping data isolation for developer route:', req.path);
     return next();
   }
   
@@ -183,6 +189,12 @@ app.use((req, res, next) => {
 securityEnforcementStack.forEach(middleware => {
   app.use((req, res, next) => {
     if (isPublicApiPath(req.path)) {
+      return next();
+    }
+    
+    // Skip security enforcement stack for developer routes - handled at route level
+    if (req.path.startsWith('/api/v1/developer')) {
+      console.log('[APP_MIDDLEWARE] Skipping security stack for developer route:', req.path);
       return next();
     }
     
