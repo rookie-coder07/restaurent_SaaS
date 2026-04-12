@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Loader, Printer } from 'lucide-react';
+import { ArrowLeft, Loader, Printer, Zap } from 'lucide-react';
 import Card from '../components/common/Card';
 import Button from '../components/common/Button';
 import Toast from '../components/common/Toast';
 import { orderAPI, restaurantAPI } from '../services/apiEndpoints';
 import { printKotReceipt } from '../utils/printerService';
+import { printKotInstant } from '../utils/thermalPrinter';
 import '../styles/thermal-print.css';
 
 function resolveReturnPath(pathname = '', fallback = '') {
@@ -151,6 +152,26 @@ export default function KitchenTicket() {
     }
   };
 
+  const handleInstantPrint = () => {
+    if (!ticket) {
+      return;
+    }
+
+    try {
+      setPrinting(true);
+      printKotInstant({
+        ticket,
+        order,
+        restaurant,
+      });
+      // Instant print doesn't throw errors, fires directly
+      setTimeout(() => setPrinting(false), 500);
+    } catch (printError) {
+      setError(printError.message || 'Failed to print the KOT.');
+      setPrinting(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center">
@@ -204,6 +225,10 @@ export default function KitchenTicket() {
                 Back
               </Button>
             </Link>
+            <Button onClick={handleInstantPrint} disabled={printing} variant="primary">
+              <Zap className="h-4 w-4" />
+              {printing ? 'Printing...' : 'Instant Print'}
+            </Button>
             <Button onClick={handlePrint} disabled={printing}>
               <Printer className="h-4 w-4" />
               {printing ? 'Printing...' : 'Print KOT'}

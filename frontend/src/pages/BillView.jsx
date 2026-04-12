@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Loader, Printer } from 'lucide-react';
+import { ArrowLeft, Loader, Printer, Zap } from 'lucide-react';
 import Card from '../components/common/Card';
 import Button from '../components/common/Button';
 import Input from '../components/common/Input';
@@ -9,6 +9,7 @@ import { orderAPI, restaurantAPI } from '../services/apiEndpoints';
 import { buildInvoiceData } from '../utils/invoice';
 import { formatCurrency, formatDisplayOrderNumber } from '../utils/formatters';
 import { printBillReceipt } from '../utils/printerService';
+import { printBillInstant } from '../utils/thermalPrinter';
 import '../styles/thermal-print.css';
 
 function resolveReturnPath(pathname = '', fallback = '') {
@@ -205,6 +206,23 @@ export default function BillView() {
     }
   };
 
+  const handleInstantPrint = () => {
+    try {
+      setPrinting(true);
+      printBillInstant({
+        order,
+        restaurant,
+        invoice,
+        cashierName: location.state?.cashierName || order?.billing?.cashierName || '',
+      });
+      // Instant print doesn't throw errors, fires directly
+      setTimeout(() => setPrinting(false), 500);
+    } catch (printError) {
+      setError(printError.message || 'Failed to print the bill.');
+      setPrinting(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center">
@@ -280,6 +298,14 @@ export default function BillView() {
                 Back
               </Button>
             </Link>
+            <Button
+              variant="primary"
+              onClick={handleInstantPrint}
+              disabled={printing}
+            >
+              <Zap className="h-4 w-4" />
+              {printing ? 'Printing...' : 'Instant Print'}
+            </Button>
             <Button
               variant="primary"
               onClick={handleSettleAndPrint}
