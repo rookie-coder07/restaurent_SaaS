@@ -157,5 +157,4 @@ export const createTables = async () => {
   }
 };
 
-export { getSupabaseAdmin };
 export default getSupabase();
