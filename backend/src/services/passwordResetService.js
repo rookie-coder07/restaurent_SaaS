@@ -190,7 +190,7 @@ class PasswordResetService {
       }
 
       // Update password via Supabase Auth
-      const { error: authError } = await supabase.auth.admin.updateUserById(
+      const { error: authError } = await getSupabaseAdmin().auth.admin.updateUserById(
         userId,
         { password: newPassword }
       );

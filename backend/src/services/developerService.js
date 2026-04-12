@@ -1,7 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import crypto from 'crypto';
-import supabaseImport from '../config/supabase.js';
+import supabaseImport, { getSupabaseAdmin } from '../config/supabase.js';
 import logger from '../utils/logger.js';
 import { clearSystemAccessCache } from '../middleware/systemAccess.js';
 import { clearFeatureFlagCache } from '../middleware/featureFlags.js';
@@ -237,7 +237,12 @@ export class DeveloperService {
       throw new Error('Owner email already exists for another user');
     }
 
-    const { data: authData, error: authError } = await getSupabase().auth.admin.createUser({
+    console.log('[DEVELOPER_SERVICE] Creating owner via Supabase admin API', {
+      email: normalizedEmail,
+      serviceRoleKeyConfigured: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
+    });
+
+    const { data: authData, error: authError } = await getSupabaseAdmin().auth.admin.createUser({
       email: normalizedEmail,
       password: temporaryPassword,
       email_confirm: true,
@@ -248,14 +253,14 @@ export class DeveloperService {
     });
 
     if (authError) {
-      console.error('[DEVELOPER_SERVICE] Auth creation error:', {
+      console.error('[DEVELOPER_SERVICE] ❌ Auth creation error:', {
         message: authError.message,
         code: authError.code,
         status: authError.status,
       });
       
       if (authError.message?.includes('Bearer token') || authError.code === 'no_authorization') {
-        throw new Error('Supabase service role key not configured - cannot create users. Contact administrator.');
+        throw new Error('Supabase service role key not configured - SUPABASE_SERVICE_ROLE_KEY is missing or invalid. Cannot create users.');
       }
       throw authError;
     }
@@ -263,6 +268,8 @@ export class DeveloperService {
     if (!authData?.user?.id) {
       throw new Error('Failed to create auth user - no user ID returned');
     }
+
+    console.log('[DEVELOPER_SERVICE] ✅ Owner created successfully', { userId: authData.user.id });
 
     let createdRestaurant = null;
 
@@ -334,7 +341,7 @@ export class DeveloperService {
       }
 
       try {
-        await getSupabase().auth.admin.deleteUser(authData.user.id);
+        await getSupabaseAdmin().auth.admin.deleteUser(authData.user.id);
       } catch (cleanupError) {
         logger.warn('Developer restaurant creation cleanup warning', {
           authUserId: authData.user.id,
@@ -414,7 +421,7 @@ export class DeveloperService {
     const { data, error } = await getSupabase().from('users').update({ role: nextRole, updated_at: new Date().toISOString() }).eq('id', userId).select('id, restaurant_id, name, email, role, status').single();
     if (error || !data) throw error || new Error('User not found');
     try {
-      await getSupabase().auth.admin.updateUserById(userId, { user_metadata: { role: nextRole } });
+      await getSupabaseAdmin().auth.admin.updateUserById(userId, { user_metadata: { role: nextRole } });
     } catch (syncError) {
       logger.warn('Role sync warning', { userId, error: syncError?.message });
     }
@@ -423,7 +430,7 @@ export class DeveloperService {
   }
 
   static async resetUserPassword(userId, newPassword, actor) {
-    const { error: authError } = await getSupabase().auth.admin.updateUserById(userId, { password: newPassword });
+    const { error: authError } = await getSupabaseAdmin().auth.admin.updateUserById(userId, { password: newPassword });
     if (authError) throw authError;
     const { data, error } = await getSupabase().from('users').update({ updated_at: new Date().toISOString() }).eq('id', userId).select('id, restaurant_id, name, email, role').single();
     if (error || !data) throw error || new Error('User not found');

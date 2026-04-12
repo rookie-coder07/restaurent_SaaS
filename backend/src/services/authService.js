@@ -1,7 +1,7 @@
 import bcryptjs from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import logger from '../utils/logger.js';
-import supabaseImport from '../config/supabase.js';
+import supabaseImport, { getSupabaseAdmin } from '../config/supabase.js';
 import { normalizeRole, ROLES, VALID_ROLES } from '../constants/index.js';
 import { 
   generateAccessToken, 
@@ -150,7 +150,7 @@ export class AuthService {
 
       // Create auth user - bypass email confirmation
       logger.info(`Creating Supabase Auth user for: ${normalizedEmail}`);
-      const { data: authData, error: authError } = await getSupabase().auth.admin.createUser({
+      const { data: authData, error: authError } = await getSupabaseAdmin().auth.admin.createUser({
         email: normalizedEmail,
         password: data.password,
         email_confirm: true,
@@ -542,7 +542,7 @@ export class AuthService {
 
       // Create auth user
       logger.info(`Creating Supabase Auth user for staff: ${normalizedEmail}`);
-      const { data: authData, error: authError } = await getSupabase().auth.admin.createUser({
+      const { data: authData, error: authError } = await getSupabaseAdmin().auth.admin.createUser({
         email: normalizedEmail,
         password: data.password,
         email_confirm: true,

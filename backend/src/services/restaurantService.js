@@ -611,7 +611,7 @@ export class RestaurantService {
       const assignedTables = assignedTableValidation.assignedTables;
 
       // Create user in Supabase Auth (password managed by Supabase)
-      const { data: authUser, error: authError } = await supabase.auth.admin.createUser({
+      const { data: authUser, error: authError } = await getSupabaseAdmin().auth.admin.createUser({
         email: normalizedEmail,
         password: staffData.password,
         email_confirm: true,
