@@ -247,8 +247,21 @@ export class DeveloperService {
       },
     });
 
-    if (authError || !authData?.user?.id) {
-      throw authError || new Error('Failed to create auth user');
+    if (authError) {
+      console.error('[DEVELOPER_SERVICE] Auth creation error:', {
+        message: authError.message,
+        code: authError.code,
+        status: authError.status,
+      });
+      
+      if (authError.message?.includes('Bearer token') || authError.code === 'no_authorization') {
+        throw new Error('Supabase service role key not configured - cannot create users. Contact administrator.');
+      }
+      throw authError;
+    }
+    
+    if (!authData?.user?.id) {
+      throw new Error('Failed to create auth user - no user ID returned');
     }
 
     let createdRestaurant = null;

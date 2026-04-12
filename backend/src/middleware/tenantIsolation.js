@@ -132,7 +132,7 @@ export const requireRole = (allowedRoles = []) => {
         allowedRoles,
         allowedRolesNormalized: allowedRoles.map(normalizeRole),
         isAllowed: allowedRoles.map(normalizeRole).includes(normalizedRole),
-        userId: req.user?.id,
+        userId: req.user?.userId || req.user?.id,
         email: req.user?.email,
       });
 

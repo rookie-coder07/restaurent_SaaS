@@ -57,6 +57,7 @@ export const verifyAccessToken = (token) => {
 
   return {
     userId: decoded.userId,
+    id: decoded.userId,  // Alias for compatibility
     restaurantId: decoded.restaurantId,
     email: decoded.email,
     role: normalizedRole,
