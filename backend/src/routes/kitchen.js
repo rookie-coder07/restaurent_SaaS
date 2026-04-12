@@ -12,8 +12,9 @@ const router = express.Router();
 router.use(authMiddleware, tenantIsolation);
 
 // Get active orders for kitchen (5-second polling)
-router.get('/orders', checkPermission(['view_orders', 'update_order_status']), kitchenController.getKitchenOrders);
-router.get('/orders/all', checkPermission(['view_orders', 'update_order_status']), kitchenController.getKitchenAllOrders);
+// ✅ GET endpoints only require view_orders - no update permission needed to READ
+router.get('/orders', checkPermission(['view_orders']), kitchenController.getKitchenOrders);
+router.get('/orders/all', checkPermission(['view_orders']), kitchenController.getKitchenAllOrders);
 router.get('/orders/:orderId', checkPermission(['view_orders']), kitchenController.getOrderDetails);
 
 // Kitchen ticket actions
