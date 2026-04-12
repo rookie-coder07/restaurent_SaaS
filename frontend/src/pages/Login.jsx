@@ -172,7 +172,11 @@ export default function Login({ portal = 'admin', initialModeKey = '' }) {
 
     console.log('[Forgot Password] Initiating password reset request for:', emailToReset);
 
-    const redirectTo = `${window.location.origin}/reset-password`;
+    // Use environment-based app URL (critical for production compatibility)
+    const APP_URL = import.meta.env.VITE_APP_URL || window.location.origin;
+    const redirectTo = `${APP_URL}/reset-password`;
+    
+    console.log('[Forgot Password] Using redirect URL:', redirectTo);
     
     try {
       const { error, data } = await supabase.auth.resetPasswordForEmail(emailToReset, {
@@ -184,24 +188,38 @@ export default function Login({ portal = 'admin', initialModeKey = '' }) {
       if (error) {
         const message = error.message || 'Unable to send reset link right now.';
         const status = error.status || 0;
+        
+        // Detect specific error types
         const isRateLimit = message.toLowerCase().includes('rate limit') || status === 429;
+        const isSmtpError = status === 500 || message.toLowerCase().includes('smtp') || message.toLowerCase().includes('email service');
         
         if (isRateLimit) {
           console.warn('[Forgot Password] Rate limit detected, setting 60s cooldown');
           setForgotCooldown(60);
         }
 
+        if (isSmtpError) {
+          console.error('[Forgot Password] SMTP/Email service error detected:', {
+            status,
+            message,
+            fullError: error,
+          });
+        }
+
         console.error('[Forgot Password] Error:', {
           message,
           status,
           isRateLimit,
+          isSmtpError,
           fullError: error,
         });
 
         setForgotPasswordState({
           isLoading: false,
           error: isRateLimit
-            ? '⏱️ Too many reset requests. Supabase rate limit active. Please wait 60 seconds before retrying.'
+            ? '⏱️ Too many reset requests. Please wait 60 seconds before retrying.'
+            : isSmtpError
+            ? '📧 Email service temporarily unavailable. Please try again in a few moments.'
             : message,
           success: '',
         });
