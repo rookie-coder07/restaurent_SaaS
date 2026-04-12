@@ -172,7 +172,7 @@ app.use((req, res, next) => {
   }
   
   // Skip data isolation for developer routes - developers don't have restaurant_id
-  if (req.path.startsWith('/api/v1/developer')) {
+  if (req.path.startsWith('/api/v1/developer') || req.path.startsWith('/api/developer')) {
     console.log('[APP_MIDDLEWARE] Skipping data isolation for developer route:', req.path);
     return next();
   }
@@ -193,7 +193,7 @@ securityEnforcementStack.forEach(middleware => {
     }
     
     // Skip security enforcement stack for developer routes - handled at route level
-    if (req.path.startsWith('/api/v1/developer')) {
+    if (req.path.startsWith('/api/v1/developer') || req.path.startsWith('/api/developer')) {
       console.log('[APP_MIDDLEWARE] Skipping security stack for developer route:', req.path);
       return next();
     }

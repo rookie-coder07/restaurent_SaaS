@@ -33,6 +33,8 @@ router.post(
   authController.resetUserPassword
 );
 router.use(`/${apiVersion}/developer`, developerRoutes);
+// FIX: Also register at /developer (without apiVersion) in case apiVersion is empty
+router.use('/developer', developerRoutes);
 router.use(`/${apiVersion}`, optionalAuth, systemAccessGuard);
 
 // Customer routes (public)
