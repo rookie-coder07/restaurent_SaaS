@@ -10,9 +10,14 @@ const TECHNICAL_ERROR_PATTERN =
 
 const normalizeStatusCode = (err) => {
   const statusCode = Number(err?.statusCode || err?.status || 500);
+  const message = String(err?.message || err?.publicMessage || '').toLowerCase();
+  
+  // Check for authentication failures
+  if (message.includes('invalid') && (message.includes('credentials') || message.includes('password'))) {
+    return 401;
+  }
   
   // Check for admin client initialization errors (missing service role key)
-  const message = String(err?.message || err?.publicMessage || '').toLowerCase();
   if (message.includes('admin client') || message.includes('service role key')) {
     // Return 503 Service Unavailable - backend infrastructure issue, not user error
     return 503;

@@ -344,60 +344,28 @@ export class AuthService {
       let user;
       let userError;
       
-      // Wrap manager user lookup in try-catch to handle ANY schema/database errors gracefully
-      if (portalKey === 'manager') {
-        console.log('[DEBUG_MANAGER] Manager login path - starting user lookup');
-        try {
-          // For manager portal, use safe columns to avoid phone_number schema issues
-          const selectColumns = 'id, name, email, restaurant_id, role, status';
-          
-          if (authUserId) {
-            console.log(`[DEBUG_MANAGER] Looking up manager by ID: ${authUserId}`);
-            ({ data: user, error: userError } = await supabase
-              .from('users')
-              .select(selectColumns)
-              .eq('id', authUserId)
-              .single());
-            console.log(`[DEBUG_MANAGER] ID lookup result:`, { found: !!user, hasError: !!userError });
-          }
-
-          // If not found by ID, try by email
-          if ((userError || !user) && email) {
-            console.log(`[DEBUG_MANAGER] Manager not found by ID, searching by email: ${email}`);
-            ({ data: user, error: userError } = await supabase
-              .from('users')
-              .select(selectColumns)
-              .eq('email', email.toLowerCase())
-              .single());
-            console.log(`[DEBUG_MANAGER] Email lookup result:`, { found: !!user, hasError: !!userError });
-          }
-          
-        } catch (managerLookupError) {
-          console.log(`[DEBUG_MANAGER] Manager lookup exception caught: ${managerLookupError.message}`);
-          logger.warn(`Manager lookup error (will retry with provisioning): ${managerLookupError.message}`);
-          user = null;
-          userError = managerLookupError;
-        }
-      } else {
-        // For other roles, use original logic with select('*')
-        if (authUserId) {
-          ({ data: user, error: userError } = await supabase
-            .from('users')
-            .select('*')
-            .eq('id', authUserId)
-            .single());
-        }
-
-        // If not found by ID, try by email and prefer existing row (avoids ID mismatch failures)
-        if ((userError || !user) && email) {
-          logger.warn(`User not found by ID, searching by email: ${email}`);
-          ({ data: user, error: userError } = await supabase
-            .from('users')
-            .select('*')
-            .eq('email', email.toLowerCase())
-            .single());
-        }
+      // Single unified lookup for all non-admin roles (including manager)
+      // No special branching - manager uses the same flow as staff
+      if (authUserId) {
+        ({ data: user, error: userError } = await supabase
+          .from('users')
+          .select('*')
+          .eq('id', authUserId)
+          .single());
       }
+
+      // If not found by ID, try by email
+      if ((userError || !user) && email) {
+        logger.warn(`User not found by ID, searching by email: ${email}`);
+        ({ data: user, error: userError } = await supabase
+          .from('users')
+          .select('*')
+          .eq('email', email.toLowerCase())
+          .single());
+      }
+
+      // User must exist - no auto-provisioning
+      // If user not found in DB, they're not registered yet
 
       // Auto-provision user on first login if not found
       console.log(`[DEBUG_MANAGER] Auto-provision check: userError=${!!userError}, user=${!!user}, authData?.user=${!!authData?.user}`);
