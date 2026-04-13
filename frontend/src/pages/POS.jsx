@@ -1290,8 +1290,8 @@ export default function POS() {
     if (isSendingToKitchen) return;
 
     // ✅ Ensure state is ready before API call
-    if (!selectedTable?.id || cartItems.length === 0) {
-      alert("Select table and items first");
+    if (!selectedTableId || cartItems.length === 0) {
+      setSubmitError('Please select a table and add items before placing KOT.');
       return;
     }
 
@@ -1304,8 +1304,8 @@ export default function POS() {
     const optimisticOrder = {
       id: tempOrderId,
       displayOrderNumber: `TEMP-${Date.now().toString().slice(-4)}`,
-      tableNumber: selectedTable.tableNumber,
-      tableId: selectedTable.id,
+      tableNumber: selectedTable?.tableNumber || 'Table',
+      tableId: selectedTableId,
       items: cartItems,
       status: 'sending',
       isOptimistic: true,
@@ -1779,7 +1779,7 @@ export default function POS() {
                 billingMessage={!canManageBilling ? 'Billing will be handled by manager.' : ''}
                 kitchenMessage={kitchenMessage}
                 isSubmitDisabled={isLoadingTableOrder}
-                isSendToKitchenDisabled={cartItems.length === 0 || isLoadingTableOrder || !hasPendingKitchenItems}
+                isSendToKitchenDisabled={!selectedTableId || cartItems.length === 0 || isLoadingTableOrder || !hasPendingKitchenItems}
                 isSettleDisabled={isLoadingTableOrder || (paymentMethod === 'cash' && shortfallAmount > 0)}
               />
             </div>
@@ -1789,7 +1789,7 @@ export default function POS() {
           <button
             type="button"
             onClick={handleSendToKitchen}
-            disabled={cartItems.length === 0 || isLoadingTableOrder || !hasPendingKitchenItems || isSubmitting || isSendingToKitchen || isSettling}
+            disabled={!selectedTableId || cartItems.length === 0 || isLoadingTableOrder || !hasPendingKitchenItems || isSubmitting || isSendingToKitchen || isSettling}
             className="w-full rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-bold uppercase tracking-[0.12em] text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {isSendingToKitchen ? 'Placing...' : 'Place KOT'}
