@@ -535,23 +535,6 @@ export class AuthService {
               redirectTo: 'restaurant-dashboard',
             };
           }
-                email,
-                ROLES.MANAGER
-              );
-              await this.persistRefreshToken(refreshToken, authData.user.id, restaurantId);
-
-              return {
-                accessToken,
-                refreshToken,
-                role: ROLES.MANAGER,
-                restaurantId,
-                userId: authData.user.id,
-                redirectTo: 'restaurant-dashboard',
-              };
-            }
-            
-            throw managerProvisionError;
-          }
         }
         
         // EXISTING AUTO-PROVISIONING FOR OTHER ROLES (unchanged)
@@ -657,6 +640,13 @@ export class AuthService {
           userErrorOrNoUser: (userError || !user),
           shouldHaveTriedProvisioning: (userError || !user) && !!authData?.user,
         });
+        
+        // For manager: if auth failed (wrong password), return 401 instead of 500
+        if (portalKey === 'manager' && authFailedMessage) {
+          logger.warn(`Manager auth failed with credentials: ${authFailedMessage}`);
+          throw new Error(authFailedMessage); // Will be caught and return 401
+        }
+        
         const debugError = new Error('User not found in profile store');
         debugError.debugState = {
           portalKey,
