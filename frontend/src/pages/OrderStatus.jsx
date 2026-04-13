@@ -29,15 +29,28 @@ export default function OrderStatus() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   // ✅ Support both 'orderId' (new) and 'order' (legacy) parameter names
-  const orderId = searchParams.get('orderId') || searchParams.get('order');
+  const rawOrderId = searchParams.get('orderId') || searchParams.get('order');
   const tableNumber = searchParams.get('table');
+  
+  // ✅ Validate orderId is a non-empty string
+  const orderId = rawOrderId && typeof rawOrderId === 'string' && rawOrderId.trim().length > 0 
+    ? rawOrderId.trim() 
+    : null;
 
-  // ✅ FIX 1: Guard against undefined orderId with detailed logging
+  // ✅ FIX 1: Enhanced guard against undefined orderId with detailed diagnostics
   if (!orderId) {
-    console.error('[ORDER_INVALID] Order ID missing from URL', {
-      searchParams: Object.fromEntries(searchParams),
-      availableParams: Array.from(searchParams.entries()),
-    });
+    const allParams = Array.from(searchParams.entries());
+    const urlDebugInfo = {
+      currentUrl: window.location.href,
+      searchString: window.location.search,
+      allParams: allParams.length > 0 ? Object.fromEntries(allParams) : 'NONE',
+      paramCount: allParams.length,
+      rawOrderId: rawOrderId,
+      typeOf: typeof rawOrderId,
+    };
+    
+    console.error('[ORDER_INVALID] Order ID missing from URL', urlDebugInfo);
+    
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-6">
         <div className="text-center max-w-md">
@@ -65,6 +78,12 @@ export default function OrderStatus() {
               Retry
             </button>
           </div>
+          {process.env.NODE_ENV === 'development' && (
+            <div className="mt-4 p-3 bg-gray-100 rounded text-left text-xs text-gray-700 overflow-auto max-h-40">
+              <p className="font-bold mb-2">DEBUG INFO:</p>
+              <p className="font-mono break-all">{JSON.stringify(urlDebugInfo, null, 2)}</p>
+            </div>
+          )}
         </div>
       </div>
     );

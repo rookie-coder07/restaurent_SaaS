@@ -18,6 +18,7 @@ import { useApi } from '../hooks/useApi';
 import { API_BASE_URL } from '../config/api';
 import { customerAPI } from '../services/apiEndpoints';
 import { formatCurrency } from '../utils/formatters';
+import { findOrderId, diagOrderResponse, validateOrderResponse, logOrderFlowDiagnostic } from '../utils/orderDiagnostics';
 import { playLoudBuzzer } from '../utils/alerts';
 import { getMenuItemImageUrl } from '../utils/menuItemImage';
 import CartDrawer from '../components/customer/CartDrawer';
@@ -290,18 +291,37 @@ export default function CustomerMenu() {
         requestId: placeOrderRequestRef.current.id,
       });
       
-      // ✅ Debug: Log full response structure
-      console.log('[ORDER_RESPONSE] Full API response:', {
-        status: response.status,
-        statusCode: response.data?.statusCode,
-        success: response.data?.success,
-        data: response.data?.data,
-        message: response.data?.message,
-        allKeys: Object.keys(response.data || {}),
+      // ✅ Comprehensive diagnostic of the order response
+      logOrderFlowDiagnostic('API_RESPONSE_RECEIVED', {
+        httpStatus: response?.status,
+        contentType: response?.headers?.['content-type'],
+        dataType: typeof response?.data,
       });
       
-      const createdOrder = response.data?.data;
+      diagOrderResponse(response, 'CUSTOMER_PLACE_ORDER');
+      const validation = validateOrderResponse(response);
+      
+      if (!validation.isValid) {
+        console.error('❌ ORDER RESPONSE VALIDATION FAILED', {
+          issues: validation.issues,
+          diagnostic: validation.diagnostic,
+        });
+      }
+      
+      // ✅ Use robust order ID extraction that finds it from any response structure
+      const orderId = validation.orderId;
+      
       placeOrderRequestRef.current = { id: '', signature: '' };
+
+      if (!orderId) {
+        console.error('❌ CRITICAL: Order ID not found after creation', {
+          validationResults: validation,
+          responseData: response?.data,
+          responseStatus: response?.status,
+          allResponseKeys: Object.keys(response || {}),
+        });
+        throw new Error(`Order created but no ID found in response. Validation issues: ${validation.issues.join('; ')}`);
+      }
 
       setOrderStatus('success');
       setOrderMessage('Order placed successfully! A waiter will review it shortly before it is sent to the kitchen.');
@@ -309,27 +329,20 @@ export default function CustomerMenu() {
       removeCart(cartKey);
       setShowCart(false);
 
-      if (!createdOrder?.id) {
-        console.error('ERROR: Created order missing ID!', {
-          response: response.data,
-          createdOrder,
-          dataPath: 'response.data?.data',
-          alternativeIds: {
-            orderId: response.data?.orderId,
-            order_id: response.data?.order_id,
-            id: response.data?.id,
-            nested: {
-              'data.order.id': response.data?.data?.order?.id,
-              'data.id': response.data?.data?.id,
-            },
-          },
-        });
-        throw new Error('Order created but missing ID in response');
-      }
+      logOrderFlowDiagnostic('ORDER_CREATED_SUCCESS', {
+        orderId,
+        tableNumber: tableNumber || 'N/A',
+        itemCount: cart.length,
+      });
 
       window.setTimeout(() => {
-        const targetUrl = `/order-status?orderId=${createdOrder.id}&table=${tableNumber || ''}`;
-        console.log('[ORDER_SUCCESS] Navigating to success page:', { targetUrl, orderId: createdOrder.id });
+        const targetUrl = `/order-status?orderId=${orderId}&table=${tableNumber || ''}`;
+        logOrderFlowDiagnostic('NAVIGATING_TO_SUCCESS', {
+          targetUrl,
+          orderId,
+          tableNumber,
+        });
+        console.log('[ORDER_SUCCESS] Navigating to success page:', { targetUrl, orderId });
         navigate(targetUrl);
       }, 2200);
     } catch (error) {
