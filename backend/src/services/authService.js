@@ -406,6 +406,17 @@ export class AuthService {
           .select()
           .single());
 
+        // If phone_number column doesn't exist in schema, retry without it
+        if (createError && createError.message?.includes('phone_number')) {
+          logger.warn('phone_number column not available, retrying without it');
+          const { phone_number, ...payloadWithoutPhone } = provisionPayload;
+          ({ data: newUser, error: createError } = await supabase
+            .from('users')
+            .insert([payloadWithoutPhone])
+            .select('id, name, email, restaurant_id, role, status, password_hash')
+            .single());
+        }
+
         // Retry with fallback restaurant if NOT NULL constraint hits (but NOT for developers)
         if (createError && restaurantId === null && inferredRole !== ROLES.DEVELOPER) {
           console.log('[AUTH_PROVISION] Retrying with fallback restaurant for non-developer role:', inferredRole);
@@ -418,6 +429,17 @@ export class AuthService {
               .insert([{ ...provisionPayload, restaurant_id: fallbackRestaurantId }])
               .select()
               .single());
+            
+            // If phone_number column doesn't exist, retry without it
+            if (createError && createError.message?.includes('phone_number')) {
+              logger.warn('phone_number column not available, retrying without it');
+              const { phone_number, ...payloadWithoutPhone } = provisionPayload;
+              ({ data: newUser, error: createError } = await supabase
+                .from('users')
+                .insert([{ ...payloadWithoutPhone, restaurant_id: fallbackRestaurantId }])
+                .select('id, name, email, restaurant_id, role, status, password_hash')
+                .single());
+            }
           }
         } else if (createError && inferredRole === ROLES.DEVELOPER) {
           console.log('[AUTH_PROVISION] Developer role attempted with null restaurant_id - NOT retrying with fallback');
@@ -584,19 +606,35 @@ export class AuthService {
       logger.info(`✅ Auth user created: ${authData.user.id}`);
 
       // Create users table record
-      const { data: user, error: userError } = await supabase
+      let userError = null;
+      let user = null;
+      
+      const userPayload = {
+        id: authData.user.id,
+        name: data.name,
+        email: data.email.toLowerCase(),
+        restaurant_id: data.restaurantId,
+        role: normalizedRole,
+        phone_number: data.phone,
+        status: 'active',
+      };
+      
+      ({ data: user, error: userError } = await supabase
         .from('users')
-        .insert([{
-          id: authData.user.id,
-          name: data.name,
-          email: data.email.toLowerCase(),
-          restaurant_id: data.restaurantId,
-          role: normalizedRole,
-          phone_number: data.phone,
-          status: 'active',
-        }])
+        .insert([userPayload])
         .select()
-        .single();
+        .single());
+
+      // If phone_number column doesn't exist, retry without it
+      if (userError && userError.message?.includes('phone_number')) {
+        logger.warn('phone_number column not available in registerStaff, retrying without it');
+        const { phone_number, ...payloadWithoutPhone } = userPayload;
+        ({ data: user, error: userError } = await supabase
+          .from('users')
+          .insert([payloadWithoutPhone])
+          .select('id, name, email, restaurant_id, role, status')
+          .single());
+      }
 
       if (userError) {
         logger.error('User creation failed:', userError.message);
