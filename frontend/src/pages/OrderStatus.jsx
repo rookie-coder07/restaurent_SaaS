@@ -28,16 +28,78 @@ function formatStatusLabel(status) {
 export default function OrderStatus() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  // ✅ Support both 'orderId' (new) and 'order' (legacy) parameter names
+  
+  // ✅ Extract and validate parameters early (NOT a hook)
   const rawOrderId = searchParams.get('orderId') || searchParams.get('order');
   const tableNumber = searchParams.get('table');
-  
-  // ✅ Validate orderId is a non-empty string
   const orderId = rawOrderId && typeof rawOrderId === 'string' && rawOrderId.trim().length > 0 
     ? rawOrderId.trim() 
     : null;
 
+  // ✅ CRITICAL: ALL HOOKS DECLARED BEFORE ANY EARLY RETURNS
+  // This prevents hook count mismatches between renders
+  
+  // ✅ FIX 1: Memoize the API function to prevent infinite re-renders
+  const fetchOrder = useCallback(() => {
+    if (!orderId) return Promise.resolve({});
+    return customerAPI.getOrder(orderId, tableNumber);
+  }, [orderId, tableNumber]);
+
+  const { data: order = {}, loading, error } = useApi(
+    fetchOrder,
+    [orderId, tableNumber],
+    { enableCache: true, cacheTTL: 3000 } // Cache for 3 seconds to avoid duplicate calls
+  );
+
+  // ✅ FIX 2: Determine polling interval based on order status
+  const effectivePollingInterval = useMemo(() => {
+    if (order?.status === 'ready' || order?.status === 'served' || order?.status === 'completed') {
+      return 10000; // Slower polling (10s) when order is complete
+    }
+    return 3000; // Faster polling (3s) while order is being prepared
+  }, [order?.status]);
+
+  // ✅ FIX 3: Use effect for polling with proper cleanup and stability
+  useEffect(() => {
+    let intervalId;
+    let isActive = true;
+
+    if (order?.id && effectivePollingInterval) {
+      // Set up polling interval
+      intervalId = setInterval(async () => {
+        if (!isActive) return;
+        try {
+          if (orderId) await customerAPI.getOrder(orderId, tableNumber);
+        } catch (err) {
+          // Error handled by useApi hook
+        }
+      }, effectivePollingInterval);
+    }
+
+    return () => {
+      isActive = false;
+      if (intervalId) {
+        clearInterval(intervalId);
+      }
+    };
+  }, [effectivePollingInterval, order?.id, orderId, tableNumber]);
+
+  // ✅ FIX 4: Log successful order fetch
+  useEffect(() => {
+    if (order?.id) {
+      console.log('[ORDER_LOADED] Order successfully fetched', {
+        orderId: order.id,
+        status: order.status,
+        tableNumber: order.tableNumber || tableNumber,
+        itemCount: order.items?.length || 0,
+      });
+    }
+  }, [order?.id]);
+
+  // ✅ NOW: Early returns after all hooks are declared
+
   // ✅ FIX 1: Enhanced guard against undefined orderId with detailed diagnostics
+  // NOW PLACED AFTER ALL HOOKS ARE DECLARED
   if (!orderId) {
     const allParams = Array.from(searchParams.entries());
     const urlDebugInfo = {
@@ -89,53 +151,6 @@ export default function OrderStatus() {
     );
   }
 
-  // ✅ FIX 2: Stable polling interval state
-  const [pollingInterval, setPollingInterval] = useState(null);
-
-  // ✅ FIX 3: Memoize the API function to prevent infinite re-renders
-  const fetchOrder = useCallback(() => {
-    return customerAPI.getOrder(orderId, tableNumber);
-  }, [orderId, tableNumber]);
-
-  const { data: order = {}, loading, error } = useApi(
-    fetchOrder,
-    [orderId, tableNumber],
-    { enableCache: true, cacheTTL: 3000 } // Cache for 3 seconds to avoid duplicate calls
-  );
-
-  // ✅ FIX 4: Determine polling interval based on order status
-  const effectivePollingInterval = useMemo(() => {
-    if (order?.status === 'ready' || order?.status === 'served' || order?.status === 'completed') {
-      return 10000; // Slower polling (10s) when order is complete
-    }
-    return 3000; // Faster polling (3s) while order is being prepared
-  }, [order?.status]);
-
-  // ✅ FIX 5: Use effect for polling with proper cleanup and stability
-  useEffect(() => {
-    let intervalId;
-    let isActive = true;
-
-    if (order?.id && effectivePollingInterval) {
-      // Set up polling interval
-      intervalId = setInterval(async () => {
-        if (!isActive) return;
-        try {
-          await customerAPI.getOrder(orderId, tableNumber);
-        } catch (err) {
-          // Error handled by useApi hook
-        }
-      }, effectivePollingInterval);
-    }
-
-    return () => {
-      isActive = false;
-      if (intervalId) {
-        clearInterval(intervalId);
-      }
-    };
-  }, [effectivePollingInterval, order?.id, orderId, tableNumber]);
-
   if (loading && !order?.id) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -185,18 +200,6 @@ export default function OrderStatus() {
       </div>
     );
   }
-  
-  // ✅ Log successful order fetch
-  useEffect(() => {
-    if (order?.id) {
-      console.log('[ORDER_LOADED] Order successfully fetched', {
-        orderId: order.id,
-        status: order.status,
-        tableNumber: order.tableNumber || tableNumber,
-        itemCount: order.items?.length || 0,
-      });
-    }
-  }, [order?.id]);
 
   const progressStatus = order.status === 'completed' ? 'served' : order.status;
   const currentStepIndex = STATUS_STEPS.findIndex(step => step.status === progressStatus);
