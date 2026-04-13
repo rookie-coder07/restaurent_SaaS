@@ -95,4 +95,4 @@ export const reportClientError = (error, context = 'Client error') => {
   }
 };
 
-export { DEFAULT_UI_ERROR, STATUS_MESSAGES, NETWORK_MESSAGES, handleError };
+export { DEFAULT_UI_ERROR, STATUS_MESSAGES, NETWORK_MESSAGES };

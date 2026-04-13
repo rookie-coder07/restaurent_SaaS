@@ -706,23 +706,57 @@ export class AuthService {
         throw new Error('User not found');
       }
 
-      const isValid = await this.comparePassword(currentPassword, account.password_hash);
-      if (!isValid) {
+      // ✅ FIX: Authenticate against Supabase Auth, not database hash
+      // Verify current password via Supabase Auth
+      let authVerifyError = null;
+      try {
+        ({ data: {}, error: authVerifyError } = await supabase.auth.signInWithPassword({
+          email: account.email,
+          password: currentPassword,
+        }));
+      } catch (authCheckError) {
+        logger.warn('Auth verification during password change failed:', authCheckError.message);
+        authVerifyError = authCheckError;
+      }
+
+      if (authVerifyError) {
         throw new Error('Current password is incorrect');
       }
 
-      const newHash = await this.hashPassword(newPassword);
-      const { error } = await supabase
+      // ✅ FIX: Update password in Supabase Auth (PRIMARY source of truth)
+      let authUpdateError = null;
+      try {
+        const adminClient = getSupabaseAdmin();
+        ({ error: authUpdateError } = await adminClient.auth.admin.updateUserById(userId, {
+          password: newPassword
+        }));
+      } catch (adminInitError) {
+        logger.error('❌ Admin client init error during password change:', adminInitError.message);
+        throw new Error('Password update failed: admin client not available');
+      }
+
+      if (authUpdateError) {
+        logger.error('❌ Failed to update Supabase Auth password:', authUpdateError.message);
+        throw authUpdateError;
+      }
+
+      // ✅ FIX: Clear database password_hash - Supabase Auth is now authoritative
+      const { error: dbError } = await supabase
         .from(table)
-        .update({ password_hash: newHash })
+        .update({ 
+          password_hash: null,  // Clear old hash - Supabase Auth is source of truth
+          password_hash_cleared: true,
+          password_updated_at: new Date().toISOString(),  // Track password update time
+          updated_at: new Date().toISOString()
+        })
         .eq(column, userId);
 
-      if (error) throw error;
+      if (dbError) throw dbError;
 
       // Revoke all refresh tokens for this user (force re-login for security)
       await revokeAllUserTokens(userId);
 
-      logger.warn(`Password changed for user: ${userId} - all tokens revoked`, { userId });
+      logger.warn(`✅ Password changed for user: ${userId} - Supabase Auth updated, all tokens revoked`, { userId });
 
       return { message: 'Password changed successfully. Please log in again.' };
     } catch (error) {
@@ -913,12 +947,31 @@ export class AuthService {
       }
 
       const handledAt = new Date().toISOString();
-      const newHash = await this.hashPassword(newPassword);
 
+      // ✅ FIX: Update password in Supabase Auth (PRIMARY source of truth)
+      let authUpdateError = null;
+      try {
+        const adminClient = getSupabaseAdmin();
+        ({ error: authUpdateError } = await adminClient.auth.admin.updateUserById(user.id, {
+          password: newPassword
+        }));
+      } catch (adminInitError) {
+        logger.error('❌ Admin client init error during manager password reset:', adminInitError.message);
+        throw new Error('Password reset failed: admin client not available');
+      }
+
+      if (authUpdateError) {
+        logger.error('❌ Failed to update Supabase Auth password during manager reset:', authUpdateError.message);
+        throw authUpdateError;
+      }
+
+      // ✅ FIX: Clear database password_hash - Supabase Auth is now authoritative
       const { error: updateUserError } = await supabase
         .from('users')
         .update({
-          password_hash: newHash,
+          password_hash: null,  // Clear old hash - Supabase Auth is source of truth
+          password_hash_cleared: true,
+          password_updated_at: handledAt,  // Track password update time
           updated_at: handledAt,
         })
         .eq('id', user.id)

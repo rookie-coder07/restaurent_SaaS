@@ -214,6 +214,8 @@ class PasswordResetService {
         .from(tableToUpdate)
         .update({
           password_hash: null, // Clear old password hash
+          password_hash_cleared: true,
+          password_updated_at: new Date().toISOString(),  // Track password update time
           updated_at: new Date().toISOString(),
         })
         .eq('id', userId);

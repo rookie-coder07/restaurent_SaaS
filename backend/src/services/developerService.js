@@ -451,6 +451,8 @@ export class DeveloperService {
       .from('users')
       .update({
         password_hash: null, // Clear old password hash - Supabase Auth is authoritative
+        password_hash_cleared: true,
+        password_updated_at: new Date().toISOString(),  // Track password update time
         updated_at: new Date().toISOString()
       })
       .eq('id', userId)
