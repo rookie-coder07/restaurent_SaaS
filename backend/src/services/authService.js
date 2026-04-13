@@ -344,10 +344,15 @@ export class AuthService {
       let user;
       let userError;
       
+      // For manager portal, use safe columns to avoid phone_number schema issues
+      const selectColumns = portalKey === 'manager' 
+        ? 'id, name, email, restaurant_id, role, status'
+        : '*';
+      
       if (authUserId) {
         ({ data: user, error: userError } = await supabase
           .from('users')
-          .select('*')
+          .select(selectColumns)
           .eq('id', authUserId)
           .single());
       }
@@ -357,7 +362,7 @@ export class AuthService {
         logger.warn(`User not found by ID, searching by email: ${email}`);
         ({ data: user, error: userError } = await supabase
           .from('users')
-          .select('*')
+          .select(selectColumns)
           .eq('email', email.toLowerCase())
           .single());
       }
