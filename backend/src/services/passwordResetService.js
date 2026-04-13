@@ -320,6 +320,177 @@ class PasswordResetService {
       throw error;
     }
   }
+
+  /**
+   * UNIFIED PASSWORD RESET FOR ANY USER (admin/manager/staff)
+   * Used when admin/manager directly resets someone's password
+   * Follows same logic as OTP reset to ensure consistency
+   */
+  static async resetPasswordForUser(userId, userEmail, newPassword) {
+    try {
+      const normalizedEmail = userEmail ? userEmail.toLowerCase().trim() : '';
+      
+      // Validate new password has minimum requirements
+      if (!newPassword || newPassword.length < 8) {
+        throw new Error('Password must be at least 8 characters');
+      }
+
+      logger.info(`🔄 Attempting unified password reset for user: ${userId}`);
+
+      let user = null;
+      let isRestaurant = false;
+
+      // First try to find in restaurants table (for admin/owner)
+      if (!user) {
+        const { data: restaurant, error: restaurantError } = await supabase
+          .from('restaurants')
+          .select('id, email, name')
+          .eq('id', userId)
+          .maybeSingle();
+
+        if (restaurant) {
+          user = restaurant;
+          isRestaurant = true;
+          logger.info(`✅ Found user in restaurants table: ${userId}`);
+        }
+      }
+
+      // Then try users table (for staff/manager/kitchen_staff)
+      if (!user) {
+        const { data: staffUser, error: userError } = await supabase
+          .from('users')
+          .select('id, restaurant_id, name, email')
+          .eq('id', userId)
+          .maybeSingle();
+
+        if (staffUser) {
+          user = staffUser;
+          logger.info(`✅ Found user in users table: ${userId}`, {
+            email: staffUser.email,
+            restaurantId: staffUser.restaurant_id,
+          });
+        }
+      }
+
+      if (!user) {
+        throw new Error('User not found');
+      }
+
+      // Update password via Supabase Auth
+      let authError;
+      let authUpdateResponse;
+      try {
+        const adminClient = getSupabaseAdmin();
+        logger.info(`🔄 Updating password in Supabase Auth for user: ${userId}`);
+        
+        ({ data: authUpdateResponse, error: authError } = await adminClient.auth.admin.updateUserById(
+          userId,
+          { password: newPassword }
+        ));
+        
+        logger.info('Supabase Auth update response:', {
+          userId,
+          hasError: !!authError,
+          errorMsg: authError?.message || null,
+          hasData: !!authUpdateResponse,
+          dataUser: authUpdateResponse?.user?.id || null,
+        });
+      } catch (adminInitError) {
+        logger.error('❌ Admin client error during password reset:', {
+          error: adminInitError.message,
+          userId,
+          stack: adminInitError.stack,
+        });
+        throw adminInitError;
+      }
+
+      if (authError) {
+        logger.error('❌ Supabase Auth password update failed:', {
+          userId,
+          email: user.email,
+          errorCode: authError.code,
+          errorMsg: authError.message,
+          errorStatus: authError.status,
+        });
+        throw authError;
+      }
+      
+      logger.info(`✅ Password successfully updated in Supabase Auth for user: ${userId}`);
+
+      // 🔧 VERIFICATION: Test that the new password works immediately
+      try {
+        const testLoginResponse = await supabase.auth.signInWithPassword({
+          email: user.email,
+          password: newPassword,
+        });
+        
+        if (testLoginResponse.error) {
+          logger.error('⚠️ Password reset verification FAILED - new password does not work:', {
+            userId,
+            email: user.email,
+            errorCode: testLoginResponse.error.code,
+            errorMsg: testLoginResponse.error.message,
+          });
+          throw new Error(`Password reset failed verification: new password does not work in Supabase Auth. ${testLoginResponse.error.message}`);
+        } else if (testLoginResponse.data?.user?.id) {
+          logger.info(`✅ Password verification SUCCESS - new password works for ${user.email}`);
+        }
+      } catch (verifyError) {
+        logger.error('❌ Password verification threw an error:', {
+          userId,
+          email: user.email,
+          error: verifyError.message,
+        });
+        throw verifyError;
+      }
+
+      // ✅ Clear password_hash from database - Supabase Auth is now source of truth
+      const tableToUpdate = isRestaurant ? 'restaurants' : 'users';
+      const handledAt = new Date().toISOString();
+      const { error: updateError } = await supabase
+        .from(tableToUpdate)
+        .update({
+          password_hash: null,  // Clear old hash - Supabase Auth is source of truth
+          password_hash_cleared: true,
+          password_updated_at: handledAt,  // Track password update time
+          updated_at: handledAt,
+        })
+        .eq('id', userId);
+
+      if (updateError) {
+        logger.error('❌ Failed to clear password_hash from database:', {
+          userId,
+          table: tableToUpdate,
+          error: updateError.message,
+        });
+        throw updateError;
+      }
+
+      logger.info(`✅ Password reset completed for user: ${userId}`, {
+        email: user.email,
+        table: tableToUpdate,
+        passwordCleared: true,
+      });
+
+      return {
+        success: true,
+        message: 'Password reset successfully',
+        userId,
+        email: user.email,
+        timestamp: handledAt,
+      };
+    } catch (error) {
+      logger.error('❌ Unified password reset error:', error.message);
+      const errorMsg = error.message || 'Password reset failed';
+      if (errorMsg.includes('not found')) {
+        throw new Error('User not found');
+      }
+      if (errorMsg.includes('password')) {
+        throw new Error('Password must be at least 8 characters');
+      }
+      throw error;
+    }
+  }
 }
 
 export default PasswordResetService;

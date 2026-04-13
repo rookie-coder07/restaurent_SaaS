@@ -92,6 +92,32 @@ router.post('/request-password-reset-otp', authLimiter, validateRequest(requestP
 router.post('/verify-otp', passwordResetController.verifyPasswordResetOTP);
 router.post('/set-password-with-otp', passwordResetController.setPasswordWithOTP);
 
+// UNIFIED PASSWORD RESET (for admin-initiated resets - admin, manager, staff, etc.)
+// Used by admins/managers to reset anyone's password consistently
+router.post('/reset-password-for-user', authMiddleware, async (req, res, next) => {
+  try {
+    // ✅ Validate new password strength
+    const passwordValidation = validatePasswordStrength(req.body.newPassword);
+    if (!passwordValidation.valid) {
+      SecurityAuditLogger.logFailedValidation(
+        req.user.id,
+        'new_password',
+        'password_reset_for_user_attempt',
+        passwordValidation.errors.join('; '),
+        req.ip
+      );
+      return res.status(400).json({
+        success: false,
+        errors: passwordValidation.errors,
+        message: 'New password does not meet security requirements'
+      });
+    }
+    next();
+  } catch (error) {
+    next(error);
+  }
+}, passwordResetController.resetPasswordForUser);
+
 // Token expiry information endpoint (PUBLIC - used by frontend to determine refresh timing)
 router.get('/token-info', (req, res) => {
   res.json({

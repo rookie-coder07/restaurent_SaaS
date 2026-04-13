@@ -1098,6 +1098,7 @@ export class AuthService {
           userId: user.id,
           userEmail: user.email,
           error: verifyError.message,
+          stack: verifyError.stack,
         });
         throw verifyError;
       }

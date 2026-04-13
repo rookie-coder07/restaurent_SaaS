@@ -62,3 +62,25 @@ export const setPasswordWithOTP = asyncHandler(async (req, res) => {
   const result = await PasswordResetService.setPasswordWithOTP(email, newPassword);
   return sendSuccess(res, 200, result, 'Password updated successfully');
 });
+
+/**
+ * NEW: Generic password reset for any user (admin, manager, staff, etc.)
+ * Used when admin/manager resets someone's password
+ * This ensures consistency with OTP flow
+ */
+export const resetPasswordForUser = asyncHandler(async (req, res) => {
+  logger.info('API HIT: POST /auth/reset-password-for-user');
+  const { userId, userEmail, newPassword } = req.body;
+
+  if (!userId || !newPassword) {
+    return sendError(res, 400, 'User ID and new password are required');
+  }
+
+  // Validate password strength
+  if (newPassword.length < 8) {
+    return sendError(res, 400, 'Password must be at least 8 characters long');
+  }
+
+  const result = await PasswordResetService.resetPasswordForUser(userId, userEmail, newPassword);
+  return sendSuccess(res, 200, result, 'Password reset successfully');
+});
