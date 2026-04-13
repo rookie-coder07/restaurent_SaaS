@@ -2,6 +2,7 @@ import logger from '../utils/logger.js';
 import supabase, { getSupabaseAdmin } from '../config/supabase.js';
 import AuthService from './authService.js';
 import InvoiceService from './invoiceService.js';
+import { revokeAllUserTokens } from '../utils/tokenManager.js';
 import { validateRestaurantGSTContext, validateInvoiceCounterRestaurant } from '../middleware/multiTenantValidation.js';
 
 export class RestaurantService {
@@ -1144,11 +1145,14 @@ export class RestaurantService {
       if (authError) throw authError;
 
       // 🔧 FIXED: Clear password_hash from database - Supabase Auth is now source of truth
+      const handledAt = new Date().toISOString();
       const { data: user, error } = await supabase
         .from('users')
         .update({
           password_hash: null, // Clear old password hash
-          updated_at: new Date().toISOString(),
+          password_hash_cleared: true,
+          password_updated_at: handledAt,  // Track password update time
+          updated_at: handledAt,
         })
         .eq('restaurant_id', restaurantId)
         .eq('id', staffId)
@@ -1159,7 +1163,17 @@ export class RestaurantService {
         throw error || new Error('Failed to reset staff password');
       }
 
-      logger.info(`✅ Password reset for staff user ${staffId} - old password invalidated`);
+      // 🔧 FIXED: Revoke all refresh tokens for this user to invalidate existing sessions
+      // This forces users to login again with the new password
+      try {
+        await revokeAllUserTokens(staffId);
+        logger.info(`✅ Tokens revoked for staff user ${staffId} after password reset`);
+      } catch (tokenError) {
+        logger.warn(`⚠️ Could not revoke tokens for staff user ${staffId}: ${tokenError.message}`);
+        // Don't fail the whole operation if token revocation fails
+      }
+
+      logger.info(`✅ Password reset for staff user ${staffId} - old password invalidated, sessions revoked`);
       return this.transformStaffUser(user);
     } catch (error) {
       logger.error('❌ Reset staff password error:', error);

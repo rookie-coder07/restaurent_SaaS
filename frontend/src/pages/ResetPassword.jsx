@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { ArrowLeft, Eye, EyeOff, Loader, ShieldCheck, AlertCircle, CheckCircle } from 'lucide-react';
 import supabase from '../config/supabase';
+import { clearAllPortalSessions } from '../utils/authStorage';
 import Card from '../components/common/Card';
 import Button from '../components/common/Button';
 import Toast from '../components/common/Toast';
@@ -182,6 +183,9 @@ export default function ResetPassword() {
 
       // Wait 2 seconds then redirect
       await new Promise(resolve => setTimeout(resolve, 2000));
+      
+      // 🔧 FIXED: Clear ALL portal sessions from localStorage (admin, pos, kot, manager, developer)
+      clearAllPortalSessions();
       
       // Sign out the session
       await supabase.auth.signOut().catch(err => {
