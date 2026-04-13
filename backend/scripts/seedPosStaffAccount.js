@@ -14,9 +14,8 @@ const POS_NAME = process.env.POS_STAFF_NAME || 'POS Billing Waiter';
 const POS_PHONE = process.env.POS_STAFF_PHONE || '9876543212';
 
 const main = async () => {
-  const [{ default: supabase }, { default: AuthService }] = await Promise.all([
+  const [{ default: supabase, getSupabaseAdmin }] = await Promise.all([
     import('../src/config/supabase.js'),
-    import('../src/services/authService.js'),
   ]);
 
   console.log('=== POS Staff Account Seeder ===');
@@ -37,14 +36,47 @@ const main = async () => {
     throw new Error(`No restaurant found for ${OWNER_EMAIL}`);
   }
 
-  const passwordHash = await AuthService.hashPassword(POS_PASSWORD);
+  // 🔧 FIXED: Use Supabase Auth to manage passwords, not database
+  const adminClient = getSupabaseAdmin();
+  
+  // Check if user already exists in auth
+  const { data: existingAuthUser } = await adminClient.auth.admin.listUsers();
+  const authUserExists = existingAuthUser?.users?.some(
+    u => u.email?.toLowerCase() === POS_EMAIL.toLowerCase()
+  );
+
+  let authUserId;
+  if (authUserExists) {
+    // Update existing auth user's password
+    const { error: updateError } = await adminClient.auth.admin.updateUserById(
+      existingAuthUser.users.find(u => u.email?.toLowerCase() === POS_EMAIL.toLowerCase()).id,
+      { password: POS_PASSWORD, email_confirm: true }
+    );
+    if (updateError) throw updateError;
+    authUserId = existingAuthUser.users.find(u => u.email?.toLowerCase() === POS_EMAIL.toLowerCase()).id;
+  } else {
+    // Create new auth user
+    const { data: newAuthUser, error: authError } = await adminClient.auth.admin.createUser({
+      email: POS_EMAIL.toLowerCase(),
+      password: POS_PASSWORD,
+      email_confirm: true,
+      user_metadata: {
+        name: POS_NAME,
+        role: 'staff',
+      },
+    });
+    if (authError) throw authError;
+    authUserId = newAuthUser.user.id;
+  }
+
+  // Sync to database (NO password stored)
   const payload = {
+    id: authUserId,
     restaurant_id: restaurant.id,
     name: POS_NAME,
     email: POS_EMAIL.toLowerCase(),
     phone: POS_PHONE,
     role: 'staff',
-    password_hash: passwordHash,
     status: 'active',
     updated_at: new Date().toISOString(),
   };

@@ -188,8 +188,8 @@ function App() {
           </Route>
 
           <Route element={<ProtectedRoute layout={PosLayout} allowedRoles={['staff']} portal="pos" />}>
-            <Route path="/pos" element={withSuspense(<POS />)} />
-            <Route path="/pos/billing" element={<Navigate to="/pos" replace />} />
+            <Route path="/pos" element={<Navigate to="/pos/tables" replace />} />
+            <Route path="/pos/billing" element={withSuspense(<POS />)} />
             <Route path="/pos/orders" element={withSuspense(<POSOrders />)} />
             <Route path="/pos/tables" element={withSuspense(<Tables />)} />
             <Route path="/pos/settings" element={withSuspense(<Settings />)} />

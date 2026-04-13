@@ -1143,10 +1143,11 @@ export class RestaurantService {
 
       if (authError) throw authError;
 
-      // Update user record with timestamp only
+      // 🔧 FIXED: Clear password_hash from database - Supabase Auth is now source of truth
       const { data: user, error } = await supabase
         .from('users')
         .update({
+          password_hash: null, // Clear old password hash
           updated_at: new Date().toISOString(),
         })
         .eq('restaurant_id', restaurantId)
@@ -1158,7 +1159,7 @@ export class RestaurantService {
         throw error || new Error('Failed to reset staff password');
       }
 
-      logger.info(`✅ Password reset for staff user ${staffId}`);
+      logger.info(`✅ Password reset for staff user ${staffId} - old password invalidated`);
       return this.transformStaffUser(user);
     } catch (error) {
       logger.error('❌ Reset staff password error:', error);

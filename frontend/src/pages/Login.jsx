@@ -487,14 +487,7 @@ export default function Login({ portal = 'admin', initialModeKey = '' }) {
               </form>
             ) : null}
 
-            {portal === 'admin' && selectedModeKey === 'owner' ? (
-              <div className="mt-6 rounded-[1.5rem] border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-4 text-center">
-                <p className="text-sm text-[var(--color-text-muted)]">New to the platform?</p>
-                <Link to="/register" className="mt-2 inline-flex text-sm font-semibold text-[var(--color-primary)]">
-                  Create restaurant account
-                </Link>
-              </div>
-            ) : null}
+
           </div>
         </Card>
       </div>

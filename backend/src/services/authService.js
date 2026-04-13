@@ -430,6 +430,49 @@ export class AuthService {
         throw new Error('User account is inactive');
       }
 
+      // CRITICAL FIX: If user has NO restaurant_id, assign one automatically
+      // This prevents managers from seeing 0 data due to null restaurant_id
+      if (!user.restaurant_id && normalizeRole(user.role) === ROLES.MANAGER) {
+        logger.warn(`🚨 Manager has NULL restaurant_id: ${user.email} - attempting to assign one`);
+        
+        // Try to find restaurant by email match first, then use first available
+        let restaurantId = null;
+        
+        const { data: emailMatchRestaurant } = await supabase
+          .from('restaurants')
+          .select('id')
+          .eq('email', email.toLowerCase())
+          .maybeSingle();
+        
+        if (emailMatchRestaurant?.id) {
+          restaurantId = emailMatchRestaurant.id;
+        } else {
+          // Fallback: use first restaurant
+          const { data: firstRestaurant } = await supabase
+            .from('restaurants')
+            .select('id')
+            .limit(1)
+            .maybeSingle();
+          restaurantId = firstRestaurant?.id || null;
+        }
+        
+        if (restaurantId) {
+          logger.info(`✅ Assigning restaurant ${restaurantId} to manager ${user.email}`);
+          const { error: assignError } = await supabase
+            .from('users')
+            .update({ restaurant_id: restaurantId })
+            .eq('id', user.id);
+          
+          if (assignError) {
+            logger.error(`Failed to assign restaurant to manager: ${assignError.message}`);
+          } else {
+            user.restaurant_id = restaurantId;
+          }
+        } else {
+          logger.error('❌ No restaurant available to assign to manager');
+        }
+      }
+
       const normalizedRole = normalizeRole(user.role);
       if (!VALID_ROLES.includes(normalizedRole)) {
         throw new Error('User account has an unsupported role');
@@ -449,28 +492,17 @@ export class AuthService {
         restaurantId: user.restaurant_id,
       });
 
-      // Validate password: accept Supabase auth success or local hash match
-      let passwordVerified = !authFailedMessage && !!authData?.user?.id;
-      if (!passwordVerified && user.password_hash) {
-        passwordVerified = await this.comparePassword(password, user.password_hash);
-      }
-      if (!passwordVerified && !user.password_hash && authFailedMessage && authFailedMessage.toLowerCase().includes('confirm')) {
-        logger.warn('Bypassing auth confirmation for dev environment', { userId: user.id });
-        passwordVerified = true;
-      }
-      if (!passwordVerified) {
+      // ✅ FIXED: Only trust Supabase Auth - no custom password checking
+      // Password is managed by Supabase auth system, not local database
+      if (authFailedMessage) {
         throw new Error(authFailedMessage || 'Invalid email or password');
       }
-
-      // Sync password hash if missing
-      if (!user.password_hash) {
-        try {
-          const newHash = await this.hashPassword(password);
-          await supabase.from('users').update({ password_hash: newHash }).eq('id', user.id);
-        } catch (hashError) {
-          logger.warn('Failed to sync password hash', { userId: user.id, error: hashError.message });
-        }
+      if (!authData?.user?.id) {
+        throw new Error('Authentication failed. Invalid email or password.');
       }
+
+      // ✅ FIXED: Never write passwords to database
+      // Supabase Auth handles all password storage and verification
 
       const accessToken = this.generateAccessToken(
         user.id,

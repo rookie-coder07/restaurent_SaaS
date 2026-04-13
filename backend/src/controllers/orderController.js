@@ -709,31 +709,19 @@ export const softDeleteOrder = asyncHandler(async (req, res) => {
       return sendError(res, 401, 'Current password is required for order deletion');
     }
 
-    // Get user's hashed password from database
-    const { data: user, error: userError } = await supabase
-      .from('users')
-      .select('password_hash')
-      .eq('id', req.user?.userId)
-      .eq('restaurant_id', req.restaurantId)
-      .single();
+    // 🔧 FIXED: Verify password via Supabase Auth (not database hash)
+    // This is more secure and ensures password matches Supabase records
+    const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+      email: req.user?.email,
+      password: currentPassword.trim(),
+    });
 
-    if (userError || !user) {
-      console.log('[ORDER_DELETE] ❌ User password record not found');
-      return sendError(res, 401, 'Unable to verify password');
-    }
-
-    // ✅ Verify password using bcrypt
-    const isPasswordValid = await AuthService.comparePassword(
-      currentPassword.trim(),
-      user.password_hash
-    );
-
-    if (!isPasswordValid) {
-      console.log('[ORDER_DELETE] ❌ PASSWORD INCORRECT - BLOCKING DELETION');
+    if (authError || !authData?.user?.id) {
+      console.log('[ORDER_DELETE] ❌ PASSWORD VERIFICATION FAILED - INVALID PASSWORD');
       return sendError(res, 401, 'Current password is incorrect');
     }
 
-    console.log('[ORDER_DELETE] ✅ Password verified - proceeding with deletion');
+    console.log('[ORDER_DELETE] ✅ Password verified via Supabase Auth - proceeding with deletion');
 
     // ✅ ONLY PROCEED IF PASSWORD IS VALID
     const deletedOrder = await OrderService.softDeleteOrder(req.restaurantId || req.user?.restaurantId || null, orderId, req.body.reason, {

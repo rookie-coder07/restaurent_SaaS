@@ -1,0 +1,11 @@
+name,price,category,description,image_url,status
+Grilled Salmon Fillet,450,Seafood,Fresh salmon grilled to perfection with lemon butter sauce,https://example.com/salmon.jpg,active
+Tandoori Chicken Breast,380,Chicken,Marinated chicken cooked in traditional tandoor with spices,https://example.com/tandoori.jpg,active
+Paneer Tikka Masala,320,Vegetarian,Cottage cheese cubes in creamy tomato-based sauce,https://example.com/tikka.jpg,active
+Vegetable Biryani,280,Rice,Fragrant basmati rice cooked with seasonal vegetables,https://example.com/biryani.jpg,active
+Butter Chicken,350,Chicken,Tender chicken pieces in rich butter and tomato gravy,https://example.com/butter.jpg,active
+Palak Paneer,300,Vegetarian,Spinach and cottage cheese curry - healthy and delicious,https://example.com/palak.jpg,active
+Dal Makhani,220,Lentils,Creamy lentil preparation with kidney beans,https://example.com/dal.jpg,active
+Shrimp Garlic Noodles,380,Seafood,Stir-fried noodles with shrimp and fresh garlic,https://example.com/noodles.jpg,active
+Vegetable Spring Rolls,180,Appetizers,Crispy rolls filled with mixed vegetables,https://example.com/rolls.jpg,active
+Mango Lassi,120,Beverages,Refreshing yogurt-based drink with fresh mango,https://example.com/lassi.jpg,active

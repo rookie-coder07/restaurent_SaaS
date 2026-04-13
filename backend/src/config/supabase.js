@@ -129,8 +129,19 @@ function getSupabase() {
     // Return null client that will fail at connectSupabase() validation time
     // This allows module loading to complete even if env vars aren't set yet
     logger.warn('Supabase configuration incomplete during module load - will validate at startup');
+    
+    // Create chainable mock that supports all query methods
+    const createMockQueryChain = () => ({
+      select: () => createMockQueryChain(),
+      eq: () => createMockQueryChain(),
+      insert: async () => ({ data: [], error: new Error('Supabase not initialized') }),
+      update: async () => ({ data: null, error: new Error('Supabase not initialized') }),
+      delete: async () => ({ data: null, error: new Error('Supabase not initialized') }),
+      single: async () => ({ data: null, error: new Error('Supabase not initialized') }),
+    });
+
     return {
-      from: () => ({ insert: async () => ({ error: new Error('Supabase not initialized') }) }),
+      from: () => createMockQueryChain(),
       auth: { signInWithPassword: async () => ({ error: new Error('Supabase not initialized') }) },
     };
   }
@@ -189,4 +200,44 @@ export const createTables = async () => {
 };
 
 export { getSupabase };
-export default getSupabase();
+
+// Initialize supabase client with error handling
+let supabaseInstance;
+try {
+  supabaseInstance = getSupabase();
+} catch (error) {
+  logger.error('❌ Failed to initialize Supabase - falling back to mock', {
+    error: error.message,
+  });
+  // Return a mock client that provides helpful error messages
+  supabaseInstance = {
+    from: (table) => ({
+      select: () => ({
+        eq: () => ({
+          single: async () => ({
+            data: null,
+            error: new Error(`Supabase not initialized. Table: ${table}`),
+          }),
+        }),
+        single: async () => ({
+          data: null,
+          error: new Error(`Supabase not initialized. Table: ${table}`),
+        }),
+      }),
+      insert: async () => ({
+        data: [],
+        error: new Error(`Supabase not initialized. Unable to insert into ${table}`),
+      }),
+      update: async () => ({
+        data: null,
+        error: new Error(`Supabase not initialized. Unable to update ${table}`),
+      }),
+      delete: async () => ({
+        data: null,
+        error: new Error(`Supabase not initialized. Unable to delete from ${table}`),
+      }),
+    }),
+  };
+}
+
+export default supabaseInstance;

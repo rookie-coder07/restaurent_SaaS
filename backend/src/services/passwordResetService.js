@@ -1,4 +1,4 @@
-import supabase from '../config/supabase.js';
+import supabase, { getSupabaseAdmin } from '../config/supabase.js';
 import logger from '../utils/logger.js';
 import { broadcastRestaurantEvent } from '../utils/realtimeEvents.js';
 import OTPService from '../utils/otpService.js';
@@ -207,11 +207,13 @@ class PasswordResetService {
 
       if (authError) throw authError;
 
-      // Update user record with timestamp
+      // ✅ FIXED: Clear password_hash from database after reset
+      // This ensures old passwords cannot be used
       const tableToUpdate = isRestaurant ? 'restaurants' : 'users';
       const { error: updateError } = await supabase
         .from(tableToUpdate)
         .update({
+          password_hash: null, // Clear old password hash
           updated_at: new Date().toISOString(),
         })
         .eq('id', userId);

@@ -445,7 +445,18 @@ export class DeveloperService {
   static async resetUserPassword(userId, newPassword, actor) {
     const { error: authError } = await getSupabaseAdmin().auth.admin.updateUserById(userId, { password: newPassword });
     if (authError) throw authError;
-    const { data, error } = await getSupabase().from('users').update({ updated_at: new Date().toISOString() }).eq('id', userId).select('id, restaurant_id, name, email, role').single();
+    
+    // 🔧 FIXED: Clear password_hash from database - Supabase Auth is now source of truth
+    const { data, error } = await getSupabase()
+      .from('users')
+      .update({
+        password_hash: null, // Clear old password hash - Supabase Auth is authoritative
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', userId)
+      .select('id, restaurant_id, name, email, role')
+      .single();
+    
     if (error || !data) throw error || new Error('User not found');
     await revokeAllUserTokens(userId);
     await this.logAudit({ actor, action: 'developer.password_reset', targetType: 'user', targetId: userId, restaurantId: data.restaurant_id, metadata: { email: data.email, role: data.role } });

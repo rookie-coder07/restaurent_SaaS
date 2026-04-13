@@ -3,12 +3,12 @@ import { useAuth } from '../hooks/useAuth';
 import api from '../services/api';
 import {
   Clock,
-  User,
   Package,
   LogIn,
   AlertCircle,
   RefreshCw,
   Loader,
+  Activity,
 } from 'lucide-react';
 
 const StaffActivity = () => {
@@ -23,40 +23,40 @@ const StaffActivity = () => {
       setLoading(true);
       setError(null);
 
-      console.log('[StaffActivity] Fetching logs for userId:', user?.id);
-      const url = `/v1/activity/${user?.id}/logs`;
-      console.log('[StaffActivity] Full URL:', url);
-      
+      // Get all activity logs for the restaurant (admin/manager view)
+      const url = `/v1/activity/logs/all`;
       const res = await api.get(url);
-      console.log('[StaffActivity] Response:', res);
       
-      const logsData = res.data?.data || [];
-      console.log('[StaffActivity] Logs data:', logsData);
+      // Safely extract logs data - handle various response formats
+      let logsData = [];
+      if (Array.isArray(res.data?.data)) {
+        logsData = res.data.data;
+      } else if (Array.isArray(res.data)) {
+        logsData = res.data;
+      } else if (res.data?.logs && Array.isArray(res.data.logs)) {
+        logsData = res.data.logs;
+      }
       
       setLogs(logsData);
+      if (logsData.length === 0) {
+        setError(null); // No error if empty, just no data
+      }
     } catch (err) {
-      console.error('[StaffActivity] Error fetching logs:', {
-        message: err.message,
-        status: err.response?.status,
-        data: err.response?.data,
-        fullError: err
-      });
-      setError(`Failed to load activity: ${err.response?.data?.message || err.message}`);
+      // If endpoint not found or no activity, don't show as error
+      if (err.response?.status === 404 || err.response?.status === 403) {
+        setLogs([]);
+        setError(null);
+      } else {
+        setError(`Failed to load activity: ${err.response?.data?.message || err.message}`);
+      }
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    console.log('[StaffActivity] useEffect - user:', user);
-    if (user?.id) {
-      console.log('[StaffActivity] Calling fetchLogs');
-      fetchLogs();
-    } else {
-      console.log('[StaffActivity] user.id not available yet');
-      // Don't set error - just wait for user to load
-    }
-  }, [user?.id]);
+    fetchLogs();
+  }, []);
 
   const getActionIcon = (action) => {
     switch (action) {
@@ -97,75 +97,75 @@ const StaffActivity = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-6">
-      <div className="max-w-6xl mx-auto">
+    <div className="min-h-screen bg-[var(--bg-primary)]">
+      <div className="max-w-full mx-auto p-6">
         {/* Header */}
         <div className="mb-8">
-          <h1 className="text-3xl font-bold text-slate-900 mb-2">
-            Staff Activity Log
-          </h1>
-          <p className="text-slate-600">
-            View your activity logs
-          </p>
+          <div className="rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card)] px-4 py-4 shadow-[var(--shadow-card)]">
+            <div className="flex items-center gap-3 mb-4">
+              <Activity className="h-6 w-6 text-[var(--color-primary)]" />
+              <h1 className="text-2xl font-black text-[var(--text-primary)]">
+                Staff Activity Tracking
+              </h1>
+            </div>
+            <p className="text-sm text-[var(--text-secondary)]">
+              View your activity logs
+            </p>
+          </div>
         </div>
 
         {/* Controls */}
-        <div className="flex gap-4 mb-6">
-          <div className="flex-1">
-            <select
-              value={filter}
-              onChange={(e) => setFilter(e.target.value)}
-              className="w-full px-4 py-2 border border-slate-300 rounded-lg bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              <option value="all">All Actions</option>
-              <option value="user_login">Login</option>
-              <option value="order_created">Orders Created</option>
-              <option value="order_deleted">Orders Deleted</option>
-              <option value="order_settled">Orders Settled</option>
-            </select>
-          </div>
+        <div className="mb-6 flex flex-col gap-4 sm:flex-row">
+          <select
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            className="flex-1 rounded-lg border border-[var(--border-color)] bg-[var(--bg-card)] px-4 py-2 text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]"
+          >
+            <option value="all">All Actions</option>
+            <option value="user_login">Login</option>
+            <option value="order_created">Orders Created</option>
+            <option value="order_deleted">Orders Deleted</option>
+            <option value="order_settled">Orders Settled</option>
+          </select>
           <button
             onClick={fetchLogs}
             disabled={loading}
-            className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 transition flex items-center gap-2"
+            className="inline-flex items-center gap-2 rounded-lg bg-[var(--color-primary)] px-6 py-2 font-medium text-white transition hover:opacity-90 disabled:opacity-50"
           >
-            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
             {loading ? 'Loading...' : 'Refresh'}
           </button>
         </div>
 
         {/* Error */}
         {error && (
-          <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6 flex items-center gap-3">
-            <AlertCircle className="w-5 h-5 text-red-600" />
-            <p className="text-red-700">{error}</p>
+          <div className="mb-6 flex items-center gap-3 rounded-lg border border-red-200 bg-red-50 p-4">
+            <AlertCircle className="h-5 w-5 text-red-600" />
+            <p className="text-sm text-red-700">{error}</p>
           </div>
         )}
 
         {/* Loading */}
         {loading && (
-          <div className="flex items-center justify-center py-12">
-            <Loader className="w-8 h-8 text-blue-600 animate-spin" />
+          <div className="flex items-center justify-center rounded-lg border border-[var(--border-color)] bg-[var(--bg-card)] py-12">
+            <Loader className="h-8 w-8 animate-spin text-[var(--color-primary)]" />
           </div>
         )}
 
         {/* Logs Table */}
         {!loading && filteredLogs.length > 0 && (
-          <div className="bg-white rounded-lg shadow overflow-hidden">
+          <div className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-card)] shadow-[var(--shadow-card)] overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full">
-                <thead className="bg-slate-50 border-b border-slate-200">
+                <thead className="border-b border-[var(--border-color)] bg-[var(--color-surface-muted)]">
                   <tr>
-                    <th className="px-6 py-3 text-left text-sm font-semibold text-slate-900">
+                    <th className="px-6 py-4 text-left text-sm font-semibold text-[var(--text-primary)]">
                       Action
                     </th>
-                    <th className="px-6 py-3 text-left text-sm font-semibold text-slate-900">
-                      User
-                    </th>
-                    <th className="px-6 py-3 text-left text-sm font-semibold text-slate-900">
+                    <th className="px-6 py-4 text-left text-sm font-semibold text-[var(--text-primary)]">
                       Details
                     </th>
-                    <th className="px-6 py-3 text-left text-sm font-semibold text-slate-900">
+                    <th className="px-6 py-4 text-left text-sm font-semibold text-[var(--text-primary)]">
                       Timestamp
                     </th>
                   </tr>
@@ -174,33 +174,29 @@ const StaffActivity = () => {
                   {filteredLogs.map((log, index) => (
                     <tr
                       key={log.id || index}
-                      className="border-b border-slate-200 hover:bg-slate-50 transition"
+                      className="border-b border-[var(--border-color)] transition hover:bg-[var(--color-surface-muted)]"
                     >
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-2">
                           {getActionIcon(log.action)}
-                          <span className="text-sm font-medium text-slate-900">
+                          <span className="text-sm font-medium text-[var(--text-primary)]">
                             {getActionLabel(log.action)}
                           </span>
                         </div>
                       </td>
                       <td className="px-6 py-4">
-                        <p className="text-sm text-slate-600">
-                          {log.details?.actorName || log.user_id?.substring(0, 8)}
-                        </p>
-                      </td>
-                      <td className="px-6 py-4">
-                        <p className="text-sm text-slate-600 max-w-xs truncate">
+                        <p className="max-w-xs truncate text-sm text-[var(--text-secondary)]">
                           {log.details?.email || 
                            log.details?.orderId || 
                            log.details?.role || 
+                           log.details?.actorName ||
                            '—'}
                         </p>
                       </td>
                       <td className="px-6 py-4">
-                        <div className="flex items-center gap-2 text-sm text-slate-600">
-                          <Clock className="w-4 h-4" />
-                          {formatTime(log.created_at)}
+                        <div className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
+                          <Clock className="h-4 w-4" />
+                          {formatTime(log.created_at || log.timestamp)}
                         </div>
                       </td>
                     </tr>
@@ -213,12 +209,14 @@ const StaffActivity = () => {
 
         {/* Empty State */}
         {!loading && filteredLogs.length === 0 && (
-          <div className="bg-white rounded-lg shadow p-12 text-center">
-            <AlertCircle className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-            <h3 className="text-lg font-medium text-slate-900 mb-2">No activity available</h3>
-            <p className="text-slate-600">
+          <div className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-card)] p-12 text-center shadow-[var(--shadow-card)]">
+            <Activity className="mx-auto mb-4 h-12 w-12 text-[var(--text-secondary)]" />
+            <h3 className="mb-2 text-lg font-semibold text-[var(--text-primary)]">
+              No activity available
+            </h3>
+            <p className="text-sm text-[var(--text-secondary)]">
               {filter === 'all' 
-                ? 'No activity has been recorded yet.'
+                ? 'No order created activity found.'
                 : `No ${getActionLabel(filter).toLowerCase()} activity found.`}
             </p>
           </div>

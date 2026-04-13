@@ -235,16 +235,85 @@ export default function MenuBulkUpload({ onUploaded }) {
 
     setSubmitting(true);
     try {
+      // ✅ CRITICAL FIX: Use FormData for file upload
       const formData = new FormData();
       formData.append('file', file);
+
+      // Log token availability before upload
+      const token = localStorage.getItem('token') || localStorage.getItem('accessToken');
+      console.log('[BULK_UPLOAD] Token availability:', {
+        hasToken: !!token,
+        tokenPreview: token ? token.substring(0, 20) + '...' : 'MISSING',
+      });
+
       const response = await menuAPI.bulkUpload(formData);
       setUploadResult(response.data.data);
       setToast({ type: 'success', message: 'Menu uploaded successfully' });
       await onUploaded?.();
     } catch (error) {
+      // Enhanced error logging with full error details
+      const errorData = error.response?.data;
+      const errorInfo = {
+        status: error.response?.status,
+        statusText: error.response?.statusText,
+        message: errorData?.message || error.message,
+        backendError: errorData?.data,
+        fullResponse: errorData,
+      };
+      
+      console.error('[BULK_UPLOAD] Full Error Details:', errorInfo);
+      console.error('[BULK_UPLOAD] Error Response Data:', JSON.stringify(errorData, null, 2));
+      console.error('[BULK_UPLOAD] Stack Trace:', error.stack);
+
+      if (error.response?.status === 401) {
+        console.error('[BULK_UPLOAD] 401 Unauthorized - Token invalid or expired');
+        setToast({
+          type: 'error',
+          message: 'Session expired - please login again',
+        });
+        return;
+      }
+
+      if (error.response?.status === 403) {
+        console.error('[BULK_UPLOAD] 403 Forbidden - Insufficient permissions');
+        setToast({
+          type: 'error',
+          message: 'You do not have permission to upload menu items',
+        });
+        return;
+      }
+
       if (error.response?.status === 404) {
-        try {
-          const { normalizedRows, rowErrors } = normalizeRowsForFallback(preview.rows, preview.mapping);
+        console.error('[BULK_UPLOAD] 404 Error - Invalid endpoint or resource not found');
+        setToast({
+          type: 'error',
+          message: 'Bulk upload endpoint not found',
+        });
+        return;
+      }
+
+      if (error.response?.status === 422) {
+        console.error('[BULK_UPLOAD] 422 Error - Validation failed', errorData?.data);
+        setToast({
+          type: 'error',
+          message: `Validation failed: ${errorData?.message || 'Invalid data format'}`,
+        });
+        return;
+      }
+
+      if (error.response?.status === 500) {
+        console.error('[BULK_UPLOAD] 500 Server Error - Backend threw an exception');
+        console.error('[BULK_UPLOAD] Backend error message:', errorData?.message);
+        setToast({
+          type: 'error',
+          message: `Server error: ${errorData?.message || 'Internal server error'}`,
+        });
+        return;
+      }
+
+      // Fallback for other errors
+      try {
+        const { normalizedRows, rowErrors } = normalizeRowsForFallback(preview.rows, preview.mapping);
           const categoriesResponse = await menuAPI.getCategories();
           const existingCategories = categoriesResponse.data?.data?.categories || [];
           const categoryMap = new Map(
@@ -318,12 +387,6 @@ export default function MenuBulkUpload({ onUploaded }) {
           });
           return;
         }
-      }
-
-      setToast({
-        type: 'error',
-        message: error.response?.data?.message || 'Bulk upload failed',
-      });
     } finally {
       setSubmitting(false);
     }

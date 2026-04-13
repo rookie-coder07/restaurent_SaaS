@@ -13,6 +13,7 @@ import {
 import * as menuController from '../controllers/menuController.js';
 import SecurityAuditLogger from '../utils/securityAudit.js';
 import { sendError } from '../utils/apiResponse.js';
+import debugBulkUploadMiddleware, { debugAuthSteps } from '../middleware/debugBulkUpload.js';
 
 const router = express.Router();
 const bulkUpload = multer({
@@ -59,21 +60,46 @@ router.delete('/categories/:categoryId', requireRole(['owner']), checkPermission
 });
 
 // Menu item routes
-router.post('/bulk-upload', requireRole(['owner', 'manager']), (req, res, next) => {
-  bulkUpload.single('file')(req, res, (error) => {
-    if (!error) {
-      next();
-      return;
-    }
+// ✅ CRITICAL: Only owner (admin role) can bulk upload menu items
+// Manager role does not have 'create_menu' permission
+router.post('/bulk-upload', 
+  debugBulkUploadMiddleware,  // 🔍 DEBUG: Log full middleware chain
+  requireRole(['owner']), 
+  checkPermission(['create_menu']), 
+  (req, res, next) => {
+    console.log('[DEBUG] 📁 MULTER: About to process file upload...');
+    bulkUpload.single('file')(req, res, (error) => {
+      if (error) {
+        console.log('[DEBUG] 📁 MULTER ERROR:', {
+          code: error.code,
+          message: error.message,
+          isMulterError: error instanceof multer.MulterError,
+        });
+      } else {
+        console.log('[DEBUG] 📁 MULTER SUCCESS:', {
+          fileReceived: !!req.file,
+          fileName: req.file?.originalname,
+          size: req.file?.size,
+          bufferLength: req.file?.buffer?.length,
+        });
+      }
 
-    if (error instanceof multer.MulterError && error.code === 'LIMIT_FILE_SIZE') {
-      sendError(res, 413, 'File exceeds 5MB limit');
-      return;
-    }
+      if (!error) {
+        next();
+        return;
+      }
 
-    sendError(res, 400, error.message || 'Unable to process upload');
-  });
-}, menuController.bulkUploadMenu);
+      if (error instanceof multer.MulterError && error.code === 'LIMIT_FILE_SIZE') {
+        console.log('[DEBUG] ⚠ File too large');
+        sendError(res, 413, 'File exceeds 5MB limit');
+        return;
+      }
+
+      console.log('[DEBUG] ⚠ Multer error:', error.message);
+      sendError(res, 400, error.message || 'Unable to process upload');
+    });
+  }, 
+  menuController.bulkUploadMenu);
 router.post('/items', requireRole(['owner']), checkPermission(['create_menu']), validateRequest(createMenuItemSchema), async (req, res, next) => {
   try {
     // ✅ Additional validation for suspicious prices

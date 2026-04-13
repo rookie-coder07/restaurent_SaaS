@@ -200,6 +200,14 @@ api.interceptors.request.use(
       return config;
     }
 
+    // CRITICAL: Log request details for debugging
+    if (shouldDebugApi) {
+      logger.debug(`[API_REQUEST] ${config.method?.toUpperCase()} ${url}`, {
+        isFormData: config.data instanceof FormData,
+        hasAuthHeader: !!config.headers.Authorization,
+      });
+    }
+
     const portal = getPortalKeyFromPathname(window.location.pathname);
     let session = readPortalSession(portal);
     let token = session?.accessToken;
@@ -251,6 +259,7 @@ api.interceptors.request.use(
         isDeveloper,
         rawRole: tokenPayload?.role,
         restaurantId: tokenPayload?.restaurantId,
+        isFormData: config.data instanceof FormData,
       });
 
       if ((!tokenPayload?.restaurantId && !isDeveloper) || !tokenRole) {
@@ -271,11 +280,22 @@ api.interceptors.request.use(
         throw new Error('Portal session does not match the current account role.');
       }
 
+      // ✅ CRITICAL FIX: Set Authorization header for ALL requests including FormData
+      // FormData with multipart/form-data MUST include the Authorization header
       config.headers.Authorization = `Bearer ${token}`;
       api.defaults.headers.common.Authorization = `Bearer ${token}`;
+      
+      if (shouldDebugApi) {
+        logger.debug(`[API_INTERCEPTOR] ✅ Authorization header set to: Bearer ${token.substring(0, 20)}...`);
+      }
+
       if (tokenPayload.restaurantId) {
         config.headers['X-Restaurant-Id'] = String(tokenPayload.restaurantId);
         api.defaults.headers.common['X-Restaurant-Id'] = String(tokenPayload.restaurantId);
+        
+        if (shouldDebugApi) {
+          logger.debug(`[API_INTERCEPTOR] ✅ X-Restaurant-Id header set to: ${tokenPayload.restaurantId}`);
+        }
       }
 
       if (tokenPayload.restaurantId && config.params && typeof config.params === 'object' && !Array.isArray(config.params)) {
@@ -284,10 +304,18 @@ api.interceptors.request.use(
           restaurantId: config.params.restaurantId || String(tokenPayload.restaurantId),
         };
       }
+    } else {
+      if (shouldDebugApi) {
+        logger.debug(`[API_INTERCEPTOR] ⚠️  No token found for request: ${config.url}`);
+      }
     }
 
     if (shouldDebugApi) {
-      logger.debug(`API Request: ${config.method?.toUpperCase()} ${config.url}`);
+      logger.debug(`[API_REQUEST_COMPLETE] ${config.method?.toUpperCase()} ${config.url}`, {
+        hasAuthorization: !!config.headers.Authorization,
+        hasRestaurantId: !!config.headers['X-Restaurant-Id'],
+        isFormData: config.data instanceof FormData,
+      });
     }
 
     return config;
