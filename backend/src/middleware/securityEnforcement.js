@@ -204,6 +204,7 @@ export const enforceSQLSafety = (req, res, next) => {
 // 7. SAFE ERROR HANDLING - No stack traces in responses
 export const enforceSafeErrorHandling = (err, req, res, next) => {
   const isProduction = process.env.NODE_ENV === 'production';
+  const isAPIEndpoint = req.path.startsWith('/api/');
 
   logger.error('Request error', {
     message: err.message,
@@ -215,19 +216,27 @@ export const enforceSafeErrorHandling = (err, req, res, next) => {
     ...(isProduction ? {} : { stack: err.stack }),
   });
 
-  if (isProduction) {
-    // Don't expose error details in production
+  if (isProduction && !isAPIEndpoint) {
+    // Don't expose error details in production for non-API endpoints (UI/page renders)
     return res.status(500).json({
       success: false,
       message: 'Something went wrong. Please try again.',
     });
   }
 
-  // Development: include error details
-  res.status(err.statusCode || 500).json({
+  // For API endpoints, return actual error message (more helpful for debugging)
+  // Add informative but non-sensitive details
+  const statusCode = err.statusCode || 500;
+  const errorMessage = isProduction 
+    ? (err.message || 'An error occurred processing your request')
+    : err.message;
+
+  res.status(statusCode).json({
     success: false,
-      message: 'Something went wrong. Please try again.',
+    message: errorMessage,
+    statusCode,
     ...(err.details && { details: err.details }),
+    ...(err.code && { code: err.code }),
   });
 };
 
