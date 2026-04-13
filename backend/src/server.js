@@ -1,3 +1,4 @@
+import 'dotenv/config.js';
 import app from './app.js';
 import logger from './utils/logger.js';
 import { getConfig } from './config/environment.js';

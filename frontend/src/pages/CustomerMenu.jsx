@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   AlertCircle,
@@ -24,6 +24,10 @@ import CartDrawer from '../components/customer/CartDrawer';
 import FloatingCartButton from '../components/customer/FloatingCartButton';
 import { useCustomerCartStore } from '../context/customerCartStore';
 
+// Lazy load QR-exclusive components for better performance
+const SignatureDishShowcase = lazy(() => import('../components/customer/SignatureDishShowcase'));
+const GreetingBitmoji = lazy(() => import('../components/customer/GreetingBitmoji'));
+
 function buildStableRequestId() {
   if (typeof globalThis !== 'undefined' && globalThis.crypto?.randomUUID) {
     return globalThis.crypto.randomUUID();
@@ -45,6 +49,9 @@ export default function CustomerMenu() {
   const hasValidQrParams = Boolean(tableNumber || tableId) && isValidUuid && isValidTableNumber;
   const cartKey = tableId || `table-${tableNumber}`;
   const placeOrderRequestRef = useRef({ id: '', signature: '' });
+
+  // ✅ QR Detection: Check if user accessed via QR code
+  const isQrUser = searchParams.get('source') === 'qr';
 
   const [showCart, setShowCart] = useState(false);
   const [isPlacingOrder, setIsPlacingOrder] = useState(false);
@@ -484,6 +491,13 @@ export default function CustomerMenu() {
         <FloatingCartButton itemCount={cartItemCount} onClick={() => setShowCart(true)} />
       )}
 
+      {/* ✅ QR Exclusive: Friendly Greeting Animation */}
+      {isQrUser && (
+        <Suspense fallback={null}>
+          <GreetingBitmoji />
+        </Suspense>
+      )}
+
       <header className="sticky top-0 z-30 border-b border-[var(--border-color)] bg-[color-mix(in_srgb,var(--bg-panel)_92%,transparent)] backdrop-blur-xl">
         <div className="mx-auto max-w-6xl px-4 py-4 sm:px-6">
           <div className="flex items-start justify-between gap-3">
@@ -567,6 +581,21 @@ export default function CustomerMenu() {
           </div>
         ) : (
           <div className="mt-8 space-y-10">
+            {/* ✅ QR Exclusive: Premium Signature Dish Showcase */}
+            {isQrUser && (
+              <Suspense fallback={null}>
+                <SignatureDishShowcase
+                  item={menuItems[0] || null}
+                  onOrderClick={() => {
+                    if (menuItems[0]) {
+                      handleAddToCart(menuItems[0]);
+                      setShowCart(true);
+                    }
+                  }}
+                />
+              </Suspense>
+            )}
+
             {groupedCategories.map((category) => (
               <section
                 key={category.id}

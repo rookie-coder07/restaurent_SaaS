@@ -150,15 +150,27 @@ export class AuthService {
 
       // Create auth user - bypass email confirmation
       logger.info(`Creating Supabase Auth user for: ${normalizedEmail}`);
-      const { data: authData, error: authError } = await getSupabaseAdmin().auth.admin.createUser({
-        email: normalizedEmail,
-        password: data.password,
-        email_confirm: true,
-        user_metadata: {
-          name: data.name,
-          role: ROLES.ADMIN,
-        },
-      });
+      let authData, authError;
+      try {
+        const adminClient = getSupabaseAdmin();
+        ({ data: authData, error: authError } = await adminClient.auth.admin.createUser({
+          email: normalizedEmail,
+          password: data.password,
+          email_confirm: true,
+          user_metadata: {
+            name: data.name,
+            role: ROLES.ADMIN,
+          },
+        }));
+      } catch (adminInitError) {
+        logger.error('❌ Failed to initialize Supabase admin client for restaurant registration');
+        logger.error(`   Error: ${adminInitError.message}`);
+        logger.error('   This typically means SUPABASE_SERVICE_ROLE_KEY is not configured in the backend environment');
+        throw new Error(
+          `Admin client initialization failed: ${adminInitError.message}. ` +
+          `Please ensure SUPABASE_SERVICE_ROLE_KEY is set in your Render backend environment.`
+        );
+      }
 
       if (authError || !authData?.user?.id) {
         logger.error('Auth user creation failed:', authError?.message);
@@ -542,15 +554,27 @@ export class AuthService {
 
       // Create auth user
       logger.info(`Creating Supabase Auth user for staff: ${normalizedEmail}`);
-      const { data: authData, error: authError } = await getSupabaseAdmin().auth.admin.createUser({
-        email: normalizedEmail,
-        password: data.password,
-        email_confirm: true,
-        user_metadata: {
-          name: data.name,
-          role: normalizedRole,
-        },
-      });
+      let authData, authError;
+      try {
+        const adminClient = getSupabaseAdmin();
+        ({ data: authData, error: authError } = await adminClient.auth.admin.createUser({
+          email: normalizedEmail,
+          password: data.password,
+          email_confirm: true,
+          user_metadata: {
+            name: data.name,
+            role: normalizedRole,
+          },
+        }));
+      } catch (adminInitError) {
+        logger.error('❌ Failed to initialize Supabase admin client for staff registration');
+        logger.error(`   Error: ${adminInitError.message}`);
+        logger.error('   This typically means SUPABASE_SERVICE_ROLE_KEY is not configured in the backend environment');
+        throw new Error(
+          `Admin client initialization failed: ${adminInitError.message}. ` +
+          `Please ensure SUPABASE_SERVICE_ROLE_KEY is set in your Render backend environment.`
+        );
+      }
 
       if (authError || !authData?.user?.id) {
         logger.error('Staff auth user creation failed:', authError?.message);

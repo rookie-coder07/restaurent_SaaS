@@ -242,15 +242,28 @@ export class DeveloperService {
       serviceRoleKeyConfigured: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
     });
 
-    const { data: authData, error: authError } = await getSupabaseAdmin().auth.admin.createUser({
-      email: normalizedEmail,
-      password: temporaryPassword,
-      email_confirm: true,
-      user_metadata: {
-        name: restaurantData.ownerName,
-        role: 'admin',
-      },
-    });
+    let authData, authError;
+    try {
+      const adminClient = getSupabaseAdmin();
+      ({ data: authData, error: authError } = await adminClient.auth.admin.createUser({
+        email: normalizedEmail,
+        password: temporaryPassword,
+        email_confirm: true,
+        user_metadata: {
+          name: restaurantData.ownerName,
+          role: 'admin',
+        },
+      }));
+    } catch (adminInitError) {
+      console.error('[DEVELOPER_SERVICE] ❌ Admin client initialization error:', {
+        message: adminInitError.message,
+        serviceRoleKeyConfigured: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
+      });
+      throw new Error(
+        `Failed to initialize admin client: ${adminInitError.message}. ` +
+        `SUPABASE_SERVICE_ROLE_KEY may be missing or invalid. Check your Render environment variables.`
+      );
+    }
 
     if (authError) {
       console.error('[DEVELOPER_SERVICE] ❌ Auth creation error:', {

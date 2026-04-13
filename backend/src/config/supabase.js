@@ -13,15 +13,16 @@ export const validateSupabaseConfig = () => {
     throw new Error('SUPABASE_URL not configured');
   }
   
+  // ⚠️ Service role key is optional at startup - only warn, don't throw
+  // It will be validated when actually needed
   if (!serviceRoleKey) {
-    console.error('❌ SUPABASE_SERVICE_ROLE_KEY is missing!');
-    console.error('Admin operations will fail. Please set SUPABASE_SERVICE_ROLE_KEY in environment variables.');
-    throw new Error('SUPABASE_SERVICE_ROLE_KEY not configured - required for admin operations');
+    console.warn('⚠️  SUPABASE_SERVICE_ROLE_KEY not configured at startup');
+    console.warn('   Admin operations will fail. Please ensure SUPABASE_SERVICE_ROLE_KEY is set in environment.');
+  } else {
+    console.log('✅ Supabase configuration validated');
+    console.log(`   URL: ${url}`);
+    console.log(`   Service Role Key: SET`);
   }
-  
-  console.log('✅ Supabase configuration validated');
-  console.log(`   URL: ${url}`);
-  console.log(`   Service Role Key: ${serviceRoleKey ? 'SET' : 'MISSING'}`);
 };
 
 // Get admin client (uses service role key for admin operations)
@@ -58,22 +59,41 @@ export function getSupabaseAdmin() {
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
   if (!supabaseUrl || !serviceRoleKey) {
-    throw new Error('Supabase admin client not initialized - missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY');
+    const missingVars = [];
+    if (!supabaseUrl) missingVars.push('SUPABASE_URL');
+    if (!serviceRoleKey) missingVars.push('SUPABASE_SERVICE_ROLE_KEY');
+    
+    const errorMsg = `Supabase admin client initialization failed. Missing environment variables: ${missingVars.join(', ')}. ` +
+                     `This is required for admin operations (user creation, staff registration, etc.). ` +
+                     `Please ensure these variables are set in your Render backend environment.`;
+    
+    logger.error('❌ Admin Client Initialization Error');
+    logger.error(`   Missing: ${missingVars.join(', ')}`);
+    logger.error(`   SUPABASE_URL: ${supabaseUrl ? 'SET' : 'MISSING'}`);
+    logger.error(`   SUPABASE_SERVICE_ROLE_KEY: ${serviceRoleKey ? 'SET' : 'MISSING'}`);
+    
+    throw new Error(errorMsg);
   }
 
-  console.log('[SUPABASE_ADMIN] Creating admin client with service role key');
-  
-  supabaseAdminSingleton = createClient(supabaseUrl, serviceRoleKey, {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false,
-    },
-    global: {
-      headers: { 'x-client-info': 'restaurant-saas-backend-admin' },
-    },
-  });
+  try {
+    logger.info('[SUPABASE_ADMIN] Creating admin client with service role key');
+    
+    supabaseAdminSingleton = createClient(supabaseUrl, serviceRoleKey, {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false,
+      },
+      global: {
+        headers: { 'x-client-info': 'restaurant-saas-backend-admin' },
+      },
+    });
 
-  return supabaseAdminSingleton;
+    logger.info('✅ Supabase admin client created successfully');
+    return supabaseAdminSingleton;
+  } catch (error) {
+    logger.error('❌ Failed to create Supabase admin client:', error.message);
+    throw new Error(`Failed to initialize Supabase admin client: ${error.message}`);
+  }
 }
 
 // Get regular client (uses anon key for user operations)
@@ -143,11 +163,16 @@ export const connectSupabase = async () => {
     }
     
     const client = getSupabase();
-    const adminClient = getSupabaseAdmin();
-    logger.info('✅ Supabase connected with admin client');
+    
+    // ⚠️ IMPORTANT: Do NOT eagerly call getSupabaseAdmin() here
+    // The admin client is lazily initialized when actually needed
+    // This prevents startup failures if SUPABASE_SERVICE_ROLE_KEY is missing
+    // Admin operations will gracefully fail at request time with clear error messages
+    
+    logger.info('✅ Supabase connected (admin client will be initialized on first admin operation)');
     return client;
   } catch (error) {
-    logger.error('Supabase error:', error.message);
+    logger.error('Supabase error at startup:', error.message);
     throw error;
   }
 };

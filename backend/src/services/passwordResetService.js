@@ -190,10 +190,20 @@ class PasswordResetService {
       }
 
       // Update password via Supabase Auth
-      const { error: authError } = await getSupabaseAdmin().auth.admin.updateUserById(
-        userId,
-        { password: newPassword }
-      );
+      let authError;
+      try {
+        const adminClient = getSupabaseAdmin();
+        ({ error: authError } = await adminClient.auth.admin.updateUserById(
+          userId,
+          { password: newPassword }
+        ));
+      } catch (adminInitError) {
+        logger.error('❌ Admin client initialization error during password reset:', adminInitError.message);
+        throw new Error(
+          `Failed to reset password: admin client initialization failed. ` +
+          `Please ensure SUPABASE_SERVICE_ROLE_KEY is set in your Render backend environment.`
+        );
+      }
 
       if (authError) throw authError;
 

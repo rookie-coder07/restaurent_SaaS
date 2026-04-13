@@ -10,6 +10,14 @@ const TECHNICAL_ERROR_PATTERN =
 
 const normalizeStatusCode = (err) => {
   const statusCode = Number(err?.statusCode || err?.status || 500);
+  
+  // Check for admin client initialization errors (missing service role key)
+  const message = String(err?.message || err?.publicMessage || '').toLowerCase();
+  if (message.includes('admin client') || message.includes('service role key')) {
+    // Return 503 Service Unavailable - backend infrastructure issue, not user error
+    return 503;
+  }
+  
   if ([400, 401, 403, 404, 409, 408, 429].includes(statusCode)) {
     return statusCode;
   }
@@ -21,6 +29,11 @@ const buildSafeMessage = (err, statusCode) => {
 
   if (!candidate) {
     return getDefaultErrorMessage(statusCode);
+  }
+
+  // Service role key errors should be shown to all users (informative)
+  if (candidate.includes('SUPABASE_SERVICE_ROLE_KEY') || candidate.includes('admin client')) {
+    return 'Backend configuration error. Please contact support. The server is unable to process admin operations.';
   }
 
   if (statusCode >= 500 || TECHNICAL_ERROR_PATTERN.test(candidate)) {
@@ -93,7 +106,18 @@ export const errorHandler = async (err, req, res, next) => {
   const safeMessage = buildSafeMessage(error, statusCode);
   const isDeveloper = ['developer'].includes(req?.user?.role);
 
-  console.error('🔥 INTERNAL ERROR:', error);
+  // Special logging for admin client errors
+  const isAdminClientError = String(error?.message || '').includes('admin client') || 
+                             String(error?.message || '').includes('SUPABASE_SERVICE_ROLE_KEY');
+  
+  if (isAdminClientError) {
+    console.error('🔴 ADMIN CLIENT INITIALIZATION FAILED');
+    console.error('   This typically means SUPABASE_SERVICE_ROLE_KEY is not configured');
+    console.error('   Please check your Render backend environment variables');
+    console.error('   Error:', error?.message);
+  } else {
+    console.error('🔥 INTERNAL ERROR:', error);
+  }
 
   logger.error('Unhandled Error:', {
     message: error?.message || 'Unknown error',
@@ -104,6 +128,7 @@ export const errorHandler = async (err, req, res, next) => {
     restaurantId: req?.restaurantId || req?.user?.restaurantId || null,
     role: req?.user?.role || '',
     statusCode,
+    isAdminClientError,
     timestamp: new Date().toISOString(),
   });
 
