@@ -3,7 +3,7 @@ import { API_BASE_URL, API_ROOT_URL, IS_LOCALHOST_API, RUNTIME_ENVIRONMENT } fro
 import { clearPortalSession, readPortalSession, savePortalSession } from '../utils/authStorage';
 import { PORTAL_LOGIN, canAccessPortal, getPortalKeyFromPathname, normalizePortalRole } from '../utils/portalRouting';
 import logger from '../utils/logger';
-import { getUserErrorMessage, isDeveloperConsoleContext, showToast } from '../utils/errorHandling';
+import { getUserErrorMessage, isDeveloperConsoleContext, showToast, handleError } from '../utils/errorHandling';
 
 const isDevelopmentHost =
   window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
@@ -376,7 +376,8 @@ api.interceptors.response.use(
       return api(originalRequest);
     }
 
-    const safeMessage = getUserErrorMessage(error);
+    // 🔧 Use enhanced error handler for better network error detection
+    const safeMessage = handleError(error);
 
     if (!isDeveloperConsoleContext()) {
       if (error.response?.data && typeof error.response.data === 'object') {

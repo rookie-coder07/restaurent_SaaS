@@ -17,6 +17,21 @@ const normalizeStatusCode = (err) => {
     return 401;
   }
   
+  // Check for rate limit errors
+  if (err.statusCode === 429 || statusCode === 429 || message.includes('rate limit')) {
+    return 429;
+  }
+  
+  // Check for duplicate/conflict errors
+  if (message.includes('unique constraint') || message.includes('already exists') || message.includes('duplicate') || err.statusCode === 409) {
+    return 409;
+  }
+  
+  // Check for validation errors
+  if (message.includes('invalid') || message.includes('required') || err.statusCode === 400) {
+    return 400;
+  }
+  
   // Check for admin client initialization errors (missing service role key)
   if (message.includes('admin client') || message.includes('service role key')) {
     // Return 503 Service Unavailable - backend infrastructure issue, not user error
@@ -41,10 +56,41 @@ const buildSafeMessage = (err, statusCode) => {
     return 'Backend configuration error. Please contact support. The server is unable to process admin operations.';
   }
 
+  // Specific error patterns - provide user-friendly messages
+  if (candidate.includes('duplicate') || candidate.includes('already exists')) {
+    return 'This item already exists. Please use a different value.';
+  }
+  
+  if (candidate.includes('foreign key')) {
+    return 'Cannot complete this action. Required data is missing or invalid.';
+  }
+  
+  if (candidate.includes('not found') || candidate.includes('does not exist')) {
+    return 'The item you are looking for does not exist.';
+  }
+  
+  if (candidate.includes('permission') || candidate.includes('denied')) {
+    return 'You do not have permission to perform this action.';
+  }
+  
+  if (candidate.includes('invalid input') || candidate.includes('validation')) {
+    return 'Please check your input and try again.';
+  }
+  
+  if (candidate.includes('network') || candidate.includes('connection')) {
+    return 'Network error. Please check your connection and try again.';
+  }
+  
+  if (candidate.includes('timeout')) {
+    return 'Request took too long. Please try again.';
+  }
+
+  // If message is technical, use default error message
   if (statusCode >= 500 || TECHNICAL_ERROR_PATTERN.test(candidate)) {
     return getDefaultErrorMessage(statusCode);
   }
 
+  // Return the safe message if it doesn't contain technical details
   return candidate;
 };
 
