@@ -344,27 +344,54 @@ export class AuthService {
       let user;
       let userError;
       
-      // For manager portal, use safe columns to avoid phone_number schema issues
-      const selectColumns = portalKey === 'manager' 
-        ? 'id, name, email, restaurant_id, role, status'
-        : '*';
-      
-      if (authUserId) {
-        ({ data: user, error: userError } = await supabase
-          .from('users')
-          .select(selectColumns)
-          .eq('id', authUserId)
-          .single());
-      }
+      // Wrap manager user lookup in try-catch to handle ANY schema/database errors gracefully
+      if (portalKey === 'manager') {
+        try {
+          // For manager portal, use safe columns to avoid phone_number schema issues
+          const selectColumns = 'id, name, email, restaurant_id, role, status';
+          
+          if (authUserId) {
+            ({ data: user, error: userError } = await supabase
+              .from('users')
+              .select(selectColumns)
+              .eq('id', authUserId)
+              .single());
+          }
 
-      // If not found by ID, try by email and prefer existing row (avoids ID mismatch failures)
-      if ((userError || !user) && email) {
-        logger.warn(`User not found by ID, searching by email: ${email}`);
-        ({ data: user, error: userError } = await supabase
-          .from('users')
-          .select(selectColumns)
-          .eq('email', email.toLowerCase())
-          .single());
+          // If not found by ID, try by email
+          if ((userError || !user) && email) {
+            logger.warn(`Manager not found by ID, searching by email: ${email}`);
+            ({ data: user, error: userError } = await supabase
+              .from('users')
+              .select(selectColumns)
+              .eq('email', email.toLowerCase())
+              .single());
+          }
+          
+        } catch (managerLookupError) {
+          logger.warn(`Manager lookup error (will retry with provisioning): ${managerLookupError.message}`);
+          user = null;
+          userError = managerLookupError;
+        }
+      } else {
+        // For other roles, use original logic with select('*')
+        if (authUserId) {
+          ({ data: user, error: userError } = await supabase
+            .from('users')
+            .select('*')
+            .eq('id', authUserId)
+            .single());
+        }
+
+        // If not found by ID, try by email and prefer existing row (avoids ID mismatch failures)
+        if ((userError || !user) && email) {
+          logger.warn(`User not found by ID, searching by email: ${email}`);
+          ({ data: user, error: userError } = await supabase
+            .from('users')
+            .select('*')
+            .eq('email', email.toLowerCase())
+            .single());
+        }
       }
 
       // Auto-provision user on first login if not found
