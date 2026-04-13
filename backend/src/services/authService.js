@@ -364,151 +364,14 @@ export class AuthService {
           .single());
       }
 
-      // User must exist - no auto-provisioning
-      // If user not found in DB, they're not registered yet
-
-      // Auto-provision user on first login if not found
-      console.log(`[DEBUG_MANAGER] Auto-provision check: userError=${!!userError}, user=${!!user}, authData?.user=${!!authData?.user}`);
+      // User must exist - auto-provision on first login if needed
+      // If user not found in DB, provision them automatically if auth succeeded
       if ((userError || !user) && authData?.user) {
         logger.warn(`Auto-provisioning user on first login: ${authData.user.id}`);
-        console.log(`[DEBUG_MANAGER] Entering auto-provisioning, portalKey=${portalKey}`);
         
-        // MANAGER-SPECIFIC SAFE PATH
-        // For managers, use simplified provisioning that doesn't require all fields
-        if (portalKey === 'manager') {
-          logger.info('Using manager-specific safe provisioning path');
-          console.log('[DEBUG_MANAGER] Manager-specific provisioning starting');
-          let provisioned = false;
-          
-          try {
-            // Find a restaurant to attach manager to
-            let restaurantId = null;
-            console.log('[DEBUG_MANAGER] Looking for first restaurant...');
-            const { data: ownerRestaurant, error: restaurantError } = await supabase
-              .from('restaurants')
-              .select('id')
-              .limit(1)
-              .maybeSingle();
-            
-            console.log('[DEBUG_MANAGER] Restaurant lookup result:', { found: !!ownerRestaurant, error: restaurantError?.message });
-            
-            if (ownerRestaurant?.id) {
-              restaurantId = ownerRestaurant.id;
-              console.log('[DEBUG_MANAGER] Using restaurant:', restaurantId);
-            }
-            
-            if (!restaurantId) {
-              console.log('[DEBUG_MANAGER] No restaurant found - allowing auth-only login');
-              logger.warn('No restaurant found for manager provisioning - login proceeds without DB record');
-              
-              // Allow login without DB record if no restaurant available
-              const accessToken = this.generateAccessToken(
-                authData.user.id,
-                authData.user.id, // Use user ID as fallback  
-                email,
-                ROLES.MANAGER
-              );
-              const refreshToken = this.generateRefreshToken(
-                authData.user.id,
-                authData.user.id,
-                email,
-                ROLES.MANAGER
-              );
-              await this.persistRefreshToken(refreshToken, authData.user.id, authData.user.id);
-
-              return {
-                accessToken,
-                refreshToken,
-                role: ROLES.MANAGER,
-                restaurantId: authData.user.id,
-                userId: authData.user.id,
-                redirectTo: 'restaurant-dashboard',
-              };
-            }
-
-            // Minimal manager user record - only required fields
-            const managerPayload = {
-              id: authData.user.id,
-              name: authData.user.user_metadata?.name || email.split('@')[0],
-              email: email.toLowerCase(),
-              restaurant_id: restaurantId,
-              role: ROLES.MANAGER,
-              status: 'active',
-            };
-            
-            console.log('[DEBUG_MANAGER] Manager payload:', { email: managerPayload.email, restaurantId, role: managerPayload.role });
-            logger.info('Creating manager user record with minimal fields', { email, restaurantId });
-            
-            const { data: newManager, error: managerError } = await supabase
-              .from('users')
-              .insert([managerPayload])
-              .select('id, name, email, restaurant_id, role, status')
-              .single();
-
-            console.log('[DEBUG_MANAGER] Manager insert result:', { success: !!newManager, hasError: !!managerError });
-            if (managerError) {
-              console.log('[DEBUG_MANAGER] Manager error details:', { code: managerError.code, message: managerError.message });
-            }
-
-            if (!managerError && newManager) {
-              console.log('[DEBUG_MANAGER] Manager successfully created:', { id: newManager?.id });
-              user = newManager;
-              provisioned = true;
-            } else if (managerError) {
-              console.log('[DEBUG_MANAGER] Manager insert failed, will attempt graceful fallback');
-              // Don't throw - will handle below
-            }
-            
-          } catch (managerProvisionError) {
-            console.log('[DEBUG_MANAGER] Manager provision exception caught:', { message: managerProvisionError.message });
-            logger.error(`Manager provisioning exception: ${managerProvisionError.message}`);
-          }
-          
-          // CRITICAL: Always allow manager to login if Supabase Auth succeeded
-          // Even if provisioning failed, auth succeeded means they're valid
-          if (!provisioned && authData?.user?.id) {
-            console.log('[DEBUG_MANAGER] Provisioning incomplete, falling back to auth-only login');
-            logger.warn('Allowing manager login without full DB provisioning - using Supabase Auth');
-            
-            // Find any restaurant to attach to
-            const { data: anyRestaurant } = await supabase
-              .from('restaurants')
-              .select('id')
-              .limit(1)
-              .maybeSingle();
-            
-            const restaurantId = anyRestaurant?.id || authData.user.id;
-            console.log('[DEBUG_MANAGER] Final fallback restaurant:', restaurantId);
-            
-            const accessToken = this.generateAccessToken(
-              authData.user.id,
-              restaurantId,
-              email,
-              ROLES.MANAGER
-            );
-            const refreshToken = this.generateRefreshToken(
-              authData.user.id,
-              restaurantId,
-              email,
-              ROLES.MANAGER
-            );
-            await this.persistRefreshToken(refreshToken, authData.user.id, restaurantId);
-
-            return {
-              accessToken,
-              refreshToken,
-              role: ROLES.MANAGER,
-              restaurantId,
-              userId: authData.user.id,
-              redirectTo: 'restaurant-dashboard',
-            };
-          }
-        }
-        
-        // EXISTING AUTO-PROVISIONING FOR OTHER ROLES (unchanged)
-
-        // For developer, allow null restaurant_id; else try to attach to any existing restaurant
+        // Find restaurant to attach user to
         let restaurantId = null;
+        
         if (portalKey !== 'developer') {
           const { data: ownerRestaurant } = await supabase
             .from('restaurants')
@@ -524,108 +387,39 @@ export class AuthService {
               .limit(1);
             restaurantId = anyRestaurant?.[0]?.id || null;
           }
-          if (!restaurantId) {
-            throw new Error('No restaurant found to attach staff account');
-          }
         }
 
-        const inferredRole =
-          portalKey === 'developer' ? ROLES.DEVELOPER
-          : portalKey === 'manager' ? ROLES.MANAGER
-          : ROLES.STAFF;
+        const inferredRole = normalizeRole(portalKey === 'developer' ? ROLES.DEVELOPER : portalKey === 'manager' ? ROLES.MANAGER : ROLES.STAFF);
 
-        let createError = null;
-        let newUser = null;
         const provisionPayload = {
           id: authData.user.id,
           name: authData.user.user_metadata?.name || email.split('@')[0],
           email: email.toLowerCase(),
           restaurant_id: restaurantId,
           role: inferredRole,
-          phone_number: null,
           status: 'active',
-          password_hash: await this.hashPassword(password),
         };
 
-        ({ data: newUser, error: createError } = await supabase
+        const { data: newUser, error: createError } = await supabase
           .from('users')
           .insert([provisionPayload])
-          .select()
-          .single());
-
-        // If phone_number column doesn't exist in schema, retry without it
-        if (createError && createError.message?.includes('phone_number')) {
-          logger.warn('phone_number column not available, retrying without it');
-          const { phone_number, ...payloadWithoutPhone } = provisionPayload;
-          ({ data: newUser, error: createError } = await supabase
-            .from('users')
-            .insert([payloadWithoutPhone])
-            .select('id, name, email, restaurant_id, role, status, password_hash')
-            .single());
-        }
-
-        // Retry with fallback restaurant if NOT NULL constraint hits (but NOT for developers)
-        if (createError && restaurantId === null && inferredRole !== ROLES.DEVELOPER) {
-          console.log('[AUTH_PROVISION] Retrying with fallback restaurant for non-developer role:', inferredRole);
-          const { data: anyRestaurant } = await supabase.from('restaurants').select('id').limit(1);
-          const fallbackRestaurantId = anyRestaurant?.[0]?.id || null;
-          if (fallbackRestaurantId) {
-            console.log('[AUTH_PROVISION] Using fallback restaurant:', fallbackRestaurantId);
-            ({ data: newUser, error: createError } = await supabase
-              .from('users')
-              .insert([{ ...provisionPayload, restaurant_id: fallbackRestaurantId }])
-              .select()
-              .single());
-            
-            // If phone_number column doesn't exist, retry without it
-            if (createError && createError.message?.includes('phone_number')) {
-              logger.warn('phone_number column not available, retrying without it');
-              const { phone_number, ...payloadWithoutPhone } = provisionPayload;
-              ({ data: newUser, error: createError } = await supabase
-                .from('users')
-                .insert([{ ...payloadWithoutPhone, restaurant_id: fallbackRestaurantId }])
-                .select('id, name, email, restaurant_id, role, status, password_hash')
-                .single());
-            }
-          }
-        } else if (createError && inferredRole === ROLES.DEVELOPER) {
-          console.log('[AUTH_PROVISION] Developer role attempted with null restaurant_id - NOT retrying with fallback');
-        }
+          .select('*')
+          .single();
 
         if (createError) {
-          logger.error(`Auto-provisioning failed: ${createError.message}`, { email, role: inferredRole, portal });
-          throw new Error(createError.message || 'Failed to create user profile');
+          logger.error(`Auto-provisioning failed: ${createError.message}`);
+          throw createError;
         }
+
         user = newUser;
+      } else if (userError || !user) {
+        // User not found AND auth failed
+        logger.warn(`Login failed for ${email}: ${authFailedMessage || 'User not found'}`);
+        throw new Error(authFailedMessage || 'Invalid email or password');
       }
 
       if (!user) {
-        console.log('[DEBUG_MANAGER] User not found at final check - debug state:', {
-          portalKey,
-          authUserId: !!authUserId,
-          userError: userError?.message || 'none',
-          authData_user: !!authData?.user,
-          userErrorOrNoUser: (userError || !user),
-          shouldHaveTriedProvisioning: (userError || !user) && !!authData?.user,
-        });
-        
-        // For manager: if auth failed (wrong password), return 401 instead of 500
-        if (portalKey === 'manager' && authFailedMessage) {
-          logger.warn(`Manager auth failed with credentials: ${authFailedMessage}`);
-          throw new Error(authFailedMessage); // Will be caught and return 401
-        }
-        
-        const debugError = new Error('User not found in profile store');
-        debugError.debugState = {
-          portalKey,
-          step: 'final_user_check',
-          authUserId: !!authUserId,
-          userError: userError?.message,
-          authDataUser: !!authData?.user,
-          userLookupFailed: !!userError,
-          provisionningShouldHaveOccurred: (userError || !user) && !!authData?.user,
-        };
-        throw debugError;
+        throw new Error('User not found in profile store');
       }
 
       if (!user.role) {
