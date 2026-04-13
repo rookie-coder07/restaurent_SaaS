@@ -1068,7 +1068,6 @@ export const bulkUploadMenu = asyncHandler(async (req, res) => {
         userId: req.user?.userId,
       });
 
-      let insertedCount = 0;
       const insertColumns = 'name, price, category_id, restaurant_id, description, image_url, preparation_time, tags, status';
       const insertPlaceholders = validItems.map((_, idx) => {
         const base = idx * 9;
@@ -1213,9 +1212,6 @@ export const bulkUploadMenu = asyncHandler(async (req, res) => {
       userId: req.user?.userId,
       fileName: req.file?.originalname,
       errorType: typeof error,
-      isAxiosError: error?.isAxiosError || false,
-      responseStatus: error?.response?.status,
-      supabaseError: error?.status || error?.code,
     };
     
     logger.error('[BULK_UPLOAD] ❌ UNCAUGHT ERROR IN BULK UPLOAD', errorDetails);
@@ -1252,7 +1248,7 @@ export const bulkUploadMenu = asyncHandler(async (req, res) => {
       return sendError(res, 413, 'File too large to process. Maximum 5MB allowed.');
     }
     
-    // Check for Supabase errors
+    // Check for database constraint errors
     if (error?.code === '23505' || error?.message?.includes('duplicate')) {
       return sendError(res, 409, 'Duplicate key error - some items may already exist in the system', {
         details: 'Please check your data and try again',
