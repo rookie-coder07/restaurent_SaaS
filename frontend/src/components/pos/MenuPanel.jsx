@@ -84,11 +84,16 @@ function MenuPanel({
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-2 md:grid-cols-3">
           {(categories.find((category) => category.id === activeCategoryId)?.items || []).map((item) => {
             const quantity = getItemQuantity(item.id);
+            const isSelected = quantity > 0;
 
             return (
               <div
                 key={item.id}
-                className="flex min-h-[7.5rem] flex-col justify-between rounded-[1rem] border border-[var(--border-color)] bg-[linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.02))] p-2 transition hover:border-[var(--color-primary)] hover:bg-[var(--color-primary-soft)]"
+                className={`flex min-h-[7.5rem] flex-col justify-between rounded-[1rem] border-2 transition ${
+                  isSelected
+                    ? 'border-emerald-500 bg-emerald-500/10 shadow-lg shadow-emerald-500/20'
+                    : 'border-[var(--border-color)] bg-[linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.02))] hover:border-[var(--color-primary)] hover:bg-[var(--color-primary-soft)]'
+                } p-2`}
               >
                 <button type="button" onClick={() => onAddItem(item)} className="text-left">
                   <div className="p-1 text-sm">
@@ -100,7 +105,7 @@ function MenuPanel({
                 <div className="mt-2 flex items-center justify-end gap-2">
 
                   {quantity > 0 ? (
-                    <div className="flex items-center gap-1 rounded-xl bg-[var(--bg-card)] p-1">
+                    <div className="flex items-center gap-1 rounded-xl bg-emerald-600/20 p-1">
                       <button
                         type="button"
                         onClick={() => onDecreaseItem(item.id)}
@@ -109,7 +114,7 @@ function MenuPanel({
                       >
                         -
                       </button>
-                      <span className="min-w-[1.5rem] text-center text-sm font-bold text-[var(--text-primary)]">
+                      <span className="min-w-[1.5rem] text-center text-sm font-bold text-emerald-400">
                         {quantity}
                       </span>
                       <button
@@ -125,7 +130,7 @@ function MenuPanel({
                     <button
                       type="button"
                       onClick={() => onAddItem(item)}
-                      className="inline-flex items-center justify-center rounded-lg bg-emerald-600 px-2 py-1 text-xs font-bold text-white"
+                      className="inline-flex items-center justify-center rounded-lg bg-emerald-600 px-2 py-1 text-xs font-bold text-white transition hover:bg-emerald-500"
                       aria-label={`Add ${item.name}`}
                     >
                       +

@@ -1779,7 +1779,7 @@ export default function POS() {
                 billingMessage={!canManageBilling ? 'Billing will be handled by manager.' : ''}
                 kitchenMessage={kitchenMessage}
                 isSubmitDisabled={isLoadingTableOrder}
-                isSendToKitchenDisabled={!selectedTable || cartItems.length === 0 || isLoadingTableOrder || !hasPendingKitchenItems}
+                isSendToKitchenDisabled={cartItems.length === 0 || isLoadingTableOrder || !hasPendingKitchenItems}
                 isSettleDisabled={isLoadingTableOrder || (paymentMethod === 'cash' && shortfallAmount > 0)}
               />
             </div>
@@ -1789,7 +1789,7 @@ export default function POS() {
           <button
             type="button"
             onClick={handleSendToKitchen}
-            disabled={!selectedTable || cartItems.length === 0 || isLoadingTableOrder || !hasPendingKitchenItems || isSubmitting || isSendingToKitchen || isSettling}
+            disabled={cartItems.length === 0 || isLoadingTableOrder || !hasPendingKitchenItems || isSubmitting || isSendingToKitchen || isSettling}
             className="w-full rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-bold uppercase tracking-[0.12em] text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {isSendingToKitchen ? 'Placing...' : 'Place KOT'}
