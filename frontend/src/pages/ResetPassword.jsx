@@ -188,7 +188,17 @@ export default function ResetPassword() {
         console.error('[ResetPassword] Sign out error:', err);
       });
       
-      navigate('/admin/login', { replace: true });
+      // Determine appropriate login page based on current pathname
+      let loginPage = '/admin/login';
+      if (location.pathname.includes('/manager')) {
+        loginPage = '/manager/login';
+      } else if (location.pathname.includes('/developer')) {
+        loginPage = '/developer/login';
+      } else if (location.pathname.includes('/pos')) {
+        loginPage = '/pos/login';
+      }
+      
+      navigate(loginPage, { replace: true });
     } catch (unexpectedError) {
       console.error('[ResetPassword] Unexpected error:', unexpectedError);
       setIsSubmitting(false);
@@ -197,7 +207,17 @@ export default function ResetPassword() {
   };
 
   const handleResendEmail = async () => {
-    navigate('/admin/login', { replace: true });
+    // Determine appropriate login page based on current pathname
+    let loginPage = '/admin/login';
+    if (location.pathname.includes('/manager')) {
+      loginPage = '/manager/login';
+    } else if (location.pathname.includes('/developer')) {
+      loginPage = '/developer/login';
+    } else if (location.pathname.includes('/pos')) {
+      loginPage = '/pos/login';
+    }
+    
+    navigate(loginPage, { replace: true });
   };
 
   return (
@@ -205,10 +225,31 @@ export default function ResetPassword() {
       <div className="mx-auto flex min-h-[calc(100vh-3rem)] w-full max-w-5xl items-center justify-center">
         <Card className="w-full max-w-xl">
           <div className="mx-auto w-full max-w-md">
-            <Link to="/admin/login" className="inline-flex items-center gap-2 text-sm font-semibold text-[var(--color-primary)]">
-              <ArrowLeft className="h-4 w-4" />
-              Back to Admin Login
-            </Link>
+            {(() => {
+              let backLink = '/';
+              let backText = 'Back to Home';
+              
+              if (location.pathname.includes('/manager')) {
+                backLink = '/manager/login';
+                backText = 'Back to Manager Login';
+              } else if (location.pathname.includes('/developer')) {
+                backLink = '/developer/login';
+                backText = 'Back to Developer Login';
+              } else if (location.pathname.includes('/pos')) {
+                backLink = '/pos/login';
+                backText = 'Back to Staff Login';
+              } else if (location.pathname.includes('/admin')) {
+                backLink = '/admin/login';
+                backText = 'Back to Admin Login';
+              }
+              
+              return (
+                <Link to={backLink} className="inline-flex items-center gap-2 text-sm font-semibold text-[var(--color-primary)]">
+                  <ArrowLeft className="h-4 w-4" />
+                  {backText}
+                </Link>
+              );
+            })()}
 
             <div className="mb-6">
               <div className="mt-5 inline-flex items-center gap-2 rounded-full bg-[var(--color-primary-soft)] px-3 py-1 text-sm font-semibold text-[var(--color-primary)]">

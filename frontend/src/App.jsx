@@ -11,7 +11,6 @@ const HomeAccess = lazy(() => import('./pages/HomeAccess'));
 const Login = lazy(() => import('./pages/Login'));
 const PosLogin = lazy(() => import('./pages/pos/PosLogin'));
 const ResetPassword = lazy(() => import('./pages/ResetPassword'));
-const StaffPasswordResetOTP = lazy(() => import('./pages/StaffPasswordResetOTP'));
 const Register = lazy(() => import('./pages/Register'));
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const Notifications = lazy(() => import('./pages/Notifications'));
@@ -129,13 +128,15 @@ function App() {
           <Route path="/" element={withSuspense(<HomeAccess />)} />
           <Route path="/login" element={<Navigate to="/" replace />} />
           <Route path="/admin/login" element={withSuspense(<Login portal="admin" />)} />
-          <Route path="/reset-password" element={withSuspense(<ResetPassword />)} />
-          <Route path="/admin/reset-password" element={withSuspense(<ResetPassword />)} />
           <Route path="/manager/login" element={withSuspense(<Login portal="admin" initialModeKey="manager" />)} />
           <Route path="/developer/login" element={withSuspense(<Login portal="admin" initialModeKey="developer" />)} />
+          <Route path="/reset-password" element={withSuspense(<ResetPassword />)} />
+          <Route path="/admin/reset-password" element={withSuspense(<ResetPassword />)} />
+          <Route path="/manager/reset-password" element={withSuspense(<ResetPassword />)} />
+          <Route path="/developer/reset-password" element={withSuspense(<ResetPassword />)} />
           <Route path="/pos/login" element={withSuspense(<PosLogin />)} />
           <Route path="/staff/login" element={withSuspense(<PosLogin />)} />
-          <Route path="/pos/reset-password" element={withSuspense(<StaffPasswordResetOTP />)} />
+          <Route path="/pos/reset-password" element={withSuspense(<ResetPassword />)} />
           <Route path="/register" element={withSuspense(<Register />)} />
           <Route path="/menu" element={withSuspense(<CustomerMenu />)} />
           <Route path="/order-status" element={withSuspense(<OrderStatus />)} />

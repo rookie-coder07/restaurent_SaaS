@@ -72,7 +72,8 @@ export default function Login({ portal = 'admin', initialModeKey = '' }) {
     () => config.modes.find((mode) => mode.key === selectedModeKey) || config.modes[0],
     [config.modes, selectedModeKey]
   );
-  const canResetAdminPassword = portal === 'admin' && !selectedMode?.isStaff && selectedModeKey === 'owner';
+  // Allow all admin portal users to reset password (owner, manager, developer)
+  const canResetPassword = portal === 'admin' || portal === 'pos';
 
   useEffect(() => {
     setSelectedModeKey(initialModeKey || config.modes[0]?.key || 'owner');
@@ -174,9 +175,22 @@ export default function Login({ portal = 'admin', initialModeKey = '' }) {
 
     // Use environment-based app URL (critical for production compatibility)
     const APP_URL = import.meta.env.VITE_APP_URL || window.location.origin;
-    const redirectTo = `${APP_URL}/reset-password`;
     
-    console.log('[Forgot Password] Using redirect URL:', redirectTo);
+    // Construct role-specific reset URL to ensure proper redirect after reset
+    let resetPath = '/reset-password';
+    if (portal === 'admin') {
+      if (selectedModeKey === 'manager') {
+        resetPath = '/manager/reset-password';
+      } else if (selectedModeKey === 'developer') {
+        resetPath = '/developer/reset-password';
+      } else {
+        resetPath = '/admin/reset-password';
+      }
+    }
+    
+    const redirectTo = `${APP_URL}${resetPath}`;
+    
+    console.log('[Forgot Password] Using redirect URL:', redirectTo, { role: selectedModeKey });
     
     try {
       const { error, data } = await supabase.auth.resetPasswordForEmail(emailToReset, {
@@ -348,7 +362,7 @@ export default function Login({ portal = 'admin', initialModeKey = '' }) {
                 {errors.password ? <p className="mt-2 text-sm text-red-500">{errors.password}</p> : null}
               </div>
 
-              {canResetAdminPassword || portal === 'pos' ? (
+              {canResetPassword ? (
                 <div className="flex items-center justify-end">
                   <button
                     type="button"
@@ -374,91 +388,103 @@ export default function Login({ portal = 'admin', initialModeKey = '' }) {
               </Button>
             </form>
 
-            {canResetAdminPassword && showForgotPassword ? (
-              <form onSubmit={handleForgotPassword} className="mt-5 rounded-[1.5rem] border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-4">
-                <p className="text-sm font-semibold text-[var(--color-text)]">Reset admin password</p>
-                <p className="mt-1 text-sm text-[var(--color-text-muted)]">
-                  Enter your admin email to receive a secure reset link.
-                </p>
-                
-                <div className="mt-4">
-                  <Input
-                    label="Admin Email"
-                    type="email"
-                    name="forgot-email"
-                    autoComplete="email"
-                    value={forgotEmail}
-                    onChange={(e) => setForgotEmail(e.target.value)}
-                    placeholder="owner@restaurant.com"
-                  />
+            {canResetPassword && showForgotPassword ? (
+              <form onSubmit={handleForgotPassword} className="mt-5 rounded-[1.5rem] border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-5 space-y-4">
+                <div>
+                  <p className="text-sm font-semibold text-[var(--color-text)]">
+                    Reset {selectedModeKey === 'manager' ? 'manager' : selectedModeKey === 'developer' ? 'developer' : selectedModeKey === 'staff' ? 'staff' : 'account'} password
+                  </p>
+                  <p className="mt-1 text-sm text-[var(--color-text-muted)]">
+                    Enter your email to receive a secure password reset link.
+                  </p>
                 </div>
-                
+
+                {forgotPasswordState.error ? (
+                  <div className="rounded-lg border border-red-200 bg-red-50 p-3">
+                    <p className="text-sm font-medium text-red-700">{forgotPasswordState.error}</p>
+                  </div>
+                ) : null}
+
+                {forgotPasswordState.success ? (
+                  <div className="rounded-lg border border-green-200 bg-green-50 p-3">
+                    <p className="text-sm font-medium text-green-700">{forgotPasswordState.success}</p>
+                  </div>
+                ) : null}
+
                 {forgotCooldown > 0 ? (
-                  <p className="mt-3 text-xs font-medium text-[var(--color-text-muted)]">
-                    You can request another reset link in {forgotCooldown} seconds.
+                  <p className="text-xs font-medium text-[var(--color-text-muted)]">
+                    ⏱️ You can request another reset link in {forgotCooldown} seconds.
                   </p>
                 ) : null}
-                
-                <div className="mt-4 flex flex-col-reverse gap-3 sm:flex-row">
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    className="w-full sm:flex-1"
-                    onClick={() => {
-                      setShowForgotPassword(false);
-                      setForgotPasswordState({
-                        isLoading: false,
-                        error: '',
-                        success: '',
-                      });
-                    }}
-                  >
-                    Cancel
-                  </Button>
-                  <Button
-                    type="submit"
-                    className="w-full sm:flex-1"
-                    disabled={forgotPasswordState.isLoading || submittingReset || forgotCooldown > 0}
-                  >
-                    {forgotPasswordState.isLoading || submittingReset ? <Loader className="h-4 w-4 animate-spin" /> : null}
-                    {forgotPasswordState.isLoading || submittingReset
-                      ? 'Sending...'
-                      : forgotCooldown > 0
-                        ? `Retry in ${forgotCooldown}s`
-                        : 'Send Reset Link'}
-                  </Button>
-                </div>
-              </form>
-            ) : portal === 'pos' && showForgotPassword ? (
-              <div className="mt-5 rounded-[1.5rem] border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-4">
-                <p className="text-sm font-semibold text-[var(--color-text)]">Reset your password</p>
-                <p className="mt-1 text-sm text-[var(--color-text-muted)]">
-                  You can reset your password using OTP sent to your email.
-                </p>
-                
-                <div className="mt-4 flex flex-col-reverse gap-3 sm:flex-row">
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    className="w-full sm:flex-1"
-                    onClick={() => {
-                      setShowForgotPassword(false);
-                      setForgotPasswordState({
-                        isLoading: false,
-                        error: '',
-                        success: '',
-                      });
-                    }}
-                  >
-                    Cancel
-                  </Button>
-                  <Link to="/pos/reset-password" className="w-full sm:flex-1">
-                    <Button type="button" className="w-full">
-                      Reset via OTP
+
+                {!forgotPasswordState.success ? (
+                  <>
+                    <div>
+                      <Input
+                        label="Email"
+                        type="email"
+                        name="forgot-email"
+                        autoComplete="email"
+                        value={forgotEmail}
+                        onChange={(e) => setForgotEmail(e.target.value)}
+                        placeholder={`${selectedModeKey === 'manager' ? 'manager' : selectedModeKey === 'developer' ? 'developer' : selectedModeKey === 'staff' ? 'staff' : 'owner'}@restaurant.com`}
+                        disabled={forgotPasswordState.isLoading || submittingReset || forgotCooldown > 0}
+                      />
+                    </div>
+
+                    <div className="flex flex-col-reverse gap-3 sm:flex-row">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        className="w-full sm:flex-1"
+                        onClick={() => {
+                          setShowForgotPassword(false);
+                          setForgotEmail('');
+                          setForgotPasswordState({
+                            isLoading: false,
+                            error: '',
+                            success: '',
+                          });
+                        }}
+                        disabled={forgotPasswordState.isLoading || submittingReset || forgotCooldown > 0}
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        type="submit"
+                        className="w-full sm:flex-1"
+                        disabled={forgotPasswordState.isLoading || submittingReset || forgotCooldown > 0 || !forgotEmail.trim()}
+                      >
+                        {forgotPasswordState.isLoading || submittingReset ? <Loader className="h-4 w-4 animate-spin" /> : null}
+                        {forgotPasswordState.isLoading || submittingReset
+                          ? 'Sending...'
+                          : forgotCooldown > 0
+                          ? `Retry in ${forgotCooldown}s`
+                          : 'Send Reset Link'}
+                      </Button>
+                    </div>
+                  </>
+                ) : (
+                  <div className="flex flex-col-reverse gap-3 sm:flex-row">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      className="w-full sm:flex-1"
+                      onClick={() => {
+                        setShowForgotPassword(false);
+                        setForgotEmail('');
+                        setForgotPasswordState({
+                          isLoading: false,
+                          error: '',
+                          success: '',
+                        });
+                      }}
+                    >
+                      Back to Login
                     </Button>
-                  </Link>
-                </div>
-              </div>
+                  </div>
+                )}
+              </form>
             ) : null}
 
             {portal === 'admin' && selectedModeKey === 'owner' ? (

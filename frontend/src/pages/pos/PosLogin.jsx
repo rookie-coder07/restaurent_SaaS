@@ -1,10 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Eye, EyeOff, Loader, ArrowLeft, ShieldCheck } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
 import { getValidPortalSession } from '../../utils/authStorage';
 import { useAuthStore } from '../../context/authStore';
 import { validateEmail } from '../../utils/validators';
+import supabase from '../../config/supabase';
 import Card from '../../components/common/Card';
 import Input from '../../components/common/Input';
 import Button from '../../components/common/Button';
@@ -21,6 +22,15 @@ export default function PosLogin() {
   const [showPassword, setShowPassword] = useState(false);
   const [errors, setErrors] = useState({});
   const [showForgotPassword, setShowForgotPassword] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [forgotPasswordState, setForgotPasswordState] = useState({
+    isLoading: false,
+    error: '',
+    success: '',
+  });
+  const [submittingReset, setSubmittingReset] = useState(false);
+  const [forgotCooldown, setForgotCooldown] = useState(0);
+  const resetRequestInProgressRef = useRef(false);
 
   // Sync auth store error to display
   useEffect(() => {
@@ -33,6 +43,13 @@ export default function PosLogin() {
   useEffect(() => {
     setError(null);
   }, [showForgotPassword, setError]);
+
+  // Handle cooldown timer
+  useEffect(() => {
+    if (forgotCooldown <= 0) return;
+    const timer = setTimeout(() => setForgotCooldown((prev) => prev - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [forgotCooldown]);
 
   // After successful login, monitor activePortal to confirm transition
   useEffect(() => {
@@ -58,6 +75,119 @@ export default function PosLogin() {
     const success = await login(email, password, 'staff', 'pos');
     if (success) {
       // ActivePortal effect above will trigger navigation
+    }
+  };
+
+  const handleForgotPassword = async (event) => {
+    event.preventDefault();
+
+    // CRITICAL: Prevent duplicate API calls
+    if (resetRequestInProgressRef.current) {
+      console.warn('[POS Forgot Password] Request already in progress, ignoring duplicate call');
+      return;
+    }
+
+    // Guard against rapid re-clicks
+    if (forgotCooldown > 0 || submittingReset) {
+      console.warn('[POS Forgot Password] In cooldown or already submitting, ignoring click');
+      return;
+    }
+
+    const emailToReset = String(forgotEmail || '').trim().toLowerCase();
+    if (!validateEmail(emailToReset)) {
+      console.log('[POS Forgot Password] Invalid email:', emailToReset);
+      setForgotPasswordState({
+        isLoading: false,
+        error: 'Enter a valid staff email address.',
+        success: '',
+      });
+      return;
+    }
+
+    // Set the ref FIRST to block any duplicate calls
+    resetRequestInProgressRef.current = true;
+    setSubmittingReset(true);
+    setForgotPasswordState({
+      isLoading: true,
+      error: '',
+      success: '',
+    });
+
+    console.log('[POS Forgot Password] Initiating password reset request for:', emailToReset);
+
+    // Use environment-based app URL
+    const APP_URL = import.meta.env.VITE_APP_URL || window.location.origin;
+    const redirectTo = `${APP_URL}/reset-password`;
+
+    console.log('[POS Forgot Password] Using redirect URL:', redirectTo);
+
+    try {
+      const { error, data } = await supabase.auth.resetPasswordForEmail(emailToReset, {
+        redirectTo,
+      });
+
+      console.log('[POS Forgot Password] API Response:', { error: error?.message, hasData: !!data });
+
+      if (error) {
+        const message = error.message || 'Unable to send reset link right now.';
+        const status = error.status || 0;
+
+        const isRateLimit = message.toLowerCase().includes('rate limit') || status === 429;
+        const isSmtpError = status === 500 || message.toLowerCase().includes('smtp') || message.toLowerCase().includes('email service');
+
+        if (isRateLimit) {
+          console.warn('[POS Forgot Password] Rate limit detected, setting 60s cooldown');
+          setForgotCooldown(60);
+        }
+
+        if (isSmtpError) {
+          console.error('[POS Forgot Password] SMTP/Email service error detected:', {
+            status,
+            message,
+            fullError: error,
+          });
+        }
+
+        console.error('[POS Forgot Password] Error:', {
+          message,
+          status,
+          isRateLimit,
+          isSmtpError,
+          fullError: error,
+        });
+
+        setForgotPasswordState({
+          isLoading: false,
+          error: isRateLimit
+            ? '⏱️ Too many reset requests. Please wait 60 seconds before retrying.'
+            : isSmtpError
+            ? '📧 Email service temporarily unavailable. Please try again in a few moments.'
+            : message,
+          success: '',
+        });
+        return;
+      }
+
+      console.log('[POS Forgot Password] Success! Setting 60s cooldown and showing success message');
+      setForgotPasswordState({
+        isLoading: false,
+        error: '',
+        success: 'Reset link sent to your email. Check your inbox.',
+      });
+
+      setForgotCooldown(60);
+      setSubmittingReset(false);
+    } catch (unexpectedError) {
+      console.error('[POS Forgot Password] Unexpected error:', unexpectedError);
+      setForgotPasswordState({
+        isLoading: false,
+        error: `Something went wrong: ${unexpectedError?.message || 'Unknown error'}`,
+        success: '',
+      });
+      setSubmittingReset(false);
+    } finally {
+      // IMPORTANT: Clear the ref ONLY after all state updates are complete
+      resetRequestInProgressRef.current = false;
     }
   };
 
@@ -153,29 +283,81 @@ export default function PosLogin() {
 
             {/* Forgot Password Modal */}
             {showForgotPassword && (
-              <div className="mt-5 rounded-[1.5rem] border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-4">
-                <p className="text-sm font-semibold text-[var(--color-text)]">Reset your password</p>
-                <p className="mt-1 text-sm text-[var(--color-text-muted)]">
-                  You can reset your password using OTP sent to your email.
-                </p>
-                
-                <div className="mt-4 flex flex-col-reverse gap-3 sm:flex-row">
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    className="w-full sm:flex-1"
-                    onClick={() => {
-                      setShowForgotPassword(false);
-                    }}
-                  >
-                    Cancel
-                  </Button>
-                  <Link to="/pos/reset-password" className="w-full sm:flex-1">
-                    <Button type="button" className="w-full">
-                      Reset via OTP
-                    </Button>
-                  </Link>
+              <div className="mt-5 rounded-[1.5rem] border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-5 space-y-4">
+                <div>
+                  <p className="text-sm font-semibold text-[var(--color-text)]">Reset your password</p>
+                  <p className="mt-1 text-sm text-[var(--color-text-muted)]">
+                    Enter your email to receive a password reset link.
+                  </p>
                 </div>
+
+                {forgotPasswordState.error && (
+                  <div className="rounded-lg border border-red-200 bg-red-50 p-3">
+                    <p className="text-sm font-medium text-red-700">{forgotPasswordState.error}</p>
+                  </div>
+                )}
+
+                {forgotPasswordState.success && (
+                  <div className="rounded-lg border border-green-200 bg-green-50 p-3">
+                    <p className="text-sm font-medium text-green-700">{forgotPasswordState.success}</p>
+                  </div>
+                )}
+
+                {!forgotPasswordState.success ? (
+                  <form onSubmit={handleForgotPassword} className="space-y-3">
+                    <Input
+                      label="Email"
+                      type="email"
+                      value={forgotEmail}
+                      onChange={(e) => setForgotEmail(e.target.value)}
+                      placeholder="staff@restaurant.com"
+                      disabled={forgotPasswordState.isLoading || forgotCooldown > 0}
+                    />
+
+                    <div className="flex flex-col-reverse gap-3 sm:flex-row">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        className="w-full sm:flex-1"
+                        onClick={() => {
+                          setShowForgotPassword(false);
+                          setForgotEmail('');
+                          setForgotPasswordState({ isLoading: false, error: '', success: '' });
+                        }}
+                        disabled={forgotPasswordState.isLoading || forgotCooldown > 0}
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        type="submit"
+                        className="w-full sm:flex-1"
+                        disabled={forgotPasswordState.isLoading || forgotCooldown > 0 || !forgotEmail.trim()}
+                      >
+                        {forgotPasswordState.isLoading ? <Loader className="h-4 w-4 animate-spin" /> : null}
+                        {forgotPasswordState.isLoading
+                          ? 'Sending...'
+                          : forgotCooldown > 0
+                          ? `Wait ${forgotCooldown}s`
+                          : 'Send Reset Link'}
+                      </Button>
+                    </div>
+                  </form>
+                ) : (
+                  <div className="flex flex-col-reverse gap-3 sm:flex-row">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      className="w-full sm:flex-1"
+                      onClick={() => {
+                        setShowForgotPassword(false);
+                        setForgotEmail('');
+                        setForgotPasswordState({ isLoading: false, error: '', success: '' });
+                      }}
+                    >
+                      Close
+                    </Button>
+                  </div>
+                )}
               </div>
             )}
           </div>
