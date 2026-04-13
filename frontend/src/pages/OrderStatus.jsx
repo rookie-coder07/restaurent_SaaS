@@ -1,5 +1,5 @@
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useApi } from '../hooks/useApi';
 import { customerAPI } from '../services/apiEndpoints';
 import { Clock, Check, AlertCircle, ChefHat, Loader, UserCheck } from 'lucide-react';
@@ -31,7 +31,7 @@ export default function OrderStatus() {
   const orderId = searchParams.get('orderId');
   const tableNumber = searchParams.get('table');
 
-  // ✅ FIX 2: Guard against undefined orderId
+  // ✅ FIX 1: Guard against undefined orderId
   if (!orderId) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-6">
@@ -50,32 +50,52 @@ export default function OrderStatus() {
     );
   }
 
-  // Memoize the API function to prevent infinite re-renders
+  // ✅ FIX 2: Stable polling interval state
+  const [pollingInterval, setPollingInterval] = useState(null);
+
+  // ✅ FIX 3: Memoize the API function to prevent infinite re-renders
   const fetchOrder = useCallback(() => {
     return customerAPI.getOrder(orderId, tableNumber);
   }, [orderId, tableNumber]);
 
-  const [pollingInterval, setPollingInterval] = useState(2000); // Poll every 2 seconds
-  const { data: order = {}, loading, error, execute: refetchOrder } = useApi(
+  const { data: order = {}, loading, error } = useApi(
     fetchOrder,
-    [orderId, tableNumber]
+    [orderId, tableNumber],
+    { enableCache: true, cacheTTL: 3000 } // Cache for 3 seconds to avoid duplicate calls
   );
 
-  // Auto-refetch order status
-  useEffect(() => {
-    const interval = setInterval(() => {
-      refetchOrder();
-    }, pollingInterval);
-
-    return () => clearInterval(interval);
-  }, [pollingInterval, refetchOrder]);
-
-  // Switch to slower polling after order is ready
-  useEffect(() => {
+  // ✅ FIX 4: Determine polling interval based on order status
+  const effectivePollingInterval = useMemo(() => {
     if (order?.status === 'ready' || order?.status === 'served' || order?.status === 'completed') {
-      setPollingInterval(5000);
+      return 10000; // Slower polling (10s) when order is complete
     }
+    return 3000; // Faster polling (3s) while order is being prepared
   }, [order?.status]);
+
+  // ✅ FIX 5: Use effect for polling with proper cleanup and stability
+  useEffect(() => {
+    let intervalId;
+    let isActive = true;
+
+    if (order?.id && effectivePollingInterval) {
+      // Set up polling interval
+      intervalId = setInterval(async () => {
+        if (!isActive) return;
+        try {
+          await customerAPI.getOrder(orderId, tableNumber);
+        } catch (err) {
+          // Error handled by useApi hook
+        }
+      }, effectivePollingInterval);
+    }
+
+    return () => {
+      isActive = false;
+      if (intervalId) {
+        clearInterval(intervalId);
+      }
+    };
+  }, [effectivePollingInterval, order?.id, orderId, tableNumber]);
 
   if (loading && !order?.id) {
     return (

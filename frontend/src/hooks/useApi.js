@@ -1,8 +1,9 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { useAuthStore } from '../context/authStore';
 import { getUserErrorMessage, showToast } from '../utils/errorHandling';
+import { apiCache } from '../utils/apiCache';
 
-export const useApi = (apiFunction, deps = []) => {
+export const useApi = (apiFunction, deps = [], { enableCache = true, cacheTTL = 5 * 60 * 1000 } = {}) => {
   const restaurantId = useAuthStore((state) => state.restaurantId);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -10,10 +11,18 @@ export const useApi = (apiFunction, deps = []) => {
   const apiFunctionRef = useRef(apiFunction);
   const activeRequestRef = useRef(0);
   const inFlightPromiseRef = useRef(null);
+  const cacheKeyRef = useRef(null);
 
   useEffect(() => {
     apiFunctionRef.current = apiFunction;
   }, [apiFunction]);
+
+  // Generate cache key from dependencies
+  useEffect(() => {
+    if (enableCache && deps.length > 0) {
+      cacheKeyRef.current = `api:${JSON.stringify(deps)}`;
+    }
+  }, [enableCache, deps]);
 
   useEffect(() => {
     setData(null);
@@ -23,6 +32,20 @@ export const useApi = (apiFunction, deps = []) => {
 
   const execute = useCallback(
     async (...args) => {
+      const cacheKey = cacheKeyRef.current;
+
+      // Check cache first if enabled
+      if (enableCache && cacheKey) {
+        const cachedData = apiCache.get(cacheKey);
+        if (cachedData) {
+          setData(cachedData);
+          setError(null);
+          setLoading(false);
+          return cachedData;
+        }
+      }
+
+      // Return in-flight promise if one exists
       if (inFlightPromiseRef.current) {
         return inFlightPromiseRef.current;
       }
@@ -39,6 +62,10 @@ export const useApi = (apiFunction, deps = []) => {
           const result = response.data?.data || response;
           if (activeRequestRef.current === requestId) {
             setData(result);
+            // Cache the result if enabled
+            if (enableCache && cacheKey) {
+              apiCache.set(cacheKey, result, cacheTTL);
+            }
           }
           return result;
         } catch (err) {
@@ -68,7 +95,7 @@ export const useApi = (apiFunction, deps = []) => {
         }
       }
     },
-    []
+    [enableCache, cacheTTL]
   );
 
   useEffect(() => {
