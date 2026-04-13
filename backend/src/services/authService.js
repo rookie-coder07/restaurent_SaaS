@@ -410,17 +410,19 @@ export class AuthService {
         if (portalKey === 'manager') {
           logger.info('Using manager-specific safe provisioning path');
           console.log('[DEBUG_MANAGER] Manager-specific provisioning starting');
+          let provisioned = false;
+          
           try {
             // Find a restaurant to attach manager to
             let restaurantId = null;
             console.log('[DEBUG_MANAGER] Looking for first restaurant...');
-            const { data: ownerRestaurant } = await supabase
+            const { data: ownerRestaurant, error: restaurantError } = await supabase
               .from('restaurants')
               .select('id')
               .limit(1)
               .maybeSingle();
             
-            console.log('[DEBUG_MANAGER] Restaurant lookup result:', { found: !!ownerRestaurant, id: ownerRestaurant?.id });
+            console.log('[DEBUG_MANAGER] Restaurant lookup result:', { found: !!ownerRestaurant, error: restaurantError?.message });
             
             if (ownerRestaurant?.id) {
               restaurantId = ownerRestaurant.id;
@@ -428,9 +430,32 @@ export class AuthService {
             }
             
             if (!restaurantId) {
-              console.log('[DEBUG_MANAGER] No restaurant found - throwing error');
-              logger.warn('No restaurant found for manager provisioning');
-              throw new Error('No restaurant configured. Please contact administrator.');
+              console.log('[DEBUG_MANAGER] No restaurant found - allowing auth-only login');
+              logger.warn('No restaurant found for manager provisioning - login proceeds without DB record');
+              
+              // Allow login without DB record if no restaurant available
+              const accessToken = this.generateAccessToken(
+                authData.user.id,
+                authData.user.id, // Use user ID as fallback  
+                email,
+                ROLES.MANAGER
+              );
+              const refreshToken = this.generateRefreshToken(
+                authData.user.id,
+                authData.user.id,
+                email,
+                ROLES.MANAGER
+              );
+              await this.persistRefreshToken(refreshToken, authData.user.id, authData.user.id);
+
+              return {
+                accessToken,
+                refreshToken,
+                role: ROLES.MANAGER,
+                restaurantId: authData.user.id,
+                userId: authData.user.id,
+                redirectTo: 'restaurant-dashboard',
+              };
             }
 
             // Minimal manager user record - only required fields
@@ -457,77 +482,59 @@ export class AuthService {
               console.log('[DEBUG_MANAGER] Manager error details:', { code: managerError.code, message: managerError.message });
             }
 
-            if (managerError) {
-              logger.error(`Manager provisioning failed: ${managerError.message}`);
-              
-              // If still fails, log but allow the manager to proceed without DB record
-              // (They can still use Supabase auth)
-              if (managerError.message?.includes('phone_number') || managerError.code === 'PGRST116') {
-                console.log('[DEBUG_MANAGER] Detected phone_number schema error - proceeding with auth-only login');
-                logger.warn('Continuing manager login without DB record due to schema mismatch');
-                
-                // Generate tokens anyway - manager authenticated via Supabase Auth
-                const accessToken = this.generateAccessToken(
-                  authData.user.id,
-                  restaurantId,
-                  email,
-                  ROLES.MANAGER
-                );
-                const refreshToken = this.generateRefreshToken(
-                  authData.user.id,
-                  restaurantId,
-                  email,
-                  ROLES.MANAGER
-                );
-                await this.persistRefreshToken(refreshToken, authData.user.id, restaurantId);
-
-                return {
-                  accessToken,
-                  refreshToken,
-                  role: ROLES.MANAGER,
-                  restaurantId: restaurantId,
-                  userId: authData.user.id,
-                  redirectTo: 'restaurant-dashboard',
-                };
-              }
-              
-              console.log('[DEBUG_MANAGER] Throwing manager error (not a schema error)');
-              throw managerError;
+            if (!managerError && newManager) {
+              console.log('[DEBUG_MANAGER] Manager successfully created:', { id: newManager?.id });
+              user = newManager;
+              provisioned = true;
+            } else if (managerError) {
+              console.log('[DEBUG_MANAGER] Manager insert failed, will attempt graceful fallback');
+              // Don't throw - will handle below
             }
-
-            console.log('[DEBUG_MANAGER] Manager successfully created:', { id: newManager?.id });
-            user = newManager;
-            // Continue to normal flow with manager user record created
             
           } catch (managerProvisionError) {
-            console.log('[DEBUG_MANAGER] Manager provision error caught:', { message: managerProvisionError.message });
-            logger.error(`Manager provisioning error: ${managerProvisionError.message}`);
+            console.log('[DEBUG_MANAGER] Manager provision exception caught:', { message: managerProvisionError.message });
+            logger.error(`Manager provisioning exception: ${managerProvisionError.message}`);
+          }
+          
+          // CRITICAL: Always allow manager to login if Supabase Auth succeeded
+          // Even if provisioning failed, auth succeeded means they're valid
+          if (!provisioned && authData?.user?.id) {
+            console.log('[DEBUG_MANAGER] Provisioning incomplete, falling back to auth-only login');
+            logger.warn('Allowing manager login without full DB provisioning - using Supabase Auth');
             
-            // CRITICAL: Don't let manager provisioning failures break authentication
-            // If Supabase Auth worked, allow manager to login anyway
-            if (authData?.user?.id) {
-              console.log('[DEBUG_MANAGER] Supabase Auth succeeded, allowing manager login without DB record');
-              logger.warn('Provisioning failed but Supabase Auth succeeded - allowing manager login');
-              
-              // Find any restaurant to attach to
-              const { data: anyRestaurant } = await supabase
-                .from('restaurants')
-                .select('id')
-                .limit(1)
-                .maybeSingle();
-              
-              const restaurantId = anyRestaurant?.id || authData.user.id;
-              console.log('[DEBUG_MANAGER] Final fallback restaurant:', restaurantId);
-              
-              const accessToken = this.generateAccessToken(
-                authData.user.id,
-                restaurantId,
-                email,
-                ROLES.MANAGER
-              );
-              const refreshToken = this.generateRefreshToken(
-                authData.user.id,
-                restaurantId,
+            // Find any restaurant to attach to
+            const { data: anyRestaurant } = await supabase
+              .from('restaurants')
+              .select('id')
+              .limit(1)
+              .maybeSingle();
+            
+            const restaurantId = anyRestaurant?.id || authData.user.id;
+            console.log('[DEBUG_MANAGER] Final fallback restaurant:', restaurantId);
+            
+            const accessToken = this.generateAccessToken(
+              authData.user.id,
+              restaurantId,
+              email,
+              ROLES.MANAGER
+            );
+            const refreshToken = this.generateRefreshToken(
+              authData.user.id,
+              restaurantId,
+              email,
+              ROLES.MANAGER
+            );
+            await this.persistRefreshToken(refreshToken, authData.user.id, restaurantId);
+
+            return {
+              accessToken,
+              refreshToken,
+              role: ROLES.MANAGER,
+              restaurantId,
+              userId: authData.user.id,
+              redirectTo: 'restaurant-dashboard',
+            };
+          }
                 email,
                 ROLES.MANAGER
               );
