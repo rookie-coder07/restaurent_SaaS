@@ -9,8 +9,15 @@ if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
   reportClientError(null, 'Missing Supabase environment variables');
 }
 
-// Create Supabase client for real-time subscriptions
+// Create Supabase client with proper auth handling for recovery sessions
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  auth: {
+    // Auto-parse recovery tokens from URL hash
+    autoRefreshToken: true,
+    persistSession: true,
+    detectSessionInUrl: true, // CRITICAL: Auto-detect and handle recovery tokens in URL
+    storageKey: 'supabase.auth.token',
+  },
   realtime: {
     params: {
       eventsPerSecond: 10,

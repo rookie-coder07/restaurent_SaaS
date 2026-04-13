@@ -18,6 +18,17 @@ export default function ProtectedRoute({ layout: LayoutComponent = null, allowed
   const userRole = effectiveUser?.role;
   const isRoleInvalid = allowedRoles.length > 0 && Boolean(userRole) && !allowedRoles.includes(userRole);
 
+  // NEVER protect password reset routes
+  const isResetPasswordRoute =
+    location.pathname === '/reset-password' ||
+    location.pathname === '/admin/reset-password' ||
+    location.pathname === '/pos/reset-password';
+
+  if (isResetPasswordRoute) {
+    console.warn('[ProtectedRoute] Reset password route should not be wrapped in ProtectedRoute. Rendering content directly.');
+    return <Outlet />;
+  }
+
   useEffect(() => {
     if (loading) {
       return;

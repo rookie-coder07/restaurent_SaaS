@@ -46,9 +46,18 @@ export default function ResetPassword() {
 
   useEffect(() => {
     let isActive = true;
+    let timeoutId = null;
 
     const verifyRecoverySession = async () => {
       try {
+        // First, wait a moment to allow Supabase to parse the URL hash
+        await new Promise(resolve => {
+          timeoutId = setTimeout(resolve, 100);
+        });
+
+        if (!isActive) return;
+
+        // Get current session (Supabase should have parsed recovery token from URL)
         const { data, error: sessionError } = await supabase.auth.getSession();
 
         if (!isActive) return;
@@ -60,40 +69,50 @@ export default function ResetPassword() {
           return;
         }
 
-        // Check for recovery token in URL hash
+        // Check for recovery token in URL hash - Supabase stores it automatically
         const hashParams = new URLSearchParams(window.location.hash.substring(1));
-        const hasAccessToken = hashParams.get('access_token');
+        const accessToken = hashParams.get('access_token');
         const tokenType = hashParams.get('type');
+        const refreshToken = hashParams.get('refresh_token');
         
-        const hasRecoveryTokens =
-          hasAccessToken ||
+        const hasRecoveryToken = (
+          tokenType === 'recovery' ||
           window.location.hash.includes('access_token=') ||
-          window.location.search.includes('type=recovery');
+          (accessToken && tokenType === 'recovery')
+        );
 
-        console.log('[ResetPassword] Verification:', {
-          hasSession: !!data.session,
-          hasRecoveryTokens,
+        const hasActiveSession = !!data?.session;
+
+        console.log('[ResetPassword] Session verification:', {
+          hasActiveSession,
+          hasRecoveryToken,
           tokenType,
+          hasAccessToken: !!accessToken,
           hashLength: window.location.hash.length,
         });
 
-        if (data.session || hasRecoveryTokens) {
+        if (hasActiveSession || hasRecoveryToken) {
           setIsReady(true);
           setError('');
+          setIsCheckingSession(false);
         } else {
+          console.warn('[ResetPassword] No valid recovery session found');
           setError('This reset link is invalid or has expired. Please request a new one.');
           setCanResendEmail(true);
+          setIsCheckingSession(false);
         }
       } catch (err) {
         console.error('[ResetPassword] Verification error:', err);
-        setError('An unexpected error occurred. Please try again.');
-      } finally {
-        setIsCheckingSession(false);
+        if (isActive) {
+          setError('An unexpected error occurred. Please try again.');
+          setIsCheckingSession(false);
+        }
       }
     };
 
     verifyRecoverySession();
 
+    // Listen for password recovery event from Supabase
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event, session) => {
@@ -102,6 +121,7 @@ export default function ResetPassword() {
       console.log('[ResetPassword] Auth state changed:', { event, hasSession: !!session });
 
       if (event === 'PASSWORD_RECOVERY' && session) {
+        console.log('[ResetPassword] Recovery event detected with active session');
         setIsReady(true);
         setError('');
         setIsCheckingSession(false);
@@ -110,6 +130,9 @@ export default function ResetPassword() {
 
     return () => {
       isActive = false;
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
       subscription.unsubscribe();
     };
   }, [location]);
