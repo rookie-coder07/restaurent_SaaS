@@ -3,7 +3,8 @@
  * Only renders visible items by calculating viewport height
  */
 
-import { memo, useCallback, useMemo, useRef } from 'react';
+import { memo, useCallback, useMemo, useRef, useState } from 'react';
+import { Trash2, Minus, Plus } from 'lucide-react';
 import { calculateVisibleRange } from '../../utils/virtualScroller';
 
 const ITEM_HEIGHT = 240; // Height of each cart item in px
@@ -78,18 +79,25 @@ function VirtualListItem({ item, isVisible, onIncrease, onDecrease, onRemove, on
 }
 
 const MemoizedVirtualListItem = memo(VirtualListItem, (prevProps, nextProps) => {
-  // Return false if props are different (need re-render)
+  // Return true if props are the SAME (skip re-render)
+  // Return false if props are DIFFERENT (need re-render)
   return (
     prevProps.isVisible === nextProps.isVisible &&
-    prevProps.item.id === nextProps.item.id &&
-    prevProps.item.qty === nextProps.item.qty &&
-    prevProps.item.name === nextProps.item.name
+    prevProps.item?.id === nextProps.item?.id &&
+    prevProps.item?.qty === nextProps.item?.qty &&
+    prevProps.item?.name === nextProps.item?.name &&
+    prevProps.item?.price === nextProps.item?.price &&
+    prevProps.onIncrease === nextProps.onIncrease &&
+    prevProps.onDecrease === nextProps.onDecrease &&
+    prevProps.onRemove === nextProps.onRemove &&
+    prevProps.onEditDetails === nextProps.onEditDetails &&
+    prevProps.formatCurrency === nextProps.formatCurrency
   );
 });
 
 export default memo(function VirtualList({ items = [], containerHeight = 400, onIncrease, onDecrease, onRemove, onEditDetails, formatCurrency }) {
   const scrollRef = useRef(null);
-  const [scrollTop, setScrollTop] = React.useState(0);
+  const [scrollTop, setScrollTop] = useState(0);
 
   const { startIndex, endIndex } = useMemo(() => {
     return calculateVisibleRange(containerHeight, ITEM_HEIGHT, scrollTop);

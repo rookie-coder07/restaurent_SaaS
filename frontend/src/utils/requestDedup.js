@@ -2,7 +2,19 @@
  * Request Deduplication Layer
  * Prevents redundant API calls during rapid bill/KOT operations
  * Critical for performance during settle operations
+ * 
+ * ⚠️ IMPORTANT: Does NOT cache auth endpoints to prevent stale credentials
  */
+
+const AUTH_ENDPOINTS = [
+  '/auth/login',
+  '/auth/logout',
+  '/auth/me',
+  '/auth/register',
+  '/auth/change-password',
+  '/auth/reset-password',
+  '/manager/reset-user-password',
+];
 
 class RequestDeduplicator {
   constructor() {
@@ -10,9 +22,21 @@ class RequestDeduplicator {
   }
 
   /**
+   * Check if endpoint should be cached
+   */
+  isAuthEndpoint(key) {
+    return AUTH_ENDPOINTS.some(endpoint => key.includes(endpoint));
+  }
+
+  /**
    * Execute function only once per key, sharing result with simultaneous calls
    */
   deduplicate(key, asyncFn) {
+    // ⚠️ SAFETY: Do NOT deduplicate auth endpoints
+    if (this.isAuthEndpoint(key)) {
+      return asyncFn();
+    }
+
     // Return existing promise if request is already in flight
     if (this.pendingRequests.has(key)) {
       return this.pendingRequests.get(key);
@@ -36,6 +60,15 @@ class RequestDeduplicator {
   clear() {
     this.pendingRequests.clear();
   }
+
+  clearAuth() {
+    // Clear any pending auth requests
+    for (const [key] of this.pendingRequests) {
+      if (this.isAuthEndpoint(key)) {
+        this.pendingRequests.delete(key);
+      }
+    }
+  }
 }
 
 class ResponseCache {
@@ -43,7 +76,19 @@ class ResponseCache {
     this.cache = new Map();
   }
 
+  /**
+   * Check if key is an auth endpoint
+   */
+  isAuthEndpoint(key) {
+    return AUTH_ENDPOINTS.some(endpoint => key.includes(endpoint));
+  }
+
   set(key, value, ttlMs = 5000) {
+    // ⚠️ SAFETY: Never cache auth endpoints
+    if (this.isAuthEndpoint(key)) {
+      return;
+    }
+
     this.cache.set(key, {
       value,
       expiresAt: Date.now() + ttlMs,
@@ -51,6 +96,11 @@ class ResponseCache {
   }
 
   get(key) {
+    // ⚠️ SAFETY: Never retrieve cached auth data
+    if (this.isAuthEndpoint(key)) {
+      return null;
+    }
+
     const entry = this.cache.get(key);
     if (!entry) return null;
 
@@ -64,6 +114,15 @@ class ResponseCache {
 
   clear() {
     this.cache.clear();
+  }
+
+  clearAuth() {
+    // Clear any cached auth data
+    for (const [key] of this.cache) {
+      if (this.isAuthEndpoint(key)) {
+        this.cache.delete(key);
+      }
+    }
   }
 
   invalidatePrefix(prefix) {
