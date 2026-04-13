@@ -22,7 +22,17 @@ export default defineConfig({
     outDir: 'dist',
     sourcemap: false,
     minify: 'terser',
-    chunkSizeWarningLimit: 1000,
+    chunkSizeWarningLimit: 2000,
+    terserOptions: {
+      compress: {
+        drop_console: true,
+        drop_debugger: true,
+      },
+      mangle: true,
+      format: {
+        comments: false,
+      },
+    },
     rollupOptions: {
       output: {
         manualChunks(id) {
@@ -30,15 +40,27 @@ export default defineConfig({
             return undefined;
           }
 
-          if (id.includes('recharts') || id.includes('d3-')) {
+          // Separate heavy charting library
+          if (id.includes('recharts')) {
             return 'charts-vendor';
           }
 
+          if (id.includes('d3-')) {
+            return 'd3-vendor';
+          }
+
+          // Separate data/auth libraries
           if (id.includes('axios') || id.includes('@supabase')) {
             return 'data-vendor';
           }
 
-          return undefined;
+          // Separate UI libraries
+          if (id.includes('lucide-react') || id.includes('framer-motion')) {
+            return 'ui-vendor';
+          }
+
+          // General vendor chunk for other node_modules
+          return 'vendor';
         },
       },
     },
