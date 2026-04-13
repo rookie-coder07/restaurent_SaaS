@@ -253,21 +253,32 @@ export class AuthService {
       let authData = null;
       
       try {
+        logger.info(`🔄 Attempting Supabase Auth login for: ${email.toLowerCase()}, portal: ${portal}`);
         if (portal === 'manager') {
-          console.log('Using Supabase login for manager');
+          logger.info('🔄 Manager portal login attempt detected');
         }
         
         ({ data: authData, error: authError } = await getSupabase().auth.signInWithPassword({
           email: email.toLowerCase(),
           password: password,
         }));
-        logger.info('Auth response', {
-          email,
+        
+        logger.info('Auth response from Supabase:', {
+          email: email.toLowerCase(),
+          portal,
           userId: authData?.user?.id || null,
-          error: authError?.message || null,
+          authSucceeded: !authError,
+          errorCode: authError?.code || null,
+          errorMsg: authError?.message || null,
+          errorStatus: authError?.status || null,
         });
       } catch (networkError) {
         // In test mode, handle network errors gracefully
+        logger.error('Network error during login:', {
+          email: email.toLowerCase(),
+          portal,
+          error: networkError.message,
+        });
         if (process.env.NODE_ENV === 'test' && (networkError.message?.includes('fetch failed') || networkError.message?.includes('ENOTFOUND'))) {
           logger.warn(`Login network error in test mode for email: ${email} - returning error response`);
           throw new Error('Invalid email or password');
@@ -277,11 +288,15 @@ export class AuthService {
 
       const authFailedMessage = authError?.message || null;
       if (authError) {
-        logger.warn(`Login failed for email: ${email}`, { error: authFailedMessage });
+        logger.warn(`Login failed for email: ${email.toLowerCase()}`, { 
+          error: authFailedMessage,
+          errorCode: authError.code,
+          portal,
+        });
       }
 
       if (authData?.user?.id) {
-        logger.info(`✅ User found in auth: ${authData.user.id}`);
+        logger.info(`✅ User authenticated in Supabase Auth: ${authData.user.id}`);
       }
 
 
@@ -484,12 +499,20 @@ export class AuthService {
         rawRole: user.role,
         normalizedRole,
         portal,
+        hasPasswordHash: !!user.password_hash,
+        passwordHashCleared: user.password_hash_cleared,
+        passwordUpdatedAt: user.password_updated_at,
       });
 
       logger.info('Login user profile', {
         userId: user.id,
+        email: user.email,
         role: normalizedRole,
         restaurantId: user.restaurant_id,
+        hasPasswordHash: !!user.password_hash,
+        passwordHashCleared: user.password_hash_cleared,
+        passwordUpdatedAt: user.password_updated_at,
+        authVerified: !!authData?.user?.id,
       });
 
       // ✅ FIXED: Only trust Supabase Auth - no custom password checking
@@ -710,12 +733,26 @@ export class AuthService {
       // Verify current password via Supabase Auth
       let authVerifyError = null;
       try {
+        logger.info(`🔄 Verifying current password for change-password: ${account.email}`);
         ({ data: {}, error: authVerifyError } = await supabase.auth.signInWithPassword({
           email: account.email,
           password: currentPassword,
         }));
+        
+        if (authVerifyError) {
+          logger.warn('Auth verification during password change failed:', {
+            email: account.email,
+            errorCode: authVerifyError.code,
+            errorMsg: authVerifyError.message,
+          });
+        } else {
+          logger.info(`✅ Current password verified for: ${account.email}`);
+        }
       } catch (authCheckError) {
-        logger.warn('Auth verification during password change failed:', authCheckError.message);
+        logger.warn('Auth verification during password change failed:', {
+          email: account.email,
+          error: authCheckError.message,
+        });
         authVerifyError = authCheckError;
       }
 
@@ -725,19 +762,68 @@ export class AuthService {
 
       // ✅ FIX: Update password in Supabase Auth (PRIMARY source of truth)
       let authUpdateError = null;
+      let authUpdateResponse = null;
       try {
         const adminClient = getSupabaseAdmin();
-        ({ error: authUpdateError } = await adminClient.auth.admin.updateUserById(userId, {
+        logger.info(`🔄 Updating password in Supabase Auth for user: ${userId}`);
+        
+        ({ data: authUpdateResponse, error: authUpdateError } = await adminClient.auth.admin.updateUserById(userId, {
           password: newPassword
         }));
+        
+        logger.info('Password update response:', {
+          userId,
+          hasError: !!authUpdateError,
+          errorMsg: authUpdateError?.message || null,
+          hasData: !!authUpdateResponse,
+          dataUser: authUpdateResponse?.user?.id || null,
+        });
       } catch (adminInitError) {
-        logger.error('❌ Admin client init error during password change:', adminInitError.message);
+        logger.error('❌ Admin client init error during password change:', {
+          error: adminInitError.message,
+          userId,
+          stack: adminInitError.stack,
+        });
         throw new Error('Password update failed: admin client not available');
       }
 
       if (authUpdateError) {
-        logger.error('❌ Failed to update Supabase Auth password:', authUpdateError.message);
+        logger.error('❌ Failed to update Supabase Auth password:', {
+          userId,
+          errorCode: authUpdateError.code,
+          errorMsg: authUpdateError.message,
+          errorStatus: authUpdateError.status,
+        });
         throw authUpdateError;
+      }
+      
+      logger.info(`✅ Password successfully updated in Supabase Auth for user: ${userId}`);
+
+      // 🔧 VERIFICATION: Test that the new password works immediately
+      try {
+        const testLoginResponse = await supabase.auth.signInWithPassword({
+          email: account.email,
+          password: newPassword,
+        });
+        
+        if (testLoginResponse.error) {
+          logger.error('⚠️ Password change verification FAILED - new password does not work:', {
+            userId,
+            email: account.email,
+            errorCode: testLoginResponse.error.code,
+            errorMsg: testLoginResponse.error.message,
+          });
+          throw new Error(`Password change failed verification: new password does not work in Supabase Auth. ${testLoginResponse.error.message}`);
+        } else if (testLoginResponse.data?.user?.id) {
+          logger.info(`✅ Password change verification SUCCESS - new password works for ${account.email}`);
+        }
+      } catch (verifyError) {
+        logger.error('❌ Password change verification threw an error:', {
+          userId,
+          email: account.email,
+          error: verifyError.message,
+        });
+        throw verifyError;
       }
 
       // ✅ FIX: Clear database password_hash - Supabase Auth is now authoritative
@@ -950,19 +1036,70 @@ export class AuthService {
 
       // ✅ FIX: Update password in Supabase Auth (PRIMARY source of truth)
       let authUpdateError = null;
+      let authUpdateResponse = null;
       try {
         const adminClient = getSupabaseAdmin();
-        ({ error: authUpdateError } = await adminClient.auth.admin.updateUserById(user.id, {
+        logger.info(`🔄 Attempting manager password reset for user: ${user.id}`);
+        
+        ({ data: authUpdateResponse, error: authUpdateError } = await adminClient.auth.admin.updateUserById(user.id, {
           password: newPassword
         }));
+        
+        logger.info('Manager password update response:', {
+          userId: user.id,
+          userEmail: user.email,
+          hasError: !!authUpdateError,
+          errorMsg: authUpdateError?.message || null,
+          hasData: !!authUpdateResponse,
+          dataUser: authUpdateResponse?.user?.id || null,
+        });
       } catch (adminInitError) {
-        logger.error('❌ Admin client init error during manager password reset:', adminInitError.message);
+        logger.error('❌ Admin client init error during manager password reset:', {
+          error: adminInitError.message,
+          userId: user.id,
+          stack: adminInitError.stack,
+        });
         throw new Error('Password reset failed: admin client not available');
       }
 
       if (authUpdateError) {
-        logger.error('❌ Failed to update Supabase Auth password during manager reset:', authUpdateError.message);
+        logger.error('❌ Failed to update Supabase Auth password during manager reset:', {
+          userId: user.id,
+          userEmail: user.email,
+          errorCode: authUpdateError.code,
+          errorMsg: authUpdateError.message,
+          errorStatus: authUpdateError.status,
+        });
         throw authUpdateError;
+      }
+      
+      logger.info(`✅ Password successfully updated in Supabase Auth during manager reset: ${user.id}`);
+
+      // 🔧 VERIFICATION: Test that the new password works immediately
+      try {
+        const testLoginResponse = await supabase.auth.signInWithPassword({
+          email: user.email,
+          password: newPassword,
+        });
+        
+        if (testLoginResponse.error) {
+          logger.error('⚠️ Manager password reset verification FAILED - new password does not work:', {
+            userId: user.id,
+            userEmail: user.email,
+            errorCode: testLoginResponse.error.code,
+            errorMsg: testLoginResponse.error.message,
+          });
+          throw new Error(`Manager password reset failed verification: new password does not work in Supabase Auth. ${testLoginResponse.error.message}`);
+        } else if (testLoginResponse.data?.user?.id) {
+          logger.info(`✅ Manager password reset verification SUCCESS - new password works for ${user.email}`);
+        }
+      } catch (verifyError) {
+        logger.error('❌ Manager password reset verification threw an error:', {
+          userId: user.id,
+          userEmail: user.email,
+          error: verifyError.message,
+        });
+        throw verifyError;
       }
 
       // ✅ FIX: Clear database password_hash - Supabase Auth is now authoritative

@@ -191,21 +191,74 @@ class PasswordResetService {
 
       // Update password via Supabase Auth
       let authError;
+      let authUpdateResponse;
       try {
         const adminClient = getSupabaseAdmin();
-        ({ error: authError } = await adminClient.auth.admin.updateUserById(
+        logger.info(`🔄 Attempting to update password in Supabase Auth for user: ${userId}`);
+        
+        ({ data: authUpdateResponse, error: authError } = await adminClient.auth.admin.updateUserById(
           userId,
           { password: newPassword }
         ));
+        
+        logger.info('Supabase Auth update response:', {
+          userId,
+          hasError: !!authError,
+          errorMsg: authError?.message || null,
+          hasData: !!authUpdateResponse,
+          dataUser: authUpdateResponse?.user?.id || null,
+        });
       } catch (adminInitError) {
-        logger.error('❌ Admin client initialization error during password reset:', adminInitError.message);
+        logger.error('❌ Admin client initialization error during password reset:', {
+          error: adminInitError.message,
+          userId,
+          stack: adminInitError.stack,
+        });
         throw new Error(
           `Failed to reset password: admin client initialization failed. ` +
           `Please ensure SUPABASE_SERVICE_ROLE_KEY is set in your Render backend environment.`
         );
       }
 
-      if (authError) throw authError;
+      if (authError) {
+        logger.error('❌ Supabase Auth password update failed:', {
+          userId,
+          email: normalizedEmail,
+          errorCode: authError.code,
+          errorMsg: authError.message,
+          errorStatus: authError.status,
+        });
+        throw authError;
+      }
+      
+      logger.info(`✅ Password successfully updated in Supabase Auth for user: ${userId}`);
+
+      // 🔧 VERIFICATION: Test that the new password works immediately
+      try {
+        const testLoginResponse = await supabase.auth.signInWithPassword({
+          email: normalizedEmail,
+          password: newPassword,
+        });
+        
+        if (testLoginResponse.error) {
+          logger.error('⚠️ Password update verification FAILED - new password does not work:', {
+            userId,
+            email: normalizedEmail,
+            errorCode: testLoginResponse.error.code,
+            errorMsg: testLoginResponse.error.message,
+          });
+          throw new Error(`Password update failed verification: new password does not work in Supabase Auth. ${testLoginResponse.error.message}`);
+        } else if (testLoginResponse.data?.user?.id) {
+          logger.info(`✅ Password verification SUCCESS - new password works for ${normalizedEmail}`);
+        }
+      } catch (verifyError) {
+        logger.error('❌ Password verification threw an error:', {
+          userId,
+          email: normalizedEmail,
+          error: verifyError.message,
+        });
+        throw verifyError;
+      }
 
       // ✅ FIXED: Clear password_hash from database after reset
       // This ensures old passwords cannot be used

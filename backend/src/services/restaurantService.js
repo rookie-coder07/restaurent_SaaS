@@ -1137,12 +1137,71 @@ export class RestaurantService {
       }
 
       // Update password via Supabase Auth (not in database)
-      const { error: authError } = await getSupabaseAdmin().auth.admin.updateUserById(
-        staffId,
-        { password: newPassword }
-      );
+      let authError;
+      let authUpdateResponse;
+      try {
+        logger.info(`🔄 Attempting to update password in Supabase Auth for staff: ${staffId}`);
+        
+        ({ data: authUpdateResponse, error: authError } = await getSupabaseAdmin().auth.admin.updateUserById(
+          staffId,
+          { password: newPassword }
+        ));
+        
+        logger.info('Supabase Auth update response for staff:', {
+          staffId,
+          hasError: !!authError,
+          errorMsg: authError?.message || null,
+          hasData: !!authUpdateResponse,
+          dataUser: authUpdateResponse?.user?.id || null,
+        });
+      } catch (adminInitError) {
+        logger.error('❌ Admin client error during staff password reset:', {
+          error: adminInitError.message,
+          staffId,
+          stack: adminInitError.stack,
+        });
+        throw adminInitError;
+      }
 
-      if (authError) throw authError;
+      if (authError) {
+        logger.error('❌ Supabase Auth password update failed for staff:', {
+          staffId,
+          email: existingUser.email,
+          errorCode: authError.code,
+          errorMsg: authError.message,
+          errorStatus: authError.status,
+        });
+        throw authError;
+      }
+      
+      logger.info(`✅ Password successfully updated in Supabase Auth for staff: ${staffId}`);
+
+      // 🔧 VERIFICATION: Test that the new password works immediately
+      try {
+        const testLoginResponse = await supabase.auth.signInWithPassword({
+          email: existingUser.email,
+          password: newPassword,
+        });
+        
+        if (testLoginResponse.error) {
+          logger.error('⚠️ Staff password update verification FAILED - new password does not work:', {
+            staffId,
+            email: existingUser.email,
+            errorCode: testLoginResponse.error.code,
+            errorMsg: testLoginResponse.error.message,
+          });
+          throw new Error(`Staff password update failed verification: new password does not work in Supabase Auth. ${testLoginResponse.error.message}`);
+        } else if (testLoginResponse.data?.user?.id) {
+          logger.info(`✅ Staff password verification SUCCESS - new password works for ${existingUser.email}`);
+        }
+      } catch (verifyError) {
+        logger.error('❌ Staff password verification threw an error:', {
+          staffId,
+          email: existingUser.email,
+          error: verifyError.message,
+        });
+        throw verifyError;
+      }
 
       // 🔧 FIXED: Clear password_hash from database - Supabase Auth is now source of truth
       const handledAt = new Date().toISOString();
