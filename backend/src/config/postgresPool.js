@@ -23,7 +23,8 @@ export const initializePool = () => {
       connectionString: databaseUrl,
       max: 20,
       idleTimeoutMillis: 30000,
-      connectionTimeoutMillis: 2000,
+      connectionTimeoutMillis: 30000,  // Increased from 2000ms to 30s for bulk operations
+      statement_timeout: 30000,        // 30s statement timeout for long-running queries
     });
 
     pool.on('error', (err) => {
@@ -50,10 +51,22 @@ export const query = async (text, params = []) => {
   try {
     return await client.query(text, params);
   } catch (error) {
+    // Provide more detailed error information for debugging
+    const isTimeoutError = error.message.includes('timeout') || 
+                          error.code === 'ECONNREFUSED' ||
+                          error.code === 'ETIMEDOUT';
+    
     logger.error('[DB_QUERY] Error executing query:', {
       query: text.substring(0, 100),
       error: error.message,
+      code: error.code,
+      isTimeoutError,
       params: params.length,
+      poolSize: {
+        totalCount: client.totalCount,
+        idleCount: client.idleCount,
+        waitingCount: client.waitingCount,
+      },
     });
     throw error;
   }
