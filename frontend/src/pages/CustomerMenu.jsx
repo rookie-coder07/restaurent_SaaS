@@ -289,6 +289,17 @@ export default function CustomerMenu() {
         ...orderData,
         requestId: placeOrderRequestRef.current.id,
       });
+      
+      // ✅ Debug: Log full response structure
+      console.log('[ORDER_RESPONSE] Full API response:', {
+        status: response.status,
+        statusCode: response.data?.statusCode,
+        success: response.data?.success,
+        data: response.data?.data,
+        message: response.data?.message,
+        allKeys: Object.keys(response.data || {}),
+      });
+      
       const createdOrder = response.data?.data;
       placeOrderRequestRef.current = { id: '', signature: '' };
 
@@ -302,12 +313,23 @@ export default function CustomerMenu() {
         console.error('ERROR: Created order missing ID!', {
           response: response.data,
           createdOrder,
+          dataPath: 'response.data?.data',
+          alternativeIds: {
+            orderId: response.data?.orderId,
+            order_id: response.data?.order_id,
+            id: response.data?.id,
+            nested: {
+              'data.order.id': response.data?.data?.order?.id,
+              'data.id': response.data?.data?.id,
+            },
+          },
         });
         throw new Error('Order created but missing ID in response');
       }
 
       window.setTimeout(() => {
-        const targetUrl = `/order-status?order=${createdOrder.id}&table=${tableNumber || ''}`;
+        const targetUrl = `/order-status?orderId=${createdOrder.id}&table=${tableNumber || ''}`;
+        console.log('[ORDER_SUCCESS] Navigating to success page:', { targetUrl, orderId: createdOrder.id });
         navigate(targetUrl);
       }, 2200);
     } catch (error) {

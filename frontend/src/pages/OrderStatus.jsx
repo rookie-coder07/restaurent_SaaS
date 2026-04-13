@@ -28,23 +28,43 @@ function formatStatusLabel(status) {
 export default function OrderStatus() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const orderId = searchParams.get('orderId');
+  // ✅ Support both 'orderId' (new) and 'order' (legacy) parameter names
+  const orderId = searchParams.get('orderId') || searchParams.get('order');
   const tableNumber = searchParams.get('table');
 
-  // ✅ FIX 1: Guard against undefined orderId
+  // ✅ FIX 1: Guard against undefined orderId with detailed logging
   if (!orderId) {
+    console.error('[ORDER_INVALID] Order ID missing from URL', {
+      searchParams: Object.fromEntries(searchParams),
+      availableParams: Array.from(searchParams.entries()),
+    });
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-6">
-        <div className="text-center">
+        <div className="text-center max-w-md">
           <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
-          <h1 className="text-2xl font-bold text-gray-900 mb-2">Invalid Order</h1>
-          <p className="text-gray-600 mb-4">Order ID not provided</p>
-          <button
-            onClick={() => navigate('/menu')}
-            className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-          >
-            Back to Menu
-          </button>
+          <h1 className="text-2xl font-bold text-gray-900 mb-2">Order ID Not Found</h1>
+          <p className="text-gray-600 mb-4">
+            Unable to load your order. The order ID was not provided. This usually happens when:
+          </p>
+          <ul className="text-left text-sm text-gray-600 mb-6 bg-gray-100 rounded-lg p-4 space-y-2">
+            <li>• The page was refreshed before the order was fully processed</li>
+            <li>• The QR code link was modified</li>
+            <li>• The order failed on the backend</li>
+          </ul>
+          <div className="space-y-3">
+            <button
+              onClick={() => navigate('/menu')}
+              className="w-full px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium"
+            >
+              Back to Menu
+            </button>
+            <button
+              onClick={() => window.location.reload()}
+              className="w-full px-6 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 font-medium"
+            >
+              Retry
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -109,22 +129,55 @@ export default function OrderStatus() {
   }
 
   if (error || !order?.id) {
+    console.error('[ORDER_FETCH_ERROR] Failed to fetch order', {
+      orderId,
+      tableNumber,
+      error: error?.message,
+      order,
+      hasOrderId: !!order?.id,
+    });
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-6">
-        <div className="text-center">
+        <div className="text-center max-w-md">
           <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
           <h1 className="text-2xl font-bold text-gray-900 mb-2">Order Not Found</h1>
-          <p className="text-gray-600 mb-4">Unable to load order details</p>
-          <button
-            onClick={() => navigate('/menu')}
-            className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-          >
-            Back to Menu
-          </button>
+          <p className="text-gray-600 mb-4">Unable to load order details. Please try again or contact support if the issue persists.</p>
+          <div className="space-y-3">
+            <button
+              onClick={() => navigate('/menu')}
+              className="w-full px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium"
+            >
+              Back to Menu
+            </button>
+            <button
+              onClick={() => window.location.reload()}
+              className="w-full px-6 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 font-medium"
+            >
+              Retry
+            </button>
+          </div>
+          {process.env.NODE_ENV === 'development' && (
+            <div className="mt-4 p-3 bg-gray-100 rounded text-left text-xs text-gray-700 overflow-auto max-h-40">
+              <p className="font-mono">Error: {error?.message}</p>
+              <p className="font-mono">OrderId: {orderId}</p>
+            </div>
+          )}
         </div>
       </div>
     );
   }
+  
+  // ✅ Log successful order fetch
+  useEffect(() => {
+    if (order?.id) {
+      console.log('[ORDER_LOADED] Order successfully fetched', {
+        orderId: order.id,
+        status: order.status,
+        tableNumber: order.tableNumber || tableNumber,
+        itemCount: order.items?.length || 0,
+      });
+    }
+  }, [order?.id]);
 
   const progressStatus = order.status === 'completed' ? 'served' : order.status;
   const currentStepIndex = STATUS_STEPS.findIndex(step => step.status === progressStatus);
