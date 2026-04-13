@@ -346,29 +346,34 @@ export class AuthService {
       
       // Wrap manager user lookup in try-catch to handle ANY schema/database errors gracefully
       if (portalKey === 'manager') {
+        console.log('[DEBUG_MANAGER] Manager login path - starting user lookup');
         try {
           // For manager portal, use safe columns to avoid phone_number schema issues
           const selectColumns = 'id, name, email, restaurant_id, role, status';
           
           if (authUserId) {
+            console.log(`[DEBUG_MANAGER] Looking up manager by ID: ${authUserId}`);
             ({ data: user, error: userError } = await supabase
               .from('users')
               .select(selectColumns)
               .eq('id', authUserId)
               .single());
+            console.log(`[DEBUG_MANAGER] ID lookup result:`, { found: !!user, hasError: !!userError });
           }
 
           // If not found by ID, try by email
           if ((userError || !user) && email) {
-            logger.warn(`Manager not found by ID, searching by email: ${email}`);
+            console.log(`[DEBUG_MANAGER] Manager not found by ID, searching by email: ${email}`);
             ({ data: user, error: userError } = await supabase
               .from('users')
               .select(selectColumns)
               .eq('email', email.toLowerCase())
               .single());
+            console.log(`[DEBUG_MANAGER] Email lookup result:`, { found: !!user, hasError: !!userError });
           }
           
         } catch (managerLookupError) {
+          console.log(`[DEBUG_MANAGER] Manager lookup exception caught: ${managerLookupError.message}`);
           logger.warn(`Manager lookup error (will retry with provisioning): ${managerLookupError.message}`);
           user = null;
           userError = managerLookupError;
@@ -395,27 +400,35 @@ export class AuthService {
       }
 
       // Auto-provision user on first login if not found
+      console.log(`[DEBUG_MANAGER] Auto-provision check: userError=${!!userError}, user=${!!user}, authData?.user=${!!authData?.user}`);
       if ((userError || !user) && authData?.user) {
         logger.warn(`Auto-provisioning user on first login: ${authData.user.id}`);
+        console.log(`[DEBUG_MANAGER] Entering auto-provisioning, portalKey=${portalKey}`);
         
         // MANAGER-SPECIFIC SAFE PATH
         // For managers, use simplified provisioning that doesn't require all fields
         if (portalKey === 'manager') {
           logger.info('Using manager-specific safe provisioning path');
+          console.log('[DEBUG_MANAGER] Manager-specific provisioning starting');
           try {
             // Find a restaurant to attach manager to
             let restaurantId = null;
+            console.log('[DEBUG_MANAGER] Looking for first restaurant...');
             const { data: ownerRestaurant } = await supabase
               .from('restaurants')
               .select('id')
               .limit(1)
               .maybeSingle();
             
+            console.log('[DEBUG_MANAGER] Restaurant lookup result:', { found: !!ownerRestaurant, id: ownerRestaurant?.id });
+            
             if (ownerRestaurant?.id) {
               restaurantId = ownerRestaurant.id;
+              console.log('[DEBUG_MANAGER] Using restaurant:', restaurantId);
             }
             
             if (!restaurantId) {
+              console.log('[DEBUG_MANAGER] No restaurant found - throwing error');
               logger.warn('No restaurant found for manager provisioning');
               throw new Error('No restaurant configured. Please contact administrator.');
             }
@@ -430,6 +443,7 @@ export class AuthService {
               status: 'active',
             };
             
+            console.log('[DEBUG_MANAGER] Manager payload:', { email: managerPayload.email, restaurantId, role: managerPayload.role });
             logger.info('Creating manager user record with minimal fields', { email, restaurantId });
             
             const { data: newManager, error: managerError } = await supabase
@@ -438,12 +452,18 @@ export class AuthService {
               .select('id, name, email, restaurant_id, role, status')
               .single();
 
+            console.log('[DEBUG_MANAGER] Manager insert result:', { success: !!newManager, hasError: !!managerError });
+            if (managerError) {
+              console.log('[DEBUG_MANAGER] Manager error details:', { code: managerError.code, message: managerError.message });
+            }
+
             if (managerError) {
               logger.error(`Manager provisioning failed: ${managerError.message}`);
               
               // If still fails, log but allow the manager to proceed without DB record
               // (They can still use Supabase auth)
               if (managerError.message?.includes('phone_number') || managerError.code === 'PGRST116') {
+                console.log('[DEBUG_MANAGER] Detected phone_number schema error - proceeding with auth-only login');
                 logger.warn('Continuing manager login without DB record due to schema mismatch');
                 
                 // Generate tokens anyway - manager authenticated via Supabase Auth
@@ -471,18 +491,22 @@ export class AuthService {
                 };
               }
               
+              console.log('[DEBUG_MANAGER] Throwing manager error (not a schema error)');
               throw managerError;
             }
 
+            console.log('[DEBUG_MANAGER] Manager successfully created:', { id: newManager?.id });
             user = newManager;
             // Continue to normal flow with manager user record created
             
           } catch (managerProvisionError) {
+            console.log('[DEBUG_MANAGER] Manager provision error caught:', { message: managerProvisionError.message });
             logger.error(`Manager provisioning error: ${managerProvisionError.message}`);
             
             // CRITICAL: Don't let manager provisioning failures break authentication
             // If Supabase Auth worked, allow manager to login anyway
             if (authData?.user?.id) {
+              console.log('[DEBUG_MANAGER] Supabase Auth succeeded, allowing manager login without DB record');
               logger.warn('Provisioning failed but Supabase Auth succeeded - allowing manager login');
               
               // Find any restaurant to attach to
@@ -493,6 +517,7 @@ export class AuthService {
                 .maybeSingle();
               
               const restaurantId = anyRestaurant?.id || authData.user.id;
+              console.log('[DEBUG_MANAGER] Final fallback restaurant:', restaurantId);
               
               const accessToken = this.generateAccessToken(
                 authData.user.id,
@@ -617,7 +642,25 @@ export class AuthService {
       }
 
       if (!user) {
-        throw new Error('User not found in profile store');
+        console.log('[DEBUG_MANAGER] User not found at final check - debug state:', {
+          portalKey,
+          authUserId: !!authUserId,
+          userError: userError?.message || 'none',
+          authData_user: !!authData?.user,
+          userErrorOrNoUser: (userError || !user),
+          shouldHaveTriedProvisioning: (userError || !user) && !!authData?.user,
+        });
+        const debugError = new Error('User not found in profile store');
+        debugError.debugState = {
+          portalKey,
+          step: 'final_user_check',
+          authUserId: !!authUserId,
+          userError: userError?.message,
+          authDataUser: !!authData?.user,
+          userLookupFailed: !!userError,
+          provisionningShouldHaveOccurred: (userError || !user) && !!authData?.user,
+        };
+        throw debugError;
       }
 
       if (!user.role) {

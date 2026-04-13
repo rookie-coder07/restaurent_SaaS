@@ -105,6 +105,9 @@ export const errorHandler = async (err, req, res, next) => {
   const statusCode = normalizeStatusCode(error);
   const safeMessage = buildSafeMessage(error, statusCode);
   const isDeveloper = ['developer'].includes(req?.user?.role);
+  
+  // Manager debugging: show debug state for "User not found in profile store" errors
+  const isManagerError = String(error?.message || '').includes('User not found in profile store');
 
   // Special logging for admin client errors
   const isAdminClientError = String(error?.message || '').includes('admin client') || 
@@ -115,6 +118,8 @@ export const errorHandler = async (err, req, res, next) => {
     console.error('   This typically means SUPABASE_SERVICE_ROLE_KEY is not configured');
     console.error('   Please check your Render backend environment variables');
     console.error('   Error:', error?.message);
+  } else if (isManagerError && error?.debugState) {
+    console.error('🟠 MANAGER LOGIN DEBUG:', JSON.stringify(error?.debugState, null, 2));
   } else {
     console.error('🔥 INTERNAL ERROR:', error);
   }
@@ -129,18 +134,21 @@ export const errorHandler = async (err, req, res, next) => {
     role: req?.user?.role || '',
     statusCode,
     isAdminClientError,
+    debugState: error?.debugState || null,
     timestamp: new Date().toISOString(),
   });
 
   await persistErrorLog(req, error, statusCode, safeMessage);
 
-  if (isDeveloper) {
+  // Always show debug state for manager errors or for developers
+  if (isDeveloper || isManagerError) {
     return res.status(statusCode).json({
       success: false,
       statusCode,
       message: error?.message || safeMessage,
-      stack: error?.stack || null,
-      details: serializeDeveloperDetails(error),
+      ...(error?.debugState && { debugState: error.debugState }),
+      stack: isDeveloper ? (error?.stack || null) : undefined,
+      details: isDeveloper ? serializeDeveloperDetails(error) : undefined,
     });
   }
 
