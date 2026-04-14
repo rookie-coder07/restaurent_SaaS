@@ -2,7 +2,7 @@ import logger from '../utils/logger.js';
 import supabase from '../config/supabase.js';
 
 export class TableService {
-  static ACTIVE_ORDER_STATUSES = ['awaiting_waiter_approval', 'pending', 'preparing', 'ready'];
+  static ACTIVE_ORDER_STATUSES = ['awaiting_waiter_approval', 'pending', 'preparing', 'ready', 'served', 'in_progress'];
 
   static normalizeTableNumber(value) {
     return String(value ?? '').trim();
