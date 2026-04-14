@@ -81,7 +81,7 @@ function MenuPanel({
         </div>
       ) : (
         <div className="h-[calc(100vh-22rem)] overflow-y-auto overflow-x-hidden pr-1 sm:h-[calc(100vh-21rem)] xl:h-[calc(100vh-18rem)]">
-          <div className="grid grid-cols-1 gap-2 px-1 sm:grid-cols-2 md:grid-cols-3">
+          <div className="grid grid-cols-2 gap-2 px-1 sm:grid-cols-2 lg:grid-cols-3">
             {(categories.find((category) => category.id === activeCategoryId)?.items || []).map((item) => {
               const quantity = getItemQuantity(item.id);
               const isSelected = quantity > 0;
@@ -89,15 +89,16 @@ function MenuPanel({
               return (
                 <div
                   key={item.id}
-                  className={`flex w-full min-h-[7rem] flex-col justify-between overflow-hidden rounded-[1rem] border-2 transition ${
+                  className={`relative aspect-square flex w-full flex-col justify-between overflow-hidden rounded-[1rem] border-2 transition ${
                     isSelected
                       ? 'border-emerald-500 bg-emerald-500/10 shadow-lg shadow-emerald-500/20'
                       : 'border-[var(--border-color)] bg-[linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.02))] hover:border-[var(--color-primary)] hover:bg-[var(--color-primary-soft)]'
                   } box-border p-2`}
+                  role="article"
                 >
                   <button type="button" onClick={() => onAddItem(item)} className="min-w-0 flex-1 text-left">
-                    <div className="min-w-0 overflow-hidden p-1 text-sm">
-                      <h3 className="truncate text-xs font-semibold text-[var(--text-primary)]">
+                    <div className="min-w-0 overflow-hidden text-sm">
+                      <h3 className="line-clamp-2 text-xs font-semibold text-[var(--text-primary)]">
                         {item.name}
                       </h3>
                       <p className="mt-1 truncate text-xs font-semibold text-[var(--text-secondary)]">
@@ -106,24 +107,30 @@ function MenuPanel({
                     </div>
                   </button>
 
-                  <div className="mt-auto flex shrink-0 items-center justify-end gap-1 pt-2">
+                  <div className="mt-auto flex shrink-0 items-center justify-center gap-0.5 pt-1">
                     {quantity > 0 ? (
-                      <div className="inline-flex shrink-0 items-center gap-0.5 rounded-lg bg-emerald-600/20 p-1">
+                      <div className="inline-flex shrink-0 items-center gap-0.5 rounded-lg bg-emerald-600/20 px-1 py-0.5">
                         <button
                           type="button"
-                          onClick={() => onDecreaseItem(item.id)}
-                          className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md bg-[var(--bg-card-muted)] text-xs font-bold text-[var(--text-primary)] transition hover:bg-[var(--color-primary-soft)]"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onDecreaseItem(item.id);
+                          }}
+                          className="inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md bg-[var(--bg-card-muted)] text-xs font-bold text-[var(--text-primary)] transition hover:bg-[var(--color-primary-soft)]"
                           aria-label={`Decrease ${item.name}`}
                         >
                           −
                         </button>
-                        <span className="w-5 flex-shrink-0 text-center text-xs font-bold text-emerald-400">
+                        <span className="w-4 flex-shrink-0 text-center text-xs font-bold text-emerald-400">
                           {quantity}
                         </span>
                         <button
                           type="button"
-                          onClick={() => onIncreaseItem(item.id)}
-                          className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md bg-emerald-600 text-white transition hover:bg-emerald-500"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onIncreaseItem(item.id);
+                          }}
+                          className="inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md bg-emerald-600 text-white transition hover:bg-emerald-500"
                           aria-label={`Increase ${item.name}`}
                         >
                           <Plus className="h-3 w-3" />
@@ -132,8 +139,11 @@ function MenuPanel({
                     ) : (
                       <button
                         type="button"
-                        onClick={() => onAddItem(item)}
-                        className="inline-flex flex-shrink-0 items-center justify-center rounded-md bg-emerald-600 px-2 py-1 text-xs font-bold text-white transition hover:bg-emerald-500"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onAddItem(item);
+                        }}
+                        className="inline-flex h-6 flex-shrink-0 items-center justify-center rounded-md bg-emerald-600 px-1.5 py-0.5 text-xs font-bold text-white transition hover:bg-emerald-500"
                         aria-label={`Add ${item.name}`}
                       >
                         +
