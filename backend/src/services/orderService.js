@@ -3045,8 +3045,17 @@ export class OrderService {
 
       logger.info(`✅ Order cancelled: ${orderId}`);
       if (order.table_id) {
+        // ✅ OPTIMIZATION: Invalidate cache before sync to ensure fresh data
+        TableService.invalidateActiveTableStateCache(restaurantId);
         await TableService.syncTableLifecycle(restaurantId, order.table_id);
       }
+      
+      // ✅ Emit socket event to notify frontend of table state change
+      this.emitOrderEvent(restaurantId, 'order.cancelled', {
+        id: orderId,
+        tableId: order.table_id || '',
+        orderType: order.order_type || '',
+      });
 
       return order;
     } catch (error) {
@@ -3109,6 +3118,9 @@ export class OrderService {
       await Promise.all(
         Array.from(touchedTableIds).map((tableId) => TableService.syncTableLifecycle(restaurantId, tableId))
       );
+      
+      // ✅ Invalidate cache after all cancellations to ensure fresh state
+      TableService.invalidateActiveTableStateCache(restaurantId);
 
       logger.info(`Bulk cancelled ${cancellableOrders.length} unapproved/pending bills for restaurant ${restaurantId}`);
 

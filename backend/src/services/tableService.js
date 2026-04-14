@@ -229,6 +229,10 @@ export class TableService {
       throw tableError || new Error('Table not found');
     }
 
+    // ✅ CRITICAL: Invalidate cache before checking table states
+    // Ensures we get fresh data after recent order changes (delete, cancel, create)
+    this.invalidateActiveTableStateCache(restaurantId);
+    
     const activeTableStates = await this.getActiveTableStates(restaurantId);
     const tableState = activeTableStates.get(tableId) || { hasActiveOrder: false, hasQrOrder: false };
     const hasActiveOrder = tableState.hasActiveOrder;
