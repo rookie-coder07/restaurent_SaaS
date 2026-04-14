@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Restaurant } from 'lucide-react';
+import { ExternalLink } from 'lucide-react';
 
 /**
  * QR Landing Page
@@ -55,7 +55,7 @@ export default function QRLanding() {
       <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-[var(--bg-main)] to-[var(--bg-card)]">
         <div className="text-center">
           <div className="mb-4 inline-block rounded-full bg-[var(--bg-card)] p-4">
-            <Restaurant className="h-12 w-12 animate-pulse text-[var(--text-primary)]" />
+            <ExternalLink className="h-12 w-12 animate-pulse text-[var(--text-primary)]" />
           </div>
           <p className="text-[var(--text-secondary)]">Preparing menu...</p>
         </div>
@@ -69,7 +69,7 @@ export default function QRLanding() {
         {/* Header */}
         <div className="mb-6 text-center">
           <div className="mb-4 inline-block rounded-full bg-[var(--bg-input)] p-4">
-            <Restaurant className="h-12 w-12 text-[var(--text-primary)]" />
+            <ExternalLink className="h-12 w-12 text-[var(--text-primary)]" />
           </div>
           <h1 className="text-2xl font-bold text-[var(--text-primary)]">Welcome!</h1>
           <p className="mt-2 text-sm text-[var(--text-secondary)]">
