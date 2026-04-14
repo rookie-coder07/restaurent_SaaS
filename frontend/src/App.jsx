@@ -5,6 +5,7 @@ import ProtectedRoute from './components/shared/ProtectedRoute';
 import AdminLayout from './components/layout/AdminLayout';
 import PosLayout from './components/layout/PosLayout';
 import KOTLayout from './components/layout/KOTLayout';
+import { initializeAudioContext, setupAudioUnlock } from './utils/alerts';
 
 // Pages
 const HomeAccess = lazy(() => import('./pages/HomeAccess'));
@@ -99,6 +100,10 @@ function App() {
 
   useEffect(() => {
     initializeAuth(window.location.pathname);
+    
+    // Initialize audio system for buzzer notifications
+    initializeAudioContext();
+    setupAudioUnlock();
   }, [initializeAuth]);
 
   useEffect(() => {
