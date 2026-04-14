@@ -21,6 +21,7 @@ const Loyalty = lazy(() => import('./pages/Loyalty'));
 const POS = lazy(() => import('./pages/POS'));
 const POSOrders = lazy(() => import('./pages/POSOrders'));
 const CustomerMenu = lazy(() => import('./pages/CustomerMenu'));
+const QRLanding = lazy(() => import('./pages/QRLanding'));
 const OrderStatus = lazy(() => import('./pages/OrderStatus'));
 const Tables = lazy(() => import('./pages/Tables'));
 const Staff = lazy(() => import('./pages/Staff'));
@@ -138,6 +139,7 @@ function App() {
           <Route path="/staff/login" element={withSuspense(<PosLogin />)} />
           <Route path="/pos/reset-password" element={withSuspense(<ResetPassword />)} />
           <Route path="/register" element={withSuspense(<Register />)} />
+          <Route path="/qr-landing" element={withSuspense(<QRLanding />)} />
           <Route path="/menu" element={withSuspense(<CustomerMenu />)} />
           <Route path="/order-status" element={withSuspense(<OrderStatus />)} />
           <Route path="/terms" element={withSuspense(<Terms />)} />

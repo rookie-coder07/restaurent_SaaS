@@ -39,5 +39,5 @@ export const buildQrMenuUrl = ({ tableNumber, tableId }) => {
 
   const queryString = searchParams.toString();
 
-  return `${baseUrl}/menu${queryString ? `?${queryString}` : ''}`;
+  return `${baseUrl}/qr-landing${queryString ? `?${queryString}` : ''}`;
 };
