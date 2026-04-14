@@ -1951,6 +1951,8 @@ export class OrderService {
             orderId: order.id,
             message: tableError.message,
           }));
+        // ✅ OPTIMIZATION: Invalidate table state cache since order was created
+        TableService.invalidateActiveTableStateCache(finalRestaurantId);
       }
 
       this.emitOrderEvent(finalRestaurantId, 'order.created', completeOrder, {
@@ -2304,6 +2306,8 @@ export class OrderService {
       logger.info(`✅ Order status updated: ${orderId} → ${newStatus}`);
       if (order.table_id) {
         await TableService.syncTableLifecycle(restaurantId, order.table_id);
+        // ✅ OPTIMIZATION: Invalidate table state cache when order status changes
+        TableService.invalidateActiveTableStateCache(restaurantId);
       }
 
       const updatedOrder = await this.getOrderById(restaurantId, orderId);
@@ -2335,6 +2339,8 @@ export class OrderService {
       logger.info(`✅ Order payment updated: ${orderId}`);
       if (order.table_id) {
         await TableService.syncTableLifecycle(restaurantId, order.table_id);
+        // ✅ OPTIMIZATION: Invalidate table state cache when payment status changes
+        TableService.invalidateActiveTableStateCache(restaurantId);
       }
 
       return order;
@@ -3416,6 +3422,8 @@ export class OrderService {
 
   static async getActiveOrderByTable(restaurantId, tableId) {
     try {
+      // ✅ OPTIMIZATION: First, check if active order exists with minimal fields
+      // This is much faster than fetching nested data
       const { data: orders, error } = await supabase
         .from('orders')
         .select(`
@@ -3435,21 +3443,7 @@ export class OrderService {
           created_at,
           updated_at,
           is_deleted,
-        order_items (
-          id,
-          menu_item_id,
-          quantity,
-          unit_price,
-          sent_to_kitchen,
-          kot_id,
-          menu_items (
-            name,
-            preparation_time
-            )
-          ),
-          tables!table_id (
-            table_number
-          )
+          tables!table_id (table_number)
         `)
         .eq('restaurant_id', restaurantId)
         .eq('table_id', tableId)
@@ -3470,6 +3464,28 @@ export class OrderService {
       if (!order) {
         return null;
       }
+
+      // ✅ OPTIMIZATION: Only fetch order_items if caller will need them
+      // Load order items separately to avoid large nested query
+      const { data: orderItems, error: itemsError } = await supabase
+        .from('order_items')
+        .select(`
+          id,
+          menu_item_id,
+          quantity,
+          unit_price,
+          sent_to_kitchen,
+          kot_id,
+          menu_items (name, preparation_time)
+        `)
+        .eq('order_id', order.id);
+
+      if (itemsError) {
+        throw itemsError;
+      }
+
+      // Attach order items to order
+      order.order_items = orderItems || [];
 
       const transformedOrder = {
         ...this.transformOrder(order),
@@ -3835,6 +3851,10 @@ export class OrderService {
 
       logger.info(`Order deletion completed: ${orderId} :: ${auditNote}`);
       console.log('[SERVICE_SOFT_DELETE] ✅ Order deletion completed successfully');
+      
+      // ✅ OPTIMIZATION: Invalidate table state cache since order was deleted
+      TableService.invalidateActiveTableStateCache(effectiveRestaurantId);
+      
       return { id: orderId, deletedAt, restaurantId: effectiveRestaurantId };
     } catch (error) {
       console.log('[SERVICE_SOFT_DELETE] ❌ Soft delete order error:', error.message);

@@ -3,6 +3,10 @@ import supabase from '../config/supabase.js';
 
 export class TableService {
   static ACTIVE_ORDER_STATUSES = ['awaiting_waiter_approval', 'pending', 'preparing', 'ready', 'served', 'in_progress'];
+  
+  // ✅ OPTIMIZATION: Cache for getActiveTableStates with 5 second TTL
+  static activeTableStateCache = new Map();
+  static ACTIVE_TABLE_STATE_CACHE_TTL_MS = 5000; // 5 seconds
 
   static normalizeTableNumber(value) {
     return String(value ?? '').trim();
@@ -71,6 +75,15 @@ export class TableService {
   }
 
   static async getActiveTableStates(restaurantId) {
+    // ✅ OPTIMIZATION: Check cache first (5 second TTL)
+    const cacheKey = `table_states:${restaurantId}`;
+    const cachedEntry = this.activeTableStateCache.get(cacheKey);
+    const now = Date.now();
+
+    if (cachedEntry && cachedEntry.expiresAt > now) {
+      return cachedEntry.value;
+    }
+
     const { data: orders, error } = await supabase
       .from('orders')
       .select('table_id, order_source, notes')
@@ -101,7 +114,19 @@ export class TableService {
       tableStates.set(order.table_id, current);
     });
 
+    // ✅ OPTIMIZATION: Cache the result
+    this.activeTableStateCache.set(cacheKey, {
+      value: tableStates,
+      expiresAt: now + this.ACTIVE_TABLE_STATE_CACHE_TTL_MS,
+    });
+
     return tableStates;
+  }
+
+  // ✅ OPTIMIZATION: Invalidate table state cache when orders change
+  static invalidateActiveTableStateCache(restaurantId) {
+    const cacheKey = `table_states:${restaurantId}`;
+    this.activeTableStateCache.delete(cacheKey);
   }
 
   static async getAssignedWaiterIdForTable(restaurantId, tableId) {
