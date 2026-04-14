@@ -86,20 +86,10 @@ router.get('/menu/items', requireFeatureFlag('qr_ordering', 'QR ordering is curr
 
     const restaurantId = tableData.restaurant_id;
 
+    // ✅ FIXED: Don't block menu loading if table is busy
+    // Let user browse menu even if table has running order
+    // Order creation endpoint will handle busy table conflict
     const activeOrder = await getBusyTableOrder(restaurantId, tableData.id);
-    if (activeOrder) {
-      return res.status(409).json({
-        statusCode: 409,
-        success: false,
-        message: `Table ${tableData.table_number} is currently busy. Please ask the waiter for the running bill.`,
-        data: {
-          tableId: tableData.id,
-          tableNumber: tableData.table_number,
-          orderId: activeOrder.id,
-          orderStatus: activeOrder.status,
-        },
-      });
-    }
 
     const [{ data: restaurantData }, categories, items] = await Promise.all([
       supabase
@@ -118,6 +108,13 @@ router.get('/menu/items', requireFeatureFlag('qr_ordering', 'QR ordering is curr
       restaurantName: restaurantData?.name || 'Restaurant Menu',
       categories,
       items,
+      // ✅ Include busy table info so frontend can show a warning
+      tableBusyStatus: activeOrder ? {
+        isBusy: true,
+        message: `Table ${tableData.table_number} has a running order. You can add more items or create a new order.`,
+        orderId: activeOrder.id,
+        orderStatus: activeOrder.status,
+      } : null,
     };
 
     res.status(200).json({

@@ -61,6 +61,7 @@ export default function CustomerMenu() {
   const [cartToast, setCartToast] = useState('');
   const [previewItem, setPreviewItem] = useState(null);
   const [activeCategory, setActiveCategory] = useState('all');
+  const [tableBusyWarning, setTableBusyWarning] = useState(null);
   const sectionRefs = useRef({});
 
   const cart = useCustomerCartStore((state) => state.carts[cartKey] || []);
@@ -103,6 +104,15 @@ export default function CustomerMenu() {
           categoryId: item.categoryId || item.category_id || item.category?.id || item.category?._id || '',
         }))
       : [];
+
+  // ✅ Show warning if table already has a running order
+  useEffect(() => {
+    if (menuData?.tableBusyStatus?.isBusy) {
+      setTableBusyWarning(menuData.tableBusyStatus);
+    } else {
+      setTableBusyWarning(null);
+    }
+  }, [menuData?.tableBusyStatus]);
 
   const groupedCategories = useMemo(() => {
     const grouped = categories.map((category) => ({
@@ -384,37 +394,7 @@ export default function CustomerMenu() {
 
   if (apiError) {
     const apiUrl = `${API_BASE_URL}/customer/menu/items?table=${tableNumber || ''}${tableId ? `&tableId=${tableId}` : ''}`;
-    const isBusyTableError = /currently busy|running bill|blocked until that bill is cleared/i.test(apiError) || apiError?.includes?.('409');
-
-    if (isBusyTableError) {
-      return (
-        <div className="flex min-h-screen items-center justify-center bg-[var(--bg-main)] p-6">
-          <div className="glass-panel max-w-md rounded-3xl p-6 text-center">
-            <AlertCircle className="mx-auto mb-4 h-12 w-12 text-amber-400" />
-            <h1 className="mb-2 text-2xl font-bold text-[var(--text-primary)]">Table Is Busy</h1>
-            <p className="mb-4 text-[var(--text-secondary)]">{apiError}</p>
-            <div className="flex flex-wrap justify-center gap-3">
-              <button
-                onClick={() => {
-                  refetch().catch(() => {
-                    setMenuRetryCount((current) => current + 1);
-                  });
-                }}
-                className="rounded-xl bg-[var(--color-primary)] px-6 py-2 text-white transition hover:brightness-110"
-              >
-                Check Again
-              </button>
-              <button
-                onClick={() => navigate('/')}
-                className="rounded-xl border border-[var(--border-color)] bg-[var(--bg-card)] px-6 py-2 text-[var(--text-primary)] transition hover:bg-[var(--bg-card-muted)]"
-              >
-                Go Back
-              </button>
-            </div>
-          </div>
-        </div>
-      );
-    }
+    // ✅ FIXED: Don't show "table busy" error - show menu with warning instead
 
     return (
       <div className="flex min-h-screen items-center justify-center bg-[var(--bg-main)] p-6">
@@ -558,6 +538,18 @@ export default function CustomerMenu() {
             </button>
           </div>
         </div>
+        
+        {/* ✅ Show warning if table has running order */}
+        {tableBusyWarning && (
+          <div className="border-t border-amber-200 bg-amber-50/50 backdrop-blur-sm">
+            <div className="mx-auto max-w-6xl px-4 py-3 sm:px-6">
+              <div className="flex items-center gap-3">
+                <AlertCircle className="h-5 w-5 flex-shrink-0 text-amber-600" />
+                <p className="text-sm font-medium text-amber-900">{tableBusyWarning.message}</p>
+              </div>
+            </div>
+          </div>
+        )}
       </header>
 
       <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8">

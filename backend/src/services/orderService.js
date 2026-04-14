@@ -3840,9 +3840,13 @@ export class OrderService {
             logger.warn(`Failed to deactivate table assignment for ${tableId}:`, assignmentError);
           }
 
+          // ✅ CRITICAL: Invalidate cache BEFORE syncTableLifecycle so it gets fresh data
+          TableService.invalidateActiveTableStateCache(effectiveRestaurantId);
           await TableService.syncTableLifecycle(effectiveRestaurantId, tableId);
         } else {
           logger.info(`⚠️ ${remainingOrders.length} open order(s) still exist on table ${tableId} - keeping status as occupied`);
+          // ✅ CRITICAL: Also invalidate cache when orders remain so table state is accurate
+          TableService.invalidateActiveTableStateCache(effectiveRestaurantId);
         }
       }
 
@@ -3863,9 +3867,6 @@ export class OrderService {
 
       logger.info(`Order deletion completed: ${orderId} :: ${auditNote}`);
       console.log('[SERVICE_SOFT_DELETE] ✅ Order deletion completed successfully');
-      
-      // ✅ OPTIMIZATION: Invalidate table state cache since order was deleted
-      TableService.invalidateActiveTableStateCache(effectiveRestaurantId);
       
       return { id: orderId, deletedAt, restaurantId: effectiveRestaurantId };
     } catch (error) {
