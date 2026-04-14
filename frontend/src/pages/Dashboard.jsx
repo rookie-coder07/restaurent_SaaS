@@ -174,6 +174,16 @@ export default function Dashboard() {
 
   return (
     <div className="compact-page space-y-4">
+      {/* Restaurant Header */}
+      {profile?.name && (
+        <div className="mb-2 border-b border-[var(--border-color)] pb-4">
+          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--text-secondary)]">Restaurant</p>
+          <h1 className="mt-2 text-2xl font-black text-[var(--text-primary)] sm:text-3xl">
+            {profile.name}
+          </h1>
+        </div>
+      )}
+
       <ResponsiveGrid>
         <StatCard
           icon={BarChart3}
