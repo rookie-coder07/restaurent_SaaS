@@ -3762,9 +3762,10 @@ export class OrderService {
       }
 
       // ✅ UPDATE table status ONLY if this is the last order on the table
+      let remainingOrders = [];
       if (tableId) {
         // Check if there are any other non-deleted OPEN orders on this table
-        const { data: remainingOrders, error: remainingOrdersError } = await supabase
+        const { data: orders, error: remainingOrdersError } = await supabase
           .from('orders')
           .select('id, status')
           .eq('restaurant_id', effectiveRestaurantId)
@@ -3777,7 +3778,8 @@ export class OrderService {
           logger.warn(`Failed to check remaining orders for table ${tableId}:`, remainingOrdersError);
         }
 
-        const hasRemainingOrders = (remainingOrders || []).length > 0;
+        remainingOrders = orders || [];
+        const hasRemainingOrders = remainingOrders.length > 0;
 
         if (!hasRemainingOrders) {
           logger.info(`✅ No remaining open orders for table ${tableId} - marking as available`);
