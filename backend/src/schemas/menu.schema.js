@@ -9,7 +9,7 @@ const ingredientSchema = Joi.object({
 export const createMenuItemSchema = Joi.object({
   categoryId: Joi.string().uuid().required(),
   name: Joi.string().trim().min(2).max(100).required(),
-  description: Joi.string().trim().max(500).optional(),
+  description: Joi.string().trim().max(500).allow('').optional(),
   price: Joi.number().positive().precision(2).required(),
   preparationTime: Joi.number().integer().min(1).max(120).default(15),
   tags: Joi.array()
@@ -22,7 +22,7 @@ export const createMenuItemSchema = Joi.object({
 export const updateMenuItemSchema = Joi.object({
   categoryId: Joi.string().uuid().required(),
   name: Joi.string().trim().min(2).max(100).optional(),
-  description: Joi.string().trim().max(500).optional(),
+  description: Joi.string().trim().max(500).allow('').optional(),
   price: Joi.number().positive().precision(2).optional(),
   preparationTime: Joi.number().integer().min(1).max(120).optional(),
   isAvailable: Joi.boolean().optional(),
