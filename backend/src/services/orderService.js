@@ -27,7 +27,9 @@ export class OrderService {
     injectedSupabase = supabaseInstance;
   }
 
-  static OPEN_BILL_STATUSES = ['awaiting_waiter_approval', 'pending', 'preparing', 'ready', 'accepted'];
+  // ✅ FIXED: Match database constraint idx_orders_one_open_bill_per_table
+  // which checks: status IN ('awaiting_waiter_approval', 'pending', 'preparing', 'ready', 'served', 'in_progress')
+  static OPEN_BILL_STATUSES = ['awaiting_waiter_approval', 'pending', 'preparing', 'ready', 'served', 'in_progress'];
 
   static CLOSED_ORDER_STATUSES = ['completed'];
   static LOYALTY_EARN_RATE_RUPEES = 100;
@@ -1842,6 +1844,31 @@ export class OrderService {
             payload: insertPayload,
           });
           throw error;
+        }
+
+        // ✅ HANDLE UNIQUE CONSTRAINT ERROR (duplicate open bill for table)
+        if (this.isUniqueConstraintError(error)) {
+          logger.warn('📋 Unique constraint violation - checking for existing open bill', {
+            restaurantId: finalRestaurantId,
+            tableId: resolvedTableId,
+            attempt: attempt + 1,
+          });
+
+          // Check if there's an existing open bill for this table
+          const existingBill = await this.getActiveOrderByTable(finalRestaurantId, resolvedTableId);
+          if (existingBill) {
+            logger.info('✅ Found existing open bill, returning it instead of creating new order', {
+              orderId: existingBill.id,
+              tableId: resolvedTableId,
+            });
+            return this.buildExistingOpenBillResult(existingBill);
+          }
+
+          // If no existing bill found, this is unexpected - log and retry
+          logger.warn('⚠️ Unique constraint error but no existing bill found - retrying', {
+            tableId: resolvedTableId,
+            attempt: attempt + 1,
+          });
         }
 
         if (normalizedRequestId) {
