@@ -6,6 +6,56 @@ import { formatCurrency } from './formatters';
  * Pure HTML + CSS for blazing-fast printing without API delays
  */
 
+// ✅ PRINTER WIDTH CONFIGURATION
+const PRINTER_WIDTHS = {
+  '58mm': 32,   // 58mm thermal printer = ~32 characters per line
+  '80mm': 48,   // 80mm thermal printer = ~48 characters per line
+};
+
+// Default to 80mm (most common)
+let CURRENT_PRINTER_WIDTH = PRINTER_WIDTHS['80mm'];
+
+/**
+ * Set the printer width dynamically
+ * @param {string} width - Printer width: '58mm' or '80mm'
+ */
+export function setPrinterWidth(width) {
+  if (PRINTER_WIDTHS[width]) {
+    CURRENT_PRINTER_WIDTH = PRINTER_WIDTHS[width];
+  }
+}
+
+/**
+ * Get the current printer width in characters
+ */
+export function getPrinterWidth() {
+  return CURRENT_PRINTER_WIDTH;
+}
+
+/**
+ * ✅ TASK 2: GENERATE DYNAMIC LINE
+ * Generate a separator line that fills the entire printer width
+ * @param {number} width - Width in characters (optional, uses current printer width)
+ * @returns {string} Dynamic separator line
+ */
+export function generateSeparatorLine(width = CURRENT_PRINTER_WIDTH) {
+  return '─'.repeat(Math.max(width - 2, 8)); // Account for padding, minimum 8 dashes
+}
+
+/**
+ * Align text for thermal printer using monospace font
+ * @param {string} left - Left-aligned text
+ * @param {string} right - Right-aligned text
+ * @param {number} width - Total width in characters
+ * @returns {string} Aligned text line
+ */
+export function alignThermalText(left, right, width = CURRENT_PRINTER_WIDTH) {
+  const leftStr = String(left || '').substring(0, width - 10);
+  const rightStr = String(right || '').substring(0, 10);
+  const padding = width - leftStr.length - rightStr.length;
+  return leftStr + ' '.repeat(Math.max(padding, 1)) + rightStr;
+}
+
 function escapeHtml(value) {
   return String(value ?? '')
     .replaceAll('&', '&amp;')
@@ -45,13 +95,21 @@ export function instantPrint(html, title = 'Print') {
 
 /**
  * Generate thermal-optimized KOT HTML for instant printing
- * Designed for 80mm (280px width) thermal printers
+ * Designed for 80mm (280px width) thermal printers and 58mm printers
  * @param {Object} ticket - Kitchen ticket data
  * @param {Object} order - Order data
  * @param {Object} restaurant - Restaurant data
+ * @param {string} printerWidth - Printer width: '58mm' or '80mm' (default: '80mm')
  * @returns {string} Complete HTML document
  */
-export function generateKotPrintHtml({ ticket, order, restaurant }) {
+export function generateKotPrintHtml({ ticket, order, restaurant, printerWidth = '80mm' }) {
+  // ✅ Set printer width for dynamic line generation
+  if (printerWidth && PRINTER_WIDTHS[printerWidth]) {
+    setPrinterWidth(printerWidth);
+  }
+  const width = getPrinterWidth();
+  const separatorLine = generateSeparatorLine(width);
+
   const createdAt = ticket?.createdAt || order?.createdAt || new Date();
   const timeStr = new Date(createdAt).toLocaleString('en-IN', {
     year: 'numeric',
@@ -137,6 +195,8 @@ export function generateKotPrintHtml({ ticket, order, restaurant }) {
       margin: 6px 0;
       font-size: 9px;
       letter-spacing: 1px;
+      font-family: 'Courier New', monospace;
+      white-space: pre;
     }
 
     .meta {
@@ -254,8 +314,8 @@ export function generateKotPrintHtml({ ticket, order, restaurant }) {
       <div class="kotlabel">● KITCHEN ORDER TICKET ●</div>
     </div>
 
-    <!-- Separator -->
-    <div class="separator">─────────────────────────</div>
+    <!-- ✅ DYNAMIC SEPARATOR LINE -->
+    <div class="separator">${escapeHtml(separatorLine)}</div>
 
     <!-- Metadata -->
     <div class="meta">
@@ -271,8 +331,8 @@ export function generateKotPrintHtml({ ticket, order, restaurant }) {
 
     ${ticket?.summary ? `<div style="font-size: 9px; margin: 4px 0; font-weight: 700; font-style: italic;">${escapeHtml(ticket.summary)}</div>` : ''}
 
-    <!-- Separator -->
-    <div class="separator">─────────────────────────</div>
+    <!-- ✅ DYNAMIC SEPARATOR LINE -->
+    <div class="separator">${escapeHtml(separatorLine)}</div>
 
     <!-- Items Header -->
     <div class="items-header">
@@ -285,8 +345,8 @@ export function generateKotPrintHtml({ ticket, order, restaurant }) {
       ${itemsHtml}
     </div>
 
-    <!-- Separator -->
-    <div class="separator">─────────────────────────</div>
+    <!-- ✅ DYNAMIC SEPARATOR LINE -->
+    <div class="separator">${escapeHtml(separatorLine)}</div>
 
     <!-- Footer -->
     <div class="footer">
@@ -306,7 +366,14 @@ export function generateKotPrintHtml({ ticket, order, restaurant }) {
  * @param {string} cashierName - Cashier name
  * @returns {string} Complete HTML document
  */
-export function generateBillPrintHtml({ order, restaurant, invoice, cashierName }) {
+export function generateBillPrintHtml({ order, restaurant, invoice, cashierName, printerWidth = '80mm' }) {
+  // ✅ Set printer width for dynamic line generation
+  if (printerWidth && PRINTER_WIDTHS[printerWidth]) {
+    setPrinterWidth(printerWidth);
+  }
+  const width = getPrinterWidth();
+  const separatorLine = generateSeparatorLine(width);
+
   const isPaid = String(invoice?.paymentStatus || order?.paymentStatus || '').toLowerCase() === 'paid';
   const invoiceDate = new Date(invoice?.invoiceDate || order?.createdAt || Date.now());
   const dateStr = invoiceDate.toLocaleString('en-IN', {
@@ -625,8 +692,8 @@ export function generateBillPrintHtml({ order, restaurant, invoice, cashierName 
       ${restaurant?.gstin ? `<div class="gstin">GSTIN: ${escapeHtml(restaurant.gstin)}</div>` : ''}
     </div>
 
-    <!-- Separator -->
-    <div class="separator">─────────────────────────</div>
+    <!-- ✅ DYNAMIC SEPARATOR LINE -->
+    <div class="separator">${escapeHtml(separatorLine)}</div>
 
     <!-- Bill Metadata -->
     <div class="bill-meta">
@@ -640,8 +707,8 @@ export function generateBillPrintHtml({ order, restaurant, invoice, cashierName 
       <span class="bill-meta-value">${escapeHtml(invoice?.tableNumber || order?.tableNumber || 'WALK-IN')}</span>
     </div>
 
-    <!-- Separator -->
-    <div class="separator">─────────────────────────</div>
+    <!-- ✅ DYNAMIC SEPARATOR LINE -->
+    <div class="separator">${escapeHtml(separatorLine)}</div>
 
     <!-- Items Header -->
     <div class="bill-items-header">
@@ -654,8 +721,8 @@ export function generateBillPrintHtml({ order, restaurant, invoice, cashierName 
       ${itemsHtml}
     </div>
 
-    <!-- Separator -->
-    <div class="separator">─────────────────────────</div>
+    <!-- ✅ DYNAMIC SEPARATOR LINE -->
+    <div class="separator">${escapeHtml(separatorLine)}</div>
 
     <!-- Summary Section -->
     <div class="bill-summary-title">SUMMARY</div>
@@ -673,8 +740,8 @@ export function generateBillPrintHtml({ order, restaurant, invoice, cashierName 
     ${sgstHtml}
     ${chargesHtml}
 
-    <!-- Separator -->
-    <div class="separator">─────────────────────────</div>
+    <!-- ✅ DYNAMIC SEPARATOR LINE -->
+    <div class="separator">${escapeHtml(separatorLine)}</div>
 
     <!-- Total -->
     <div class="bill-total">
@@ -695,8 +762,8 @@ export function generateBillPrintHtml({ order, restaurant, invoice, cashierName 
       <div class="payment-status">${isPaid ? '✓ PAID' : '⧗ PENDING'}</div>
     </div>
 
-    <!-- Separator -->
-    <div class="separator">─────────────────────────</div>
+    <!-- ✅ DYNAMIC SEPARATOR LINE -->
+    <div class="separator">${escapeHtml(separatorLine)}</div>
 
     <!-- Footer -->
     <div class="footer">
@@ -710,22 +777,22 @@ export function generateBillPrintHtml({ order, restaurant, invoice, cashierName 
 
 /**
  * Print KOT instantly using thermal-optimized HTML
- * @param {Object} params - Parameters object
+ * @param {Object} params - Parameters object (ticket, order, restaurant, printerWidth)
  * @returns {void}
  */
-export function printKotInstant({ ticket, order, restaurant }) {
-  const html = generateKotPrintHtml({ ticket, order, restaurant });
+export function printKotInstant({ ticket, order, restaurant, printerWidth = '80mm' }) {
+  const html = generateKotPrintHtml({ ticket, order, restaurant, printerWidth });
   const title = `KOT ${ticket?.sequence || ''}`.trim();
   instantPrint(html, title);
 }
 
 /**
  * Print Bill instantly using thermal-optimized HTML
- * @param {Object} params - Parameters object
+ * @param {Object} params - Parameters object (order, restaurant, invoice, cashierName, printerWidth)
  * @returns {void}
  */
-export function printBillInstant({ order, restaurant, invoice, cashierName }) {
-  const html = generateBillPrintHtml({ order, restaurant, invoice, cashierName });
+export function printBillInstant({ order, restaurant, invoice, cashierName, printerWidth = '80mm' }) {
+  const html = generateBillPrintHtml({ order, restaurant, invoice, cashierName, printerWidth });
   const title = invoice?.invoiceNumber || order?.displayOrderNumber || 'Bill';
   instantPrint(html, title);
 }

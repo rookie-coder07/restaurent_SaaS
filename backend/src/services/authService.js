@@ -354,29 +354,52 @@ export class AuthService {
         }
       }
 
-      // Not in restaurants, check users table for staff
+      // ✅ CRITICAL FIX: Fetch user table WITHOUT role filtering
+      // Fetch ALL columns including role, restaurant_id, status, password_hash
       logger.info(`Auth user not found in restaurants, checking users table...`);
       let user;
       let userError;
       
       // Single unified lookup for all non-admin roles (including manager)
-      // No special branching - manager uses the same flow as staff
+      // ✅ TASK 1: FETCH USER WITHOUT ROLE FILTER
+      // SELECT * FROM users WHERE id = authUserId
       if (authUserId) {
+        logger.debug(`Fetching user by ID: ${authUserId}`);
         ({ data: user, error: userError } = await supabase
           .from('users')
-          .select('*')
+          .select('*, restaurants!inner(id, name, email, status)')
           .eq('id', authUserId)
           .single());
+        
+        if (userError) {
+          logger.warn(`[LOGIN] User fetch by ID failed for authUserId ${authUserId}: ${userError.message}`);
+        } else if (user) {
+          logger.info(`[LOGIN] User fetched from database by ID:`, {
+            userId: user.id,
+            email: user.email,
+            role: user.role,
+            status: user.status,
+            restaurantId: user.restaurant_id,
+          });
+        }
       }
 
-      // If not found by ID, try by email
+      // If not found by ID, try by email (fallback)
       if ((userError || !user) && email) {
         logger.warn(`User not found by ID, searching by email: ${email}`);
         ({ data: user, error: userError } = await supabase
           .from('users')
-          .select('*')
+          .select('*, restaurants!inner(id, name, email, status)')
           .eq('email', email.toLowerCase())
           .single());
+        
+        if (user) {
+          logger.info(`[LOGIN] User fetched from database by email:`, {
+            userId: user.id,
+            email: user.email,
+            role: user.role,
+          });
+        }
       }
 
       // User must exist - auto-provision on first login if needed
@@ -434,62 +457,40 @@ export class AuthService {
       }
 
       if (!user) {
+        logger.error(`[LOGIN] User not found in profile store for email: ${email}`);
         throw new Error('User not found in profile store');
       }
 
+      logger.debug(`[LOGIN] User validation:`, {
+        userId: user.id,
+        email: user.email,
+        role: user.role,
+        status: user.status,
+        hasRole: !!user.role,
+      });
+
       if (!user.role) {
+        logger.error(`[LOGIN] User role is missing for user: ${user.id}`);
         throw new Error('User role is missing');
       }
 
       if (user.status !== 'active') {
+        logger.warn(`[LOGIN] User account is inactive for: ${user.email}, status: ${user.status}`);
         throw new Error('User account is inactive');
       }
 
-      // CRITICAL FIX: If user has NO restaurant_id, assign one automatically
-      // This prevents managers from seeing 0 data due to null restaurant_id
-      if (!user.restaurant_id && normalizeRole(user.role) === ROLES.MANAGER) {
-        logger.warn(`🚨 Manager has NULL restaurant_id: ${user.email} - attempting to assign one`);
-        
-        // Try to find restaurant by email match first, then use first available
-        let restaurantId = null;
-        
-        const { data: emailMatchRestaurant } = await supabase
-          .from('restaurants')
-          .select('id')
-          .eq('email', email.toLowerCase())
-          .maybeSingle();
-        
-        if (emailMatchRestaurant?.id) {
-          restaurantId = emailMatchRestaurant.id;
-        } else {
-          // Fallback: use first restaurant
-          const { data: firstRestaurant } = await supabase
-            .from('restaurants')
-            .select('id')
-            .limit(1)
-            .maybeSingle();
-          restaurantId = firstRestaurant?.id || null;
-        }
-        
-        if (restaurantId) {
-          logger.info(`✅ Assigning restaurant ${restaurantId} to manager ${user.email}`);
-          const { error: assignError } = await supabase
-            .from('users')
-            .update({ restaurant_id: restaurantId })
-            .eq('id', user.id);
-          
-          if (assignError) {
-            logger.error(`Failed to assign restaurant to manager: ${assignError.message}`);
-          } else {
-            user.restaurant_id = restaurantId;
-          }
-        } else {
-          logger.error('❌ No restaurant available to assign to manager');
-        }
-      }
+      // \u2705 TASK 4: FIX ROLE CHECK - Allow admin, manager, staff\n      // CRITICAL FIX: If user has NO restaurant_id, assign one automatically\n      // This prevents managers from seeing 0 data due to null restaurant_id\n      if (!user.restaurant_id && normalizeRole(user.role) === ROLES.MANAGER) {\n        logger.warn(`[LOGIN] 🚨 Manager has NULL restaurant_id: ${user.email} - attempting to assign one`);\n        \n        // Try to find restaurant by email match first, then use first available\n        let restaurantId = null;\n        \n        const { data: emailMatchRestaurant } = await supabase\n          .from('restaurants')\n          .select('id, name')\n          .eq('email', email.toLowerCase())\n          .maybeSingle();\n        \n        if (emailMatchRestaurant?.id) {\n          restaurantId = emailMatchRestaurant.id;\n          logger.info(`[LOGIN] ✅ Found restaurant by email match: ${emailMatchRestaurant.name} (${restaurantId})`);\n        } else {\n          // Fallback: use first restaurant\n          const { data: firstRestaurant } = await supabase\n            .from('restaurants')\n            .select('id, name')\n            .limit(1)\n            .maybeSingle();\n          restaurantId = firstRestaurant?.id || null;\n          if (restaurantId) {\n            logger.info(`[LOGIN] ✅ No email match, using first restaurant: ${firstRestaurant.name} (${restaurantId})`);\n          }\n        }\n        \n        if (restaurantId) {\n          logger.info(`[LOGIN] ✅ Assigning restaurant ${restaurantId} to manager ${user.email}`);\n          const { error: assignError } = await supabase\n            .from('users')\n            .update({ restaurant_id: restaurantId })\n            .eq('id', user.id);\n          \n          if (assignError) {\n            logger.error(`[LOGIN] ❌ Failed to assign restaurant to manager: ${assignError.message}`);\n          } else {\n            user.restaurant_id = restaurantId;\n            logger.info(`[LOGIN] ✅ Manager restaurant assignment successful`);\n          }\n        } else {\n          logger.error('[LOGIN] ❌ No restaurant available to assign to manager');\n        }\n      }"
 
       const normalizedRole = normalizeRole(user.role);
+      logger.debug(`[LOGIN] Role normalization:`, {
+        rawRole: user.role,
+        normalizedRole,
+        isValid: VALID_ROLES.includes(normalizedRole),
+        validRoles: VALID_ROLES,
+      });
+      
       if (!VALID_ROLES.includes(normalizedRole)) {
+        logger.error(`[LOGIN] User has unsupported role: ${normalizedRole} (raw: ${user.role})`);
         throw new Error('User account has an unsupported role');
       }
 
@@ -502,6 +503,14 @@ export class AuthService {
         hasPasswordHash: !!user.password_hash,
         passwordHashCleared: user.password_hash_cleared,
         passwordUpdatedAt: user.password_updated_at,
+      });   
+      
+      // ✅ DEBUG: Log the auth verification
+      logger.info(`[LOGIN] Auth verification result:`, {
+        authSucceeded: !authError,
+        authUserId: authData?.user?.id,
+        email: email.toLowerCase(),
+        portal,
       });
 
       logger.info('Login user profile', {
@@ -515,14 +524,31 @@ export class AuthService {
         authVerified: !!authData?.user?.id,
       });
 
+      // ✅ TASK 3: REMOVE INVALID COMPARISON
       // ✅ FIXED: Only trust Supabase Auth - no custom password checking
       // Password is managed by Supabase auth system, not local database
+      // ❌ DO NOT: Use bcrypt.compare with database password_hash
+      // ❌ DO NOT: Use inputPassword === user.password comparison
+      // ✅ DO: Use Supabase Auth result which already verified the password
+      
       if (authFailedMessage) {
+        logger.error(`[LOGIN] Supabase Auth failed:`, {
+          email: email.toLowerCase(),
+          errorMessage: authFailedMessage,
+          portal,
+        });
         throw new Error(authFailedMessage || 'Invalid email or password');
       }
       if (!authData?.user?.id) {
+        logger.error(`[LOGIN] Authentication failed - no auth user ID:`, {
+          email: email.toLowerCase(),
+          hasAuthData: !!authData,
+          portal,
+        });
         throw new Error('Authentication failed. Invalid email or password.');
       }
+      
+      logger.info(`[LOGIN] Password verified by Supabase Auth for: ${email.toLowerCase()}`);
 
       // ✅ FIXED: Never write passwords to database
       // Supabase Auth handles all password storage and verification

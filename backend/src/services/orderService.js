@@ -1020,27 +1020,82 @@ export class OrderService {
   }
 
   static async validateOrderItems(restaurantId, items = [], options = {}) {
-    if (!Array.isArray(items) || items.length === 0) {
+    // ✅ TASK 2: VALIDATE ITEMS - Check if empty
+    if (!Array.isArray(items)) {
+      logger.error('❌ Items validation failed: not an array', {
+        restaurantId,
+        receivedType: typeof items,
+        enforceMenuPrice: options.enforceMenuPrice,
+      });
+      throw new Error('Order items must be an array');
+    }
+
+    if (items.length === 0) {
+      logger.warn('⚠️ Items validation failed: empty array', {
+        restaurantId,
+        enforceMenuPrice: options.enforceMenuPrice,
+      });
       throw new Error('At least one order item is required');
     }
+
+    logger.debug('✅ Items array validation passed', {
+      restaurantId,
+      itemsCount: items.length,
+      enforceMenuPrice: options.enforceMenuPrice,
+    });
+
+    // ✅ TASK 5: ADD DEBUG LOGS
+    console.log('🔍 [VALIDATION] Items received:', {
+      count: items.length,
+      items: items.map(i => ({
+        menuItemId: i.menuItemId || i.itemId,
+        quantity: i.quantity,
+        price: i.unitPrice || i.price,
+      })),
+    });
 
     const normalizedItems = this.normalizeOrderItems(items);
     const menuItemIds = normalizedItems.map((item) => item.menuItemId).filter(Boolean);
     const uniqueMenuItemIds = Array.from(new Set(menuItemIds));
 
+    logger.debug('📝 Items normalized', {
+      originalCount: items.length,
+      normalizedCount: normalizedItems.length,
+      uniqueMenuItemCount: uniqueMenuItemIds.length,
+    });
+
     if (menuItemIds.length !== normalizedItems.length) {
+      logger.error('❌ Items validation failed: missing menu item IDs', {
+        restaurantId,
+        itemsWithIds: menuItemIds.length,
+        totalItems: normalizedItems.length,
+      });
       throw new Error('Each order item must include a menu item ID');
     }
 
     const { menuItems, categoryMap } = await this.getMenuCatalogSnapshot(restaurantId, uniqueMenuItemIds);
 
+    logger.debug('📚 Menu catalog snapshot retrieved', {
+      restaurantId,
+      requestedItemsCount: uniqueMenuItemIds.length,
+      foundItemsCount: (menuItems || []).length,
+    });
+
     if ((menuItems || []).length !== uniqueMenuItemIds.length) {
+      logger.error('❌ Items validation failed: menu items not found', {
+        restaurantId,
+        requestedCount: uniqueMenuItemIds.length,
+        foundCount: (menuItems || []).length,
+        missingIds: uniqueMenuItemIds
+          .filter(id => !(menuItems || []).find(m => m.id === id))
+          .slice(0, 5),
+      });
       throw new Error('One or more menu items are invalid or unavailable');
     }
 
     const menuItemMap = new Map((menuItems || []).map((item) => [item.id, item]));
 
-    return normalizedItems.map((item) => {
+    const finalItems = normalizedItems.map((item) => {
       const menuItem = menuItemMap.get(item.menuItemId);
       const tags = String(menuItem?.tags || '')
         .split(',')
@@ -1060,6 +1115,19 @@ export class OrderService {
         station: this.resolveKitchenStation({ tags, categoryName }),
       };
     });
+
+    logger.info('✅ All items validated successfully', {
+      restaurantId,
+      totalItems: finalItems.length,
+      totalInvoiceAmount: finalItems.reduce((sum, i) => sum + (i.unitPrice * i.quantity), 0),
+    });
+
+    console.log('✅ [VALIDATION] Items validated:', {
+      count: finalItems.length,
+      total: finalItems.reduce((sum, i) => sum + (i.unitPrice * i.quantity), 0),
+    });
+
+    return finalItems;
   }
 
   static computeOrderTotal(items = []) {
@@ -1875,6 +1943,23 @@ export class OrderService {
         throw new Error('Order ID is required to add items');
       }
 
+      // ✅ TASK 5: ADD DEBUG LOGS
+      logger.debug('📥 Adding items to order', {
+        orderId,
+        itemsCount: items.length,
+        selectResult: options.selectResult,
+      });
+
+      console.log('📥 [ITEMS] Adding to order:', {
+        orderId,
+        count: items.length,
+        items: items.map(i => ({
+          menuItemId: i.menuItemId || i.itemId,
+          quantity: i.quantity,
+          unitPrice: i.unitPrice ?? i.price ?? 0,
+        })),
+      });
+
       const itemsToInsert = items.map(item => ({
         order_id: orderId,
         menu_item_id: item.menuItemId || item.itemId,
@@ -1890,6 +1975,8 @@ export class OrderService {
         quantity: it.quantity,
         unit_price: it.unit_price,
       })));
+
+      console.log('📝 [ITEMS] Insert payload:', itemsToInsert);
 
       let query = supabase
         .from('order_items')
@@ -1911,12 +1998,22 @@ export class OrderService {
           itemCount: itemsToInsert.length,
           itemsPayload: itemsToInsert,
         };
-        console.log('❌ Order Items Insert Error:', { items: itemsToInsert, error }); // 🎯 Direct logging
+        console.error('❌ Order Items Insert Error:', { items: itemsToInsert, error }); // 🎯 Direct logging
         logger.error('Supabase error inserting items:', errorDetails);
         throw error;
       }
 
-      logger.info(`✅ ${items.length} items added to order ${orderId}`);
+      logger.info(`✅ ${items.length} items successfully added to order ${orderId}`, {
+        orderId,
+        itemsCount: items.length,
+        insertedRows: orderItems?.length || 0,
+      });
+
+      console.log('✅ [ITEMS] Successfully inserted:', {
+        orderId,
+        count: items.length,
+      });
+
       return orderItems;
     } catch (error) {
       const errorDetails = {
@@ -1926,7 +2023,7 @@ export class OrderService {
         itemCount: items.length,
         items: items.map(it => ({ menuItemId: it.menuItemId, quantity: it.quantity, unitPrice: it.unitPrice })),
       };
-      console.log('❌ Add Order Items Error:', { error: errorDetails, items }); // 🎯 Direct logging
+      console.error('❌ Add Order Items Error:', { error: errorDetails, items }); // 🎯 Direct logging
       logger.error('❌ Add order items error:', errorDetails);
       throw error;
     }
@@ -4115,10 +4212,12 @@ export class OrderService {
         throw new Error('Order ID is required to send to kitchen');
       }
 
+      console.log('🍳 [KOT] Starting KOT generation for order:', { orderId, restaurantId });
       logger.info(`🔍 Fetching order ${orderId} before creating KOT...`);
       const rawOrder = await this.fetchOrderRecord(restaurantId, orderId);
       
       if (!rawOrder || !rawOrder.id) {
+        logger.error('❌ Order not found or invalid', { orderId, restaurantId });
         throw new Error(`Order ${orderId} not found or invalid`);
       }
 
@@ -4126,11 +4225,53 @@ export class OrderService {
       const transformedOrder = this.transformOrder(rawOrder);
       const { publicNotes, kotMeta } = splitNotesAndKotMeta(rawOrder.notes);
 
+      // ✅ TASK 5: ADD DEBUG LOGS - Check items from transformed order
+      logger.debug('📦 Order items check', {
+        orderId,
+        transformedOrderItemsCount: transformedOrder?.items?.length || 0,
+        rawOrderItemsCount: rawOrder?.order_items?.length || 0,
+      });
+
+      console.log('📦 [KOT] Items available for KOT:', {
+        transformedCount: transformedOrder?.items?.length || 0,
+        rawCount: rawOrder?.order_items?.length || 0,
+        items: (rawOrder?.order_items || []).map(i => ({
+          id: i.id,
+          menuItemId: i.menu_item_id,
+          quantity: i.quantity,
+          sentToKitchen: i.sent_to_kitchen,
+        })),
+      });
+
       if (!Array.isArray(transformedOrder.items) || transformedOrder.items.length === 0) {
+        logger.error('❌ No items in order for KOT generation', {
+          orderId,
+          transformedItems: transformedOrder?.items?.length || 0,
+        });
         throw new Error('Add at least one item before sending to kitchen');
       }
 
       const pendingKitchenRows = (rawOrder.order_items || []).filter((item) => !item.sent_to_kitchen);
+      
+      // ✅ TASK 5: ADD DEBUG LOGS - Check pending items for KOT
+      logger.info('🔍 Pending kitchen items for KOT', {
+        orderId,
+        totalOrderItems: rawOrder.order_items?.length || 0,
+        pendingForKitchenCount: pendingKitchenRows.length,
+        alreadySentCount: (rawOrder.order_items || []).filter(i => i.sent_to_kitchen).length,
+      });
+
+      console.log('🍳 [KOT] Pending items for kitchen:', {
+        count: pendingKitchenRows.length,
+        items: pendingKitchenRows.map(i => ({
+          id: i.id,
+          menuItemId: i.menu_item_id,
+          name: i.menu_items?.name || 'Unknown',
+          quantity: i.quantity,
+          price: i.unit_price,
+        })),
+      });
+
       const existingTickets = (kotMeta.kitchen?.tickets || []).map((ticket) => this.normalizeKitchenTicket(ticket));
       const ticketItems = pendingKitchenRows.map((item) => ({
         lineKey: `${item.id}`,
@@ -4153,7 +4294,28 @@ export class OrderService {
         action: 'add',
       }));
 
+      // ✅ TASK 5: ADD DEBUG LOGS - Final ticket items for KOT
+      logger.debug('🎫 KOT ticket items prepared', {
+        orderId,
+        ticketItemsCount: ticketItems.length,
+        ticketItems: ticketItems.map(ti => ({
+          menuItemId: ti.menuItemId,
+          name: ti.name,
+          quantity: ti.quantity,
+          station: ti.station,
+        })),
+      });
+
+      console.log('🎫 [KOT] Final ticket items for printing:', {
+        count: ticketItems.length,
+        items: ticketItems,
+      });
+
       if (ticketItems.length === 0) {
+        logger.warn('⚠️ No pending kitchen items to create KOT', {
+          orderId,
+          allItemsAlreadySent: true,
+        });
         throw new Error('No new kitchen changes to send for this bill');
       }
 

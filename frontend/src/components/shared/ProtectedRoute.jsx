@@ -22,6 +22,8 @@ export default function ProtectedRoute({ layout: LayoutComponent = null, allowed
   const isResetPasswordRoute =
     location.pathname === '/reset-password' ||
     location.pathname === '/admin/reset-password' ||
+    location.pathname === '/manager/reset-password' ||
+    location.pathname === '/developer/reset-password' ||
     location.pathname === '/pos/reset-password';
 
   if (isResetPasswordRoute) {
