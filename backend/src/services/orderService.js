@@ -3702,29 +3702,13 @@ export class OrderService {
       const deletedAt = new Date().toISOString();
       const auditNote = `[order-delete] ${trimmedReason || 'no reason provided'} | actor=${role || 'unknown'}:${options.actorName || 'Unknown user'} | at=${deletedAt}`;
 
-      // Collect ALL orders tied to this table so it can never stay busy
-      const orphanOrders = new Set([orderId]);
-      if (tableId) {
-        const { data: allTableOrders, error: tableOrdersError } = await supabase
-          .from('orders')
-          .select('id')
-          .eq('restaurant_id', effectiveRestaurantId)
-          .eq('table_id', tableId)
-          .eq('is_deleted', false);
+      // ✅ FIXED: Only delete the requested order, not all orders on the table
+      const orphanIds = [orderId];
 
-        if (tableOrdersError) {
-          throw tableOrdersError;
-        }
-
-        (allTableOrders || []).forEach((row) => row?.id && orphanOrders.add(row.id));
-      }
-
-      const orphanIds = Array.from(orphanOrders);
-
-      // ⚡ BATCH DELETE dependent records (instead of per-order loops) for performance
+      // ⚡ DELETE dependent records for this specific order
       if (orphanIds.length > 0) {
-        // Batch delete order_items
-        const { error: deleteItemsError, count: itemsDeletedCount } = await supabase
+        // Delete order_items for this order
+        const { error: deleteItemsError } = await supabase
           .from('order_items')
           .delete()
           .in('order_id', orphanIds);
@@ -3734,7 +3718,7 @@ export class OrderService {
           throw new Error(`Cannot delete order - failed to remove order items: ${deleteItemsError.message}`);
         }
 
-        // Batch delete kitchen_tickets
+        // Delete kitchen_tickets for this order
         const { error: deleteKotError } = await supabase
           .from('kitchen_tickets')
           .delete()
@@ -3745,7 +3729,7 @@ export class OrderService {
           // Continue anyway - KOT records are less critical
         }
 
-        // Batch delete order_bills
+        // Delete order_bills for this order
         try {
           await supabase
             .from('order_bills')
@@ -3756,7 +3740,7 @@ export class OrderService {
         }
       }
 
-      // ⚡ BATCH UPDATE orders instead of looping - no .select() to avoid data fetching
+      // ✅ SOFT DELETE the specific order
       if (orphanIds.length > 0) {
         const { error: softDeleteError } = await supabase
           .from('orders')
@@ -3770,44 +3754,66 @@ export class OrderService {
           .eq('restaurant_id', effectiveRestaurantId);
 
         if (softDeleteError) {
-          logger.warn(`Failed to soft-delete orders:`, softDeleteError);
-          throw new Error(`Unable to delete orders: ${softDeleteError.message}`);
+          logger.warn(`Failed to soft-delete order:`, softDeleteError);
+          throw new Error(`Unable to delete order: ${softDeleteError.message}`);
         }
 
-        logger.info(`Soft-deleted ${orphanIds.length} order(s): ${auditNote}`);
+        logger.info(`Soft-deleted order: ${orderId} :: ${auditNote}`);
       }
 
-      // Update table status if orders were tied to a table
+      // ✅ UPDATE table status ONLY if this is the last order on the table
       if (tableId) {
-        const tableUpdatePayload = {
-          status: 'available',
-          reserved_by: null,
-          reservation_time: null,
-          assigned_to: null,
-        };
-
-        const { error: tableUpdateError } = await supabase
-          .from('tables')
-          .update(tableUpdatePayload)
-          .eq('id', tableId)
-          .eq('restaurant_id', effectiveRestaurantId);
-
-        if (tableUpdateError) {
-          logger.warn(`Failed to update table status for ${tableId}:`, tableUpdateError);
-        }
-
-        // Deactivate any table_assignment entry for this table so it can be reassigned cleanly
-        const { error: assignmentError } = await supabase
-          .from('table_assignments')
-          .update({ is_active: false, updated_at: deletedAt })
+        // Check if there are any other non-deleted OPEN orders on this table
+        const { data: remainingOrders, error: remainingOrdersError } = await supabase
+          .from('orders')
+          .select('id, status')
           .eq('restaurant_id', effectiveRestaurantId)
-          .eq('table_id', tableId);
+          .eq('table_id', tableId)
+          .eq('is_deleted', false)
+          .neq('payment_status', 'paid') // Exclude paid/completed orders
+          .in('status', this.OPEN_BILL_STATUSES); // Only count open status orders
 
-        if (assignmentError) {
-          logger.warn(`Failed to deactivate table assignment for ${tableId}:`, assignmentError);
+        if (remainingOrdersError) {
+          logger.warn(`Failed to check remaining orders for table ${tableId}:`, remainingOrdersError);
         }
 
-        await TableService.syncTableLifecycle(effectiveRestaurantId, tableId);
+        const hasRemainingOrders = (remainingOrders || []).length > 0;
+
+        if (!hasRemainingOrders) {
+          logger.info(`✅ No remaining open orders for table ${tableId} - marking as available`);
+
+          const tableUpdatePayload = {
+            status: 'available',
+            reserved_by: null,
+            reservation_time: null,
+            assigned_to: null,
+          };
+
+          const { error: tableUpdateError } = await supabase
+            .from('tables')
+            .update(tableUpdatePayload)
+            .eq('id', tableId)
+            .eq('restaurant_id', effectiveRestaurantId);
+
+          if (tableUpdateError) {
+            logger.warn(`Failed to update table status for ${tableId}:`, tableUpdateError);
+          }
+
+          // Deactivate any table_assignment entry for this table so it can be reassigned cleanly
+          const { error: assignmentError } = await supabase
+            .from('table_assignments')
+            .update({ is_active: false, updated_at: deletedAt })
+            .eq('restaurant_id', effectiveRestaurantId)
+            .eq('table_id', tableId);
+
+          if (assignmentError) {
+            logger.warn(`Failed to deactivate table assignment for ${tableId}:`, assignmentError);
+          }
+
+          await TableService.syncTableLifecycle(effectiveRestaurantId, tableId);
+        } else {
+          logger.info(`⚠️ ${remainingOrders.length} open order(s) still exist on table ${tableId} - keeping status as occupied`);
+        }
       }
 
       this.emitOrderEvent(effectiveRestaurantId, 'order.deleted', {
@@ -3815,6 +3821,15 @@ export class OrderService {
         tableId: tableId || '',
         orderType: existingOrder.order_type || existingOrder.orderType || '',
       });
+
+      // 📊 EMIT table update event for real-time UI sync
+      if (tableId) {
+        broadcastRestaurantEvent(effectiveRestaurantId, 'table_updated', {
+          tableId,
+          status: (remainingOrders?.length || 0) > 0 ? 'occupied' : 'available',
+          updatedAt: deletedAt,
+        });
+      }
 
       logger.info(`Order deletion completed: ${orderId} :: ${auditNote}`);
       console.log('[SERVICE_SOFT_DELETE] ✅ Order deletion completed successfully');

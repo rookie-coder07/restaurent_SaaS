@@ -32,7 +32,7 @@ import StatCard from '../components/common/StatCard';
 import PaginationControls from '../components/common/PaginationControls';
 import useResponsivePagination from '../hooks/useResponsivePagination';
 import { playLoudBuzzer } from '../utils/alerts';
-import { subscribeToOrderEvents } from '../utils/liveOrderEvents';
+import { subscribeToOrderEvents, subscribeToTableEvents } from '../utils/liveOrderEvents';
 
 const TABLE_STATUS_META = {
   open: {
@@ -281,6 +281,20 @@ export default function Tables() {
     }
 
     const cleanup = subscribeToOrderEvents(() => {
+      refreshTableOverview({ force: true, silent: true }).catch(() => {});
+    });
+
+    return cleanup;
+  }, [refreshTableOverview, restaurantId]);
+
+  // 📊 Subscribe to table updates (when orders are deleted, tables are freed)
+  useEffect(() => {
+    if (!restaurantId) {
+      return undefined;
+    }
+
+    const cleanup = subscribeToTableEvents((tableUpdate) => {
+      // Refresh tables when a table status is updated (e.g., freed from order deletion)
       refreshTableOverview({ force: true, silent: true }).catch(() => {});
     });
 

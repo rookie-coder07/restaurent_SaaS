@@ -137,3 +137,81 @@ export function subscribeToOrderEvents(onEvent, options = {}) {
     }
   };
 }
+
+export function subscribeToTableEvents(onEvent, options = {}) {
+  // Listen to table_updated events from order deletion
+  if (typeof window === 'undefined' || typeof window.EventSource !== 'function' || typeof onEvent !== 'function') {
+    return () => {};
+  }
+
+  const accessToken = getCurrentPortalAccessToken();
+  if (!accessToken) {
+    logger.debug('No access token available for table stream connection');
+    return () => {};
+  }
+
+  if (typeof accessToken !== 'string' || !accessToken.includes('.')) {
+    logger.error('Invalid token format for table stream connection');
+    return () => {};
+  }
+
+  const streamUrl = new URL(`${API_BASE_URL}/orders/events/stream`);
+  streamUrl.searchParams.set('accessToken', accessToken);
+  
+  logger.info(`[Table Stream] Listening for table updates`);
+
+  const eventName = 'table_updated';
+  let isClosed = false;
+  let eventSource = null;
+  let reconnectAttempts = 0;
+  const maxReconnectAttempts = 3;
+
+  const handleTableEvent = (event) => {
+    try {
+      const payload = JSON.parse(event.data || '{}');
+      logger.debug(`[Table] Update received for table ${payload.tableId}:`, payload);
+      onEvent(payload);
+    } catch (error) {
+      reportClientError(error, 'Error: failed to parse table update event');
+      onEvent({});
+    }
+  };
+
+  const openStream = () => {
+    canOpenOrderEventStream(streamUrl.toString()).then((isSupported) => {
+      if (isClosed || !isSupported) {
+        return;
+      }
+
+      logger.info('[Table Stream] Opening connection for table updates');
+      eventSource = new window.EventSource(streamUrl.toString());
+      eventSource.addEventListener(eventName, handleTableEvent);
+      
+      eventSource.addEventListener('error', (error) => {
+        if (eventSource) {
+          eventSource.close();
+          eventSource = null;
+        }
+        
+        if (!isClosed && reconnectAttempts < maxReconnectAttempts) {
+          reconnectAttempts++;
+          const delayMs = Math.min(1000 * Math.pow(2, reconnectAttempts - 1), 10000);
+          logger.debug(`[Table Stream] Reconnect attempt ${reconnectAttempts}/${maxReconnectAttempts}`);
+          setTimeout(openStream, delayMs);
+        }
+      });
+    });
+  };
+
+  openStream();
+
+  return () => {
+    isClosed = true;
+    reconnectAttempts = maxReconnectAttempts;
+    if (eventSource) {
+      eventSource.removeEventListener(eventName, handleTableEvent);
+      eventSource.close();
+      eventSource = null;
+    }
+  };
+}
