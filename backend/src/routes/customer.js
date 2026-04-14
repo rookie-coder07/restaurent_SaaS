@@ -171,6 +171,14 @@ router.get('/menu/:qrCodeData/items', requireFeatureFlag('qr_ordering', 'QR orde
 // This handles table resolution from tableNumber to tableId
 router.post('/orders', optionalAuth, requireFeatureFlag('qr_ordering', 'QR ordering is currently disabled by the platform administrator.'), async (req, res, next) => {
   try {
+    console.log('📦 Customer order creation route:', {
+      hasTableId: !!req.body.tableId,
+      hasTableNumber: !!req.body.tableNumber,
+      hasRestaurantId: !!req.body.restaurantId,
+      itemsCount: req.body.items?.length,
+      hasUser: !!req.user,
+    });
+
     // ✅ Validate input data
     if (!req.body.tableId && !req.body.tableNumber) {
       SecurityAuditLogger.logFailedValidation(
@@ -212,6 +220,7 @@ router.post('/orders', optionalAuth, requireFeatureFlag('qr_ordering', 'QR order
         .single();
 
       if (tableError || !table) {
+        console.error('❌ Table lookup failed:', { tableId: req.body.tableId, error: tableError?.message });
         SecurityAuditLogger.logUnauthorizedAccess(
           req.user?.id || 'unknown',
           '/customer/orders',
@@ -226,7 +235,7 @@ router.post('/orders', optionalAuth, requireFeatureFlag('qr_ordering', 'QR order
       }
 
       req.restaurantId = table.restaurant_id;
-      console.log(`✅ Using table ID ${req.body.tableId} for restaurant ${table.restaurant_id}`);
+      console.log(`✅ Restaurant ID set from table: ${req.restaurantId}`);
 
       try {
         const activeOrder = await getBusyTableOrder(table.restaurant_id, table.id);
@@ -254,6 +263,7 @@ router.post('/orders', optionalAuth, requireFeatureFlag('qr_ordering', 'QR order
 
     // If tableNumber is provided but not tableId, resolve it
     if (req.body.tableNumber && !req.body.tableId) {
+      console.log('🔍 Resolving table number:', req.body.tableNumber);
       const { data: table, error: tableError } = await supabase
         .from('tables')
         .select('id, restaurant_id')
@@ -261,6 +271,7 @@ router.post('/orders', optionalAuth, requireFeatureFlag('qr_ordering', 'QR order
         .single();
 
       if (tableError || !table) {
+        console.error('❌ Table lookup failed:', { tableNumber: req.body.tableNumber, error: tableError?.message });
         SecurityAuditLogger.logFailedValidation(
           req.user?.id || 'unknown',
           'table_number',
@@ -278,7 +289,7 @@ router.post('/orders', optionalAuth, requireFeatureFlag('qr_ordering', 'QR order
       // Add resolved IDs to request body
       req.body.tableId = table.id;
       req.restaurantId = table.restaurant_id;
-      console.log(`✅ Resolved Table #${req.body.tableNumber} → ID: ${table.id}`);
+      console.log(`✅ Restaurant ID set from table number: ${req.restaurantId}`);
 
       try {
         const activeOrder = await getBusyTableOrder(table.restaurant_id, table.id);
@@ -305,6 +316,11 @@ router.post('/orders', optionalAuth, requireFeatureFlag('qr_ordering', 'QR order
       }
     }
 
+    // ✅ Ensure restaurantId is available to controller
+    if (req.restaurantId && !req.body.restaurantId) {
+      req.body.restaurantId = req.restaurantId;
+    }
+
     // ✅ Log data access
     SecurityAuditLogger.logDataAccess(
       req.user?.id || 'unknown',
@@ -312,6 +328,12 @@ router.post('/orders', optionalAuth, requireFeatureFlag('qr_ordering', 'QR order
       'create',
       req.ip
     );
+
+    console.log('📝 Request ready for order creation:', {
+      restaurantId: req.restaurantId,
+      tableId: req.body.tableId,
+      itemsCount: req.body.items?.length,
+    });
 
     // Call the order controller
     next();

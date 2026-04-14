@@ -419,22 +419,25 @@ export const createOrder = asyncHandler(async (req, res) => {
       return sendError(res, 400, 'Table is required for dine-in orders');
     }
 
-    const restaurantId = req.restaurantId || req.user?.restaurantId;
+    const restaurantId = req.restaurantId || req.user?.restaurantId || req.body?.restaurantId;
     if (!restaurantId) {
       console.error('❌ Missing restaurantId in createOrder:', {
         'req.restaurantId': req.restaurantId,
         'req.user?.restaurantId': req.user?.restaurantId,
+        'req.body?.restaurantId': req.body?.restaurantId,
         'req.user': req.user,
+        'req.body.tableId': req.body.tableId,
+        'req.body.tableNumber': req.body.tableNumber,
       });
       logFailedRequest(new Error('Restaurant ID missing'), {
         message: 'Create order failed - no restaurant ID',
         endpoint: req.path,
         method: req.method,
         userId: req.user?.id || req.user?.userId,
-        statusCode: 401,
+        statusCode: 400,
         action: 'create_order_auth',
       });
-      return sendError(res, 401, 'Restaurant ID is required');
+      return sendError(res, 400, 'Unable to determine restaurant. Please try scanning the QR code again.');
     }
 
     console.log('📊 Calling OrderService.createOrder with:', {
