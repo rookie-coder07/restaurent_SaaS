@@ -213,6 +213,85 @@ export class OrderService {
     return combined.includes('23505') || combined.includes('duplicate key') || combined.includes('unique');
   }
 
+  static async cleanupSoftDeletedOrdersBlockingTableCreation(restaurantId, tableId) {
+    try {
+      if (!tableId) return;
+
+      logger.info(`🧹 Checking for soft-deleted orders blocking table ${tableId}`);
+
+      // Find any soft-deleted orders that might be blocking this table
+      const { data: softDeletedOrders, error: fetchError } = await supabase
+        .from('orders')
+        .select('id')
+        .eq('restaurant_id', restaurantId)
+        .eq('table_id', tableId)
+        .eq('is_deleted', true)
+        .in('status', this.OPEN_BILL_STATUSES);
+
+      if (fetchError) {
+        logger.warn(`Failed to fetch soft-deleted orders: ${fetchError.message}`);
+        return;
+      }
+
+      if (!softDeletedOrders || softDeletedOrders.length === 0) {
+        logger.info(`No soft-deleted orders found for table ${tableId}`);
+        return;
+      }
+
+      logger.warn(`⚠️ Found ${softDeletedOrders.length} soft-deleted orders blocking table ${tableId}`);
+
+      // Permanently delete these orders and their dependencies to free up the table
+      const orderIds = softDeletedOrders.map(o => o.id);
+      
+      // Delete order items
+      const { error: itemsError } = await supabase
+        .from('order_items')
+        .delete()
+        .in('order_id', orderIds);
+
+      if (itemsError) {
+        logger.warn(`Failed to clean up order items: ${itemsError.message}`);
+      }
+
+      // Delete kitchen tickets
+      try {
+        await supabase
+          .from('kitchen_tickets')
+          .delete()
+          .in('order_id', orderIds);
+      } catch (err) {
+        logger.warn(`Failed to clean up kitchen tickets: ${err.message}`);
+      }
+
+      // Delete bills
+      try {
+        await supabase
+          .from('order_bills')
+          .delete()
+          .in('order_id', orderIds);
+      } catch (err) {
+        // Table may not exist; ignore
+      }
+
+      // Hard delete the orders themselves to fully clear the table
+      const { error: deleteError } = await supabase
+        .from('orders')
+        .delete()
+        .in('id', orderIds)
+        .eq('restaurant_id', restaurantId);
+
+      if (deleteError) {
+        logger.error(`Failed to delete soft-deleted orders: ${deleteError.message}`);
+        throw deleteError;
+      }
+
+      logger.info(`✅ Cleaned up ${orderIds.length} soft-deleted orders blocking table ${tableId}`);
+    } catch (err) {
+      logger.warn(`Cleanup of soft-deleted orders failed: ${err.message}`);
+      // Don't throw - this is best-effort cleanup
+    }
+  }
+
   static isMissingColumnError(error, columnName = '') {
     const normalizedColumnName = String(columnName || '').trim().toLowerCase();
     const combined = `${error?.code || ''} ${error?.message || ''} ${error?.details || ''} ${error?.hint || ''}`.toLowerCase();
@@ -1862,6 +1941,12 @@ export class OrderService {
               tableId: resolvedTableId,
             });
             return this.buildExistingOpenBillResult(existingBill);
+          }
+
+          // ✅ NEW: If no active bill found, check for soft-deleted orders blocking the table
+          if (attempt < 3) {
+            logger.info('🔍 No active bill found, checking for soft-deleted orders blocking the table...');
+            await this.cleanupSoftDeletedOrdersBlockingTableCreation(finalRestaurantId, resolvedTableId);
           }
 
           // If no existing bill found, this is unexpected - log and retry
