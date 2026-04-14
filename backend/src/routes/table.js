@@ -52,4 +52,14 @@ router.post('/:tableId/claim', checkPermission(['manage_orders']), tableControll
 // Generate QR URLs
 router.post('/qr/generate', checkPermission(['manage_menu']), tableController.generateQRUrls);
 
+// ✅ CLEANUP: Fix stale tables marked as occupied with no active orders
+router.post('/admin/cleanup-stale', checkPermission(['view_orders', 'manage_tables']), async (req, res, next) => {
+  try {
+    const result = await tableController.cleanupStaleTables(req, res, next);
+    return result;
+  } catch (error) {
+    next(error);
+  }
+});
+
 export default router;

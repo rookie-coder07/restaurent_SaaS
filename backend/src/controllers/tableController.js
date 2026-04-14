@@ -171,3 +171,35 @@ export const generateQRUrls = asyncHandler(async (req, res) => {
 
   return sendSuccess(res, 200, qrUrls, 'QR URLs generated successfully');
 });
+
+// ✅ CLEANUP: Fix stale tables marked as occupied but with no active orders
+export const cleanupStaleTables = asyncHandler(async (req, res) => {
+  try {
+    const restaurantId = req.user.restaurantId;
+    
+    logger.info('🧹 Starting stale table cleanup', { restaurantId });
+
+    const result = await TableService.cleanupStaleTableStates(restaurantId);
+
+    logSuccessfulOperation('table_cleanup', {
+      userId: req.user?.id || req.user?.userId,
+      restaurantId,
+      tablesFixed: result.cleaned,
+      message: result.message,
+    });
+
+    return sendSuccess(res, 200, result, `✅ ${result.message}`);
+  } catch (error) {
+    logger.error('🧹 Stale table cleanup failed:', error);
+    logError(error, {
+      message: 'Table cleanup failed',
+      endpoint: req.path,
+      method: req.method,
+      userId: req.user?.id || req.user?.userId,
+      restaurantId: req.user.restaurantId,
+      statusCode: 500,
+      action: 'cleanup_tables',
+    });
+    throw error;
+  }
+});

@@ -75,6 +75,7 @@ export class TableService {
       .from('orders')
       .select('table_id, order_source, notes')
       .eq('restaurant_id', restaurantId)
+      .eq('is_deleted', false) // ✅ FIXED: Exclude deleted orders
       .eq('is_archived', false)
       .neq('payment_status', 'paid')
       .in('status', this.ACTIVE_ORDER_STATUSES);
@@ -749,6 +750,86 @@ export class TableService {
       return this.transformTable(enrichedTable);
     } catch (error) {
       logger.error('Claim table failed:', error.message);
+      throw error;
+    }
+  }
+
+  // ✅ CLEANUP: Fix stale tables marked as occupied but with no active orders
+  static async cleanupStaleTableStates(restaurantId) {
+    try {
+      if (!restaurantId) {
+        throw new Error('restaurantId is required');
+      }
+
+      // Get all tables marked as occupied
+      const { data: occupiedTables, error: tableError } = await supabase
+        .from('tables')
+        .select('id')
+        .eq('restaurant_id', restaurantId)
+        .eq('status', 'occupied');
+
+      if (tableError) {
+        throw tableError;
+      }
+
+      if (!occupiedTables || occupiedTables.length === 0) {
+        logger.info('✅ No stale tables found');
+        return { cleaned: 0, message: 'No stale tables found' };
+      }
+
+      const occupiedTableIds = occupiedTables.map((t) => t.id);
+
+      // Find which of these tables actually have NO active non-deleted orders
+      const { data: activeOrders, error: ordersError } = await supabase
+        .from('orders')
+        .select('table_id')
+        .eq('restaurant_id', restaurantId)
+        .eq('is_deleted', false)
+        .eq('is_archived', false)
+        .neq('payment_status', 'paid')
+        .in('status', this.ACTIVE_ORDER_STATUSES)
+        .in('table_id', occupiedTableIds);
+
+      if (ordersError) {
+        throw ordersError;
+      }
+
+      const tableIdsWithActiveOrders = new Set(activeOrders?.map((o) => o.table_id) || []);
+      const staleTableIds = occupiedTableIds.filter((id) => !tableIdsWithActiveOrders.has(id));
+
+      if (staleTableIds.length === 0) {
+        logger.info('✅ No stale tables found (all occupied tables have active orders)');
+        return { cleaned: 0, message: 'All occupied tables have active orders' };
+      }
+
+      // Mark stale tables as available
+      const { error: updateError } = await supabase
+        .from('tables')
+        .update({
+          status: 'available',
+          reserved_by: null,
+          reservation_time: null,
+          assigned_to: null,
+        })
+        .eq('restaurant_id', restaurantId)
+        .in('id', staleTableIds);
+
+      if (updateError) {
+        throw updateError;
+      }
+
+      logger.info(`✅ Cleaned up ${staleTableIds.length} stale table(s)`, {
+        restaurantId,
+        cleanedTableIds: staleTableIds,
+      });
+
+      return {
+        cleaned: staleTableIds.length,
+        tableIds: staleTableIds,
+        message: `Fixed ${staleTableIds.length} table(s) marked as occupied with no active orders`,
+      };
+    } catch (error) {
+      logger.error('Table cleanup failed:', error.message);
       throw error;
     }
   }
