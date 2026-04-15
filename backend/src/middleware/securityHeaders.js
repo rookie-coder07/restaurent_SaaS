@@ -46,19 +46,27 @@ export const secureHeadersMiddleware = (req, res, next) => {
 };
 
 export const corsConfiguration = () => {
-  // Get allowed origins from environment or use defaults
+  // Merge env-provided origins with safe defaults so one stale env value
+  // does not accidentally remove the known production frontend.
   const corsOriginEnv = process.env.CORS_ORIGIN || '';
   const defaultOrigins = [
     'https://restaurent-saas.vercel.app',
+    'https://restaurentsaas-seven.vercel.app',
     'http://localhost:5173',
     'http://localhost:3000',
     'http://127.0.0.1:5173',
     'http://127.0.0.1:3000',
   ];
-  
-  const allowedOrigins = corsOriginEnv
-    ? corsOriginEnv.split(',').map(o => o.trim()).filter(Boolean)
-    : defaultOrigins;
+
+  const envOrigins = corsOriginEnv
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+
+  const allowedOrigins = Array.from(new Set([
+    ...defaultOrigins,
+    ...envOrigins,
+  ]));
   
   return {
     origin: (origin, callback) => {
