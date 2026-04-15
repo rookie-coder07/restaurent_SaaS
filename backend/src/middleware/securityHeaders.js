@@ -1,6 +1,16 @@
 import { logWarn } from '../utils/logger.js';
 import SecurityAuditLogger from '../utils/securityAudit.js';
 
+const normalizeOrigin = (origin = '') => String(origin || '').trim().replace(/\/+$/, '').toLowerCase();
+
+const isAllowedWildcardOrigin = (origin = '') => {
+  const normalizedOrigin = normalizeOrigin(origin);
+  return (
+    /^https:\/\/[a-z0-9-]+\.vercel\.app$/i.test(normalizedOrigin) ||
+    /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(normalizedOrigin)
+  );
+};
+
 export const secureHeadersMiddleware = (req, res, next) => {
   const isProduction = process.env.NODE_ENV === 'production';
 
@@ -67,11 +77,12 @@ export const corsConfiguration = () => {
   const allowedOrigins = Array.from(new Set([
     ...defaultOrigins,
     ...envOrigins,
-  ]));
+  ].map((origin) => normalizeOrigin(origin)).filter(Boolean)));
   
   return {
     origin: (origin, callback) => {
-      logWarn(`[CORS] Incoming origin: ${origin || 'no-origin'}`);
+      const normalizedOrigin = normalizeOrigin(origin);
+      logWarn(`[CORS] Incoming origin: ${normalizedOrigin || 'no-origin'}`);
 
       // Allow requests with no origin (like mobile apps or curl)
       if (!origin) {
@@ -79,13 +90,13 @@ export const corsConfiguration = () => {
       }
       
       // Check if origin is in allowed list
-      if (allowedOrigins.includes(origin)) {
+      if (allowedOrigins.includes(normalizedOrigin) || isAllowedWildcardOrigin(normalizedOrigin)) {
         return callback(null, true);
       }
       
       // Allow all localhost variations in development
       const isDev = process.env.NODE_ENV !== 'production';
-      if (isDev && (origin.includes('localhost') || origin.includes('127.0.0.1'))) {
+      if (isDev && (normalizedOrigin.includes('localhost') || normalizedOrigin.includes('127.0.0.1'))) {
         return callback(null, true);
       }
       
@@ -97,7 +108,7 @@ export const corsConfiguration = () => {
       }
       
       // Production: reject unknown origins without throwing an application error
-      logWarn(`[CORS] Blocked origin in production: ${origin}`);
+      logWarn(`[CORS] Blocked origin in production: ${normalizedOrigin}`);
       return callback(null, false);
     },
     credentials: true,
