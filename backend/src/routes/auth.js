@@ -78,7 +78,7 @@ router.post(
   authController.registerRestaurant
 );
 
-router.post('/login', authLimiter, validateRequest(loginSchema), async (req, res, next) => {
+const auditLoginAttempt = async (req, res, next) => {
   try {
     const originalJson = res.json.bind(res);
     res.json = function jsonWithAudit(data) {
@@ -94,7 +94,23 @@ router.post('/login', authLimiter, validateRequest(loginSchema), async (req, res
     SecurityAuditLogger.logLoginAttempt(req.body.email, false, req.ip, error.message);
     next(error);
   }
-});
+};
+
+router.post(
+  '/login',
+  authLimiter,
+  validateRequest(loginSchema),
+  auditLoginAttempt,
+  authController.login
+);
+
+router.post(
+  '/staff/login',
+  authLimiter,
+  validateRequest(loginSchema),
+  auditLoginAttempt,
+  authController.login
+);
 
 router.post(
   '/staff/register',

@@ -416,23 +416,13 @@ export class AuthService {
     const normalizedEmail = String(email || '').trim().toLowerCase();
     const portalKey = String(portal || 'admin').trim().toLowerCase();
     const shouldPrioritizeRestaurant = portalKey === 'admin' || portalKey === 'owner';
-    const authUser = await this.findAuthUserByEmail(normalizedEmail);
 
     logger.info('[LOGIN_FALLBACK] Evaluating database-only login fallback', {
       email: normalizedEmail,
       portal: portalKey,
       authFailedMessage,
-      hasSupabaseAuthUser: Boolean(authUser?.id),
       inputPasswordLength: String(password || '').length,
     });
-
-    if (authUser?.id) {
-      logger.info('[LOGIN_FALLBACK] Skipping database-only fallback because auth.users record already exists', {
-        email: normalizedEmail,
-        authUserId: authUser.id,
-      });
-      return null;
-    }
 
     if (shouldPrioritizeRestaurant) {
       const restaurant = await this.findRestaurantByEmail(normalizedEmail);

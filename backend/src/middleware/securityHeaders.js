@@ -61,8 +61,6 @@ export const secureHeadersMiddleware = (req, res, next) => {
 };
 
 export const corsConfiguration = () => {
-  // Merge env-provided origins with safe defaults so one stale env value
-  // does not accidentally remove the known production frontend.
   const corsOriginEnv = process.env.CORS_ORIGIN || '';
   const defaultOrigins = [
     'https://restaurent-saas.vercel.app',
@@ -87,38 +85,33 @@ export const corsConfiguration = () => {
   return {
     origin: (origin, callback) => {
       const normalizedOrigin = normalizeOrigin(origin);
-      logWarn(`[CORS] Incoming origin: ${normalizedOrigin || 'no-origin'}`);
 
       // Allow requests with no origin (like mobile apps or curl)
       if (!origin) {
         return callback(null, true);
       }
       
+      // Always allow localhost/127.0.0.1 (for development)
+      if (isAllowedDevelopmentOrigin(normalizedOrigin)) {
+        logWarn(`[CORS] ✓ Allowed localhost origin: ${normalizedOrigin}`);
+        return callback(null, true);
+      }
+      
       // Check if origin is in allowed list
-      if (
-        allowedOrigins.includes(normalizedOrigin) ||
-        isAllowedWildcardOrigin(normalizedOrigin) ||
-        isAllowedDevelopmentOrigin(normalizedOrigin)
-      ) {
+      if (allowedOrigins.includes(normalizedOrigin)) {
+        logWarn(`[CORS] ✓ Allowed origin from list: ${normalizedOrigin}`);
         return callback(null, true);
       }
       
-      // Allow all localhost variations in development
-      const isDev = process.env.NODE_ENV !== 'production';
-      if (isDev && isAllowedDevelopmentOrigin(normalizedOrigin)) {
+      // Check wildcard patterns (vercel.app)
+      if (isAllowedWildcardOrigin(normalizedOrigin)) {
+        logWarn(`[CORS] ✓ Allowed wildcard origin: ${normalizedOrigin}`);
         return callback(null, true);
       }
       
-      // In production, be more strict but still allow (can be changed to reject)
-      const isProduction = process.env.NODE_ENV === 'production';
-      if (!isProduction) {
-        logWarn(`[CORS] Origin not in allowlist: ${origin}. Allowing anyway in development.`);
-        return callback(null, true);
-      }
-      
-      // Production: reject unknown origins without throwing an application error
-      logWarn(`[CORS] Blocked origin in production: ${normalizedOrigin}`);
-      return callback(null, false);
+      // Reject unknown origins in production
+      logWarn(`[CORS] ✗ Rejected origin: ${normalizedOrigin}`);
+      return callback(new Error('CORS policy violation'), false);
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'],

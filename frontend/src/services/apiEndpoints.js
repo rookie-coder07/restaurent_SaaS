@@ -108,7 +108,8 @@ export function preloadManagerOrderWorkspace() {
     cachedGet('/v1/restaurants/profile', {}, { ttlMs: 2 * 60 * 1000 }),
     cachedGet('/v1/menu/categories', {}, { ttlMs: 2 * 60 * 1000 }),
     cachedGet('/v1/menu/items', { params: { limit: 300 } }, { ttlMs: 2 * 60 * 1000 }),
-    cachedGet('/v1/orders', { params: { limit: 20, skip: 0 } }, { ttlMs: 20 * 1000 }),
+    cachedGet('/v1/tables', { params: { limit: 200 } }, { ttlMs: 2 * 60 * 1000 }),
+    cachedGet('/v1/orders', { params: { limit: 50, skip: 0 } }, { ttlMs: 20 * 1000 }),
     cachedGet('/v1/orders/open', {}, { ttlMs: 20 * 1000 }),
   ]);
 }
@@ -118,7 +119,25 @@ export const authAPI = {
   login: (email, password, portal = 'admin') => api.post('/v1/auth/login', { email, password, portal }),
   logout: () => api.post('/v1/auth/logout'),
   getCurrentUser: () => cachedGet('/v1/auth/me', {}, { ttlMs: 8 * 1000 }),
-  changePassword: (data) => api.post('/v1/auth/change-password', data),
+  changePassword: async (data) => {
+    try {
+      return await api.post('/v1/auth/change-password', data);
+    } catch (error) {
+      if (error?.response?.status !== 404) {
+        throw error;
+      }
+
+      try {
+        return await api.put('/v1/auth/change-password', data);
+      } catch (putError) {
+        if (putError?.response?.status !== 404) {
+          throw putError;
+        }
+      }
+
+      return await api.post('/v1/auth/password/change', data);
+    }
+  },
   resetUserPassword: (data) => api.post('/v1/manager/reset-user-password', data),
 };
 

@@ -1,6 +1,10 @@
 import logger from '../utils/logger.js';
 import { sendError } from '../utils/apiResponse.js';
 
+const isPublicAuthPath = (path = '') => /^\/?(api\/v1\/)?auth\/(login|register|token-info|forgot-password|reset-password|verify-otp|refresh-token|request-password-reset-otp|set-password-with-otp|debug-test|staff\/register|reset-password-for-user)/.test(
+  String(path || '').replace(/^\/+/, '')
+);
+
 /**
  * COMPREHENSIVE SECURITY ENFORCEMENT MIDDLEWARE
  * Implements all 10 security requirements:
@@ -21,7 +25,8 @@ export const enforceJWTAuthentication = (req, res, next) => {
   const isPublic = (
     req.path === '/health' ||
     req.path === '/api/v1/health' ||
-    req.path.match(/^\/api\/v1\/auth\/(login|register|token-info|forgot-password|reset-password|verify-otp|debug-test)/)
+    isPublicAuthPath(req.path) ||
+    isPublicAuthPath(req.originalUrl)
   );
   
   if (isPublic) {
@@ -58,7 +63,8 @@ export const enforceRBAC = (req, res, next) => {
   const isPublic = (
     req.path === '/health' ||
     req.path === '/api/v1/health' ||
-    req.path.match(/^\/api\/v1\/auth\/(login|register|token-info|forgot-password|reset-password|verify-otp|debug-test)/)
+    isPublicAuthPath(req.path) ||
+    isPublicAuthPath(req.originalUrl)
   );
   
   if (isPublic) {

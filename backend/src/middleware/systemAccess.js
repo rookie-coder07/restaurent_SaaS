@@ -11,6 +11,12 @@ export function setSupabaseForTesting(supabaseInstance) {
   injectedSupabase = supabaseInstance;
 }
 
+function isPublicAuthPath(path = '') {
+  return /^\/?(api\/v1\/)?auth\/(login|register|token-info|forgot-password|reset-password|verify-otp|refresh-token|request-password-reset-otp|set-password-with-otp|staff\/register|reset-password-for-user)/.test(
+    String(path || '').replace(/^\/+/, '')
+  );
+}
+
 const CACHE_TTL_MS = 15000;
 
 const cache = {
@@ -170,6 +176,11 @@ export const systemAccessGuard = async (req, res, next) => {
       method: req.method,
       role: normalizedRole,
     });
+
+    if (isPublicAuthPath(req.path) || isPublicAuthPath(req.originalUrl)) {
+      console.log('[SYSTEM_ACCESS] ✅ Public auth route - bypassing');
+      return next();
+    }
 
     if (normalizedRole === 'developer' || req.path.includes('/developer')) {
       console.log('[SYSTEM_ACCESS] ✅ Developer role - bypassing');

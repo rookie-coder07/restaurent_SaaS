@@ -49,12 +49,16 @@ function getBillSummary(
 ) {
   const billing = order?.billing || order?.settlement?.billing || {};
   const settlement = order?.settlement || {};
-  const itemSubtotal = Number(
-    ((order?.items || order?.orderItems || []).reduce(
-      (sum, item) => sum + Number(item.quantity || item.qty || 0) * Number(item.unitPrice ?? item.price ?? 0),
-      0
-    )).toFixed(2)
-  );
+  const storedSubtotal = Number(billing.subtotal ?? order?.totalAmount ?? order?.total ?? 0);
+  const itemSubtotal =
+    storedSubtotal > 0
+      ? storedSubtotal
+      : Number(
+          ((order?.items || order?.orderItems || []).reduce(
+            (sum, item) => sum + Number(item.quantity || item.qty || 0) * Number(item.unitPrice ?? item.price ?? 0),
+            0
+          )).toFixed(2)
+        );
   const storedGrandTotal = Number(billing.grandTotal ?? settlement.finalTotal ?? 0);
   const fallbackGrandTotal = Number(order?.totalAmount ?? order?.total ?? itemSubtotal ?? 0);
   const hasComputedInputs =

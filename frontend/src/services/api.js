@@ -197,6 +197,11 @@ api.interceptors.request.use(
     if (isPublicEndpoint) {
       delete config.headers.Authorization;
       delete config.headers['X-Restaurant-Id'];
+      delete config.headers.common?.Authorization;
+      delete config.headers.common?.['X-Restaurant-Id'];
+      delete api.defaults.headers.common.Authorization;
+      delete api.defaults.headers.common['X-Restaurant-Id'];
+      config.withCredentials = false;
 
       if (shouldDebugApi) {
         logger.debug(`⏭️  Skipping auth headers for public endpoint: ${url}`);

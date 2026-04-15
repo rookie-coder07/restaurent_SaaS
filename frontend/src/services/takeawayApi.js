@@ -1,12 +1,11 @@
 import api from './api';
+import { menuAPI } from './apiEndpoints';
 
 export const takeawayApi = {
   fetchCategories: () =>
-    api.get('/v1/menu/categories').then((r) => r.data?.data?.categories || []),
+    menuAPI.getCategories().then((r) => r.data?.data?.categories || []),
   fetchItems: () =>
-    api
-      .get('/v1/menu/items', { params: { status: 'active', limit: 300 } })
-      .then((r) => r.data?.data?.items || []),
+    menuAPI.getItems({ status: 'active', limit: 300 }).then((r) => r.data?.data?.items || []),
   createOrder: (payload) =>
     api.post('/v1/takeaway', payload).then((r) => r.data?.data),
   settleOrder: (orderId, payload) =>

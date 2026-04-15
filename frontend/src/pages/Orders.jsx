@@ -156,7 +156,7 @@ export default function Orders() {
     hasPagination,
   } = useResponsivePagination(filteredOrders, { mobileItemsPerPage: 6, desktopItemsPerPage: 12 });
 
-  useAutoRefresh(() => Promise.allSettled([refetchOrders(), refetchTables()]), 12000);
+  useAutoRefresh(() => refetchOrders(), 12000);
 
   useEffect(() => {
     pendingDeletionQueueRef.current = pendingDeletionQueue;

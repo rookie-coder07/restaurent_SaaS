@@ -198,7 +198,19 @@ export const login = asyncHandler(async (req, res) => {
       redirectTo,
     }, 'Login successful');
   } catch (error) {
-    const statusCode = error?.statusCode || error?.status || (error.message === 'Invalid email or password' ? 401 : 500);
+    const statusCode = error?.statusCode || error?.status || (error.code === 'INVALID_CREDENTIALS' ? 401 : 500);
+    
+    // Detailed logging for 401 errors
+    if (statusCode === 401) {
+      logger.warn('🔴 LOGIN FAILED - INVALID CREDENTIALS', {
+        email: String(email || '').trim().toLowerCase(),
+        portal: (portal || 'admin'),
+        errorMessage: error.message,
+        errorCode: error.code,
+        timestamp: new Date().toISOString(),
+      });
+    }
+    
     logError(error, {
       message: 'Login failed',
       endpoint: req.path,
