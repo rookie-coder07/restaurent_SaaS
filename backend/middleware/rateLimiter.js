@@ -110,6 +110,7 @@ function createRateLimitMiddleware(maxRequests = 100, windowMs = 60 * 1000) {
     res.setHeader('X-RateLimit-Reset', new Date(result.resetTime).toISOString());
 
     if (!result.allowed) {
+      
       res.setHeader('Retry-After', Math.ceil((result.retryAfter || 0) / 1000));
       return res.status(429).json({
         error: 'Too many requests',

@@ -292,17 +292,33 @@ export const logout = asyncHandler(async (req, res) => {
 });
 
 export const changePassword = asyncHandler(async (req, res) => {
-  const { currentPassword, newPassword } = req.body;
-  const isRestaurant = ['admin'].includes(req.user.role);
+  try {
+    const { currentPassword, newPassword } = req.body;
+    
+    // Validate inputs
+    if (!currentPassword || !newPassword) {
+      return sendError(res, 400, 'Current password and new password are required');
+    }
 
-  await AuthService.changePassword(
-    req.user.userId,
-    currentPassword,
-    newPassword,
-    isRestaurant
-  );
+    const isRestaurant = ['admin'].includes(req.user.role);
 
-  return sendSuccess(res, 200, null, 'Password changed successfully');
+    // Change password with non-blocking operations
+    await AuthService.changePassword(
+      req.user.userId,
+      currentPassword,
+      newPassword,
+      isRestaurant
+    );
+
+    return sendSuccess(res, 200, null, 'Password changed successfully');
+  } catch (error) {
+    // Catch any errors and return proper response
+    const errorMessage = error?.message || 'Failed to change password';
+    const statusCode = error?.status || 500;
+    
+    // Don't throw - always return a proper error response
+    return sendError(res, statusCode, errorMessage);
+  }
 });
 
 export const requestPasswordReset = asyncHandler(async (req, res) => {

@@ -950,61 +950,66 @@ export class AuthService {
       
       logger.info(`✅ Password successfully updated in Supabase Auth for user: ${userId}`);
 
-      // 🔧 VERIFICATION: Test that the new password works immediately
-      // This is non-blocking - logging only, doesn't affect success
-      try {
-        const testLoginResponse = await supabase.auth.signInWithPassword({
-          email: account.email,
-          password: newPassword,
-        });
-        
-        if (testLoginResponse.error) {
-          logger.warn('⚠️ Password change verification warning - new password test failed (non-blocking):', {
+      // Return success immediately - all other operations are fire-and-forget background tasks
+      const result = { message: 'Password changed successfully. Please log in again.' };
+
+      // Fire-and-forget: All background operations that don't block response
+      setImmediate(async () => {
+        try {
+          // 🔧 VERIFICATION: Test that the new password works
+          try {
+            const testLoginResponse = await supabase.auth.signInWithPassword({
+              email: account.email,
+              password: newPassword,
+            });
+            
+            if (testLoginResponse.error) {
+              logger.warn('⚠️ Password change verification warning - new password test failed (background):', {
+                userId,
+                email: account.email,
+                errorCode: testLoginResponse.error.code,
+                errorMsg: testLoginResponse.error.message,
+              });
+            } else if (testLoginResponse.data?.user?.id) {
+              logger.info(`✅ Password change verification SUCCESS - new password works for ${account.email}`);
+            }
+          } catch (verifyError) {
+            logger.warn('⚠️ Password change verification threw an error (background):', {
+              userId,
+              email: account.email,
+              error: verifyError.message,
+            });
+          }
+
+          // ✅ FIX: Clear database password_hash - Supabase Auth is now authoritative
+          try {
+            const passwordHash = await this.hashPassword(newPassword);
+            await this.updatePasswordTrackingColumns(table, { [column]: userId }, passwordHash);
+          } catch (trackingError) {
+            logger.warn('Password tracking column update failed (background):', {
+              userId,
+              error: trackingError.message,
+            });
+          }
+
+          // Revoke all refresh tokens for this user (force re-login for security)
+          try {
+            await revokeAllUserTokens(userId);
+          } catch (revokeError) {
+            logger.warn('Token revocation failed (background):', {
+              userId,
+              error: revokeError.message,
+            });
+          }
+        } catch (backgroundError) {
+          logger.warn('Background password operations error:', {
             userId,
-            email: account.email,
-            errorCode: testLoginResponse.error.code,
-            errorMsg: testLoginResponse.error.message,
+            error: backgroundError.message,
           });
-        } else if (testLoginResponse.data?.user?.id) {
-          logger.info(`✅ Password change verification SUCCESS - new password works for ${account.email}`);
         }
-      } catch (verifyError) {
-        logger.warn('⚠️ Password change verification threw an error (non-blocking):', {
-          userId,
-          email: account.email,
-          error: verifyError.message,
-        });
-        // Continue anyway - password was successfully changed in Supabase Auth
-      }
+      });
 
-      // ✅ FIX: Clear database password_hash - Supabase Auth is now authoritative
-      // This is non-blocking - if it fails, password is still changed in Supabase Auth
-      try {
-        const passwordHash = await this.hashPassword(newPassword);
-        await this.updatePasswordTrackingColumns(table, { [column]: userId }, passwordHash);
-      } catch (trackingError) {
-        logger.warn('Password tracking column update failed (non-blocking):', {
-          userId,
-          error: trackingError.message,
-        });
-        // Continue anyway - password was successfully changed in Supabase Auth
-      }
-
-      // Revoke all refresh tokens for this user (force re-login for security)
-      // This is also non-blocking - best effort
-      try {
-        await revokeAllUserTokens(userId);
-      } catch (revokeError) {
-        logger.warn('Token revocation failed (non-blocking):', {
-          userId,
-          error: revokeError.message,
-        });
-        // Continue anyway - password change succeeded
-      }
-
-      logger.warn(`✅ Password changed for user: ${userId} - Supabase Auth updated`, { userId });
-
-      return { message: 'Password changed successfully. Please log in again.' };
+      return result;
     } catch (error) {
       logger.error('Change password error:', error);
       throw error;
