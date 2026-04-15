@@ -117,7 +117,7 @@ export default function POSOrders() {
 
         if (!matched && (targetOrderId || targetTableId)) {
           try {
-            const activeResponse = await orderAPI.getActiveOrderForTable(targetTableId || '');
+            const activeResponse = await orderAPI.getActiveOrderForTable(targetTableId || '', { forceRefresh: true });
             const activeOrder = activeResponse.data?.data || null;
             if (activeOrder) {
               setOrders((current) => {

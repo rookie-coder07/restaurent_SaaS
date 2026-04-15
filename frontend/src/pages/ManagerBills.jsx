@@ -149,21 +149,16 @@ export default function ManagerBills() {
 
   // Polling disabled - realtime subscriptions handle updates
   // Only refetch on manual user action
-  const fetchInFlightRef = useRef(false);
-
   const fetchFreshBill = useCallback(async (bill) => {
-    if (fetchInFlightRef.current || !bill?.id) {
+    if (!bill?.id) {
       return bill;
     }
 
-    fetchInFlightRef.current = true;
-    try {
-      const response = await orderAPI.getOrder(bill.id);
-      return response.data?.data || bill;
-    } finally {
-      fetchInFlightRef.current = false;
-    }
+    const response = await orderAPI.getOrder(bill.id);
+    return response.data?.data || bill;
   }, []);
+
+  const fetchInFlightRef = useRef(false);
 
   const bills = useMemo(
     () => (ordersData?.items || []).filter((order) => order?.status !== 'cancelled'),
@@ -436,7 +431,7 @@ export default function ManagerBills() {
           note,
           approvedBy: user?.name || user?.email || 'Manager',
         });
-        await reloadOrders();
+        await refetchOrders();
         setSuccess(`Discount approved for ${formatDisplayOrderNumber(selectedBill)}.`);
         setSelectedBill(null);
         setDiscountPercent('');
@@ -466,24 +461,19 @@ export default function ManagerBills() {
     setError('');
 
     try {
-      const freshBill = await fetchFreshBill(payingBill);
+      await fetchFreshBill(payingBill);
       const receivedAmount = Number(amountReceived || payableAfterLoyalty || 0);
       if (!Number.isFinite(receivedAmount) || receivedAmount < 0) {
         throw new Error('Enter a valid settlement amount.');
       }
 
-      await orderAPI.settleOrder(payingBill.id, {
+      const settleResponse = await orderAPI.settleOrder(payingBill.id, {
         paymentMethod,
         amountReceived: receivedAmount,
         discountPercent: approval?.percent || undefined,
         paymentNote: [approval?.note, note.trim()].filter(Boolean).join(' | '),
-        loyaltyPhone: loyaltyPhone.trim(),
-        redeemPoints: loyaltyRedeemPreview,
-        serviceCharge: numericServiceCharge,
       });
-
-      const refreshedOrder = await orderAPI.getOrder(payingBill.id);
-      const settledBill = refreshedOrder.data?.data;
+      const settledBill = settleResponse.data?.data || payingBill;
       const invoiceData = buildInvoiceData({
         order: settledBill,
         restaurant: restaurantProfile,
@@ -492,8 +482,8 @@ export default function ManagerBills() {
 
       setSuccess(
         approval?.percent
-          ? `${formatDisplayOrderNumber(payingBill)} bill created with ${approval.percent}% discount.`
-          : `${formatDisplayOrderNumber(payingBill)} bill created and waiting for payment confirmation.`
+          ? `${formatDisplayOrderNumber(payingBill)} bill created with ${approval.percent}% discount and is waiting for payment confirmation.`
+          : `${formatDisplayOrderNumber(payingBill)} bill created and is waiting for payment confirmation.`
       );
       setPayingBill(null);
       setAmountReceived('');
@@ -501,7 +491,7 @@ export default function ManagerBills() {
       setLoyaltyProfile(null);
       setRedeemPoints('');
       setNote('');
-      await reloadOrders();
+      await refetchOrders();
       navigate(`/manager/bills/${settledBill?.id || payingBill.id}`, {
         state: {
           order: settledBill,
@@ -535,8 +525,16 @@ export default function ManagerBills() {
     try {
       await orderAPI.markOrderPaid(bill.id, {
         paymentMethod: String(bill?.paymentMethod || bill?.billing?.paymentMode || 'cash').toLowerCase(),
+        amountReceived: Number(
+          bill?.billing?.paidAmount ??
+          bill?.settlement?.amountReceived ??
+          bill?.billing?.grandTotal ??
+          bill?.finalAmount ??
+          bill?.totalAmount ??
+          0
+        ),
       });
-      await reloadOrders();
+      await refetchOrders();
       setSuccess(`${formatDisplayOrderNumber(bill)} marked paid.`);
     } catch (requestError) {
       setError(requestError.response?.data?.message || 'Failed to mark the bill paid.');
@@ -707,7 +705,7 @@ export default function ManagerBills() {
       if (payingBill?.id === refreshedBill.id) {
         setPayingBill(refreshedBill);
       }
-      await reloadOrders();
+      await refetchOrders();
       setSuccess(`${formatDisplayOrderNumber(refreshedBill)} updated before settlement.`);
     } catch (requestError) {
       setError(requestError.response?.data?.message || 'Failed to update the bill.');
@@ -764,7 +762,7 @@ export default function ManagerBills() {
                 <p className="text-sm text-[var(--text-secondary)]">Unpaid bills stay first. Paid bills stay ready for print.</p>
               </div>
             </div>
-            <Button variant="secondary" onClick={() => Promise.allSettled([reloadOrders(), refetchProfile()])}>
+            <Button variant="secondary" onClick={() => Promise.allSettled([refetchOrders(), refetchProfile()])}>
               <RefreshCw className="h-4 w-4" />
               Refresh
             </Button>

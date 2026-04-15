@@ -506,8 +506,8 @@ export default function POS() {
       try {
         const targetOrderId = pinnedOrderId || requestedOrderId;
         const response = targetOrderId
-          ? await orderAPI.getOrder(targetOrderId)
-          : await orderAPI.getActiveOrderForTable(selectedTableId);
+          ? await orderAPI.getOrder(targetOrderId, { forceRefresh: true })
+          : await orderAPI.getActiveOrderForTable(selectedTableId, { forceRefresh: true });
         const fetchedOrder = response.data?.data || null;
         const currentOrder = isOrderClosedForBilling(fetchedOrder) ? null : fetchedOrder;
 
@@ -593,7 +593,7 @@ export default function POS() {
       setSubmitSuccess(null);
 
       try {
-        const response = await orderAPI.getOrder(requestedOrderId);
+        const response = await orderAPI.getOrder(requestedOrderId, { forceRefresh: true });
         const requestedOrder = response.data?.data || null;
 
         if (!isCurrent || !requestedOrder) {

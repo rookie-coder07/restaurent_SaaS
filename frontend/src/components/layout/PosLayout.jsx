@@ -2,10 +2,12 @@ import { useMemo, useState, useEffect, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
 import { playLoudBuzzer } from '../../utils/alerts';
 import { subscribeToOrderEvents } from '../../utils/liveOrderEvents';
+import { invalidateOrderReadCaches } from '../../services/apiEndpoints';
 import Toast from '../common/Toast';
 import Navbar from './Navbar';
 import Sidebar from './Sidebar';
 import { useAuthStore } from '../../context/authStore';
+import { usePosStore } from '../../context/posStore';
 
 const PAGE_META = {
   '/pos/tables': {
@@ -27,6 +29,9 @@ export default function PosLayout({ children }) {
   const [staffAlertMessage, setStaffAlertMessage] = useState('');
   const location = useLocation();
   const userRole = useAuthStore((state) => state.user?.role);
+  const removeOpenBillById = usePosStore((state) => state.removeOpenBillById);
+  const patchTableRealtime = usePosStore((state) => state.patchTableRealtime);
+  const clearTableOrderCache = usePosStore((state) => state.clearTableOrderCache);
   const knownStaffOrderIdsRef = useRef(new Set());
 
   const pageMeta = useMemo(
@@ -48,6 +53,7 @@ export default function PosLayout({ children }) {
     const cleanup = subscribeToOrderEvents((payload) => {
       const eventType = String(payload?.type || '');
       const orderId = String(payload?.orderId || '').trim();
+      const tableId = String(payload?.tableId || '').trim();
       const eventTimestamp = payload?.updatedAt || payload?.createdAt || payload?.emittedAt || '';
       const eventAgeMs = eventTimestamp ? Date.now() - new Date(eventTimestamp).getTime() : 0;
       const isFreshEvent = !eventTimestamp || Number.isNaN(eventAgeMs) || eventAgeMs <= 20000;
@@ -59,6 +65,20 @@ export default function PosLayout({ children }) {
 
       if (!eventType.startsWith('order.') || !orderId) {
         return;
+      }
+
+      if (eventType === 'order.deleted') {
+        invalidateOrderReadCaches({ orderId, tableId });
+        removeOpenBillById(orderId);
+        if (tableId) {
+          clearTableOrderCache(tableId);
+          patchTableRealtime({
+            tableId,
+            status: 'available',
+            assignedTo: null,
+            assignedWaiterName: '',
+          });
+        }
       }
 
       if (!knownStaffOrderIdsRef.current.has(orderId) && isFreshEvent) {
@@ -76,7 +96,7 @@ export default function PosLayout({ children }) {
     });
 
     return cleanup;
-  }, [userRole]);
+  }, [clearTableOrderCache, patchTableRealtime, removeOpenBillById, userRole]);
 
   return (
     <div className="h-screen overflow-hidden bg-[var(--bg-main)] text-[var(--text-primary)]">

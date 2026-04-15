@@ -54,7 +54,7 @@ export default function BillView() {
   const { orderId = '' } = useParams();
   const location = useLocation();
   const navigate = useNavigate();
-  const [loading, setLoading] = useState(!location.state?.invoice);
+  const [loading, setLoading] = useState(!location.state?.order && !location.state?.invoice);
   const [error, setError] = useState(location.state?.autoPrintError || '');
   const [order, setOrder] = useState(location.state?.order || null);
   const [restaurant, setRestaurant] = useState(location.state?.restaurant || null);
@@ -68,7 +68,7 @@ export default function BillView() {
   );
 
   useEffect(() => {
-    if (invoiceOverride || !orderId) {
+    if (!orderId) {
       setLoading(false);
       return;
     }
@@ -89,8 +89,10 @@ export default function BillView() {
           return;
         }
 
-        setOrder(orderResponse.data?.data || null);
+        const freshOrder = orderResponse.data?.data || null;
+        setOrder(freshOrder);
         setRestaurant(restaurantResponse.data?.data || null);
+        setInvoiceOverride(null);
       } catch (requestError) {
         if (!isActive) {
           return;
@@ -109,7 +111,7 @@ export default function BillView() {
     return () => {
       isActive = false;
     };
-  }, [invoiceOverride, orderId]);
+  }, [orderId]);
 
   const invoice = useMemo(
     () =>
@@ -139,14 +141,27 @@ export default function BillView() {
     [invoice]
   );
   const isPaid = String(order?.paymentStatus || invoice?.paymentStatus || '').toLowerCase() === 'paid';
+  const lastSyncedLabel = useMemo(() => {
+    const sourceTimestamp = order?.updatedAt || order?.createdAt || '';
+    if (!sourceTimestamp) {
+      return '';
+    }
+
+    const parsed = new Date(sourceTimestamp);
+    if (Number.isNaN(parsed.getTime())) {
+      return '';
+    }
+
+    return parsed.toLocaleString('en-IN');
+  }, [order?.createdAt, order?.updatedAt]);
   const finalAmount = Number(
-    order?.totalAmount ||
-    order?.finalAmount ||
     invoice?.summary?.grandTotal ||
     invoice?.finalAmount ||
+    order?.finalAmount ||
+    order?.billing?.grandTotal ||
+    order?.totalAmount ||
     0
   );
-  // Auto-fill received amount with final amount
   const numericReceivedAmount = finalAmount;
 
   const handleSettleAndPrint = async () => {
@@ -170,7 +185,7 @@ export default function BillView() {
       // Mark order as paid if not already paid
       if (!isPaid) {
         const response = await orderAPI.markOrderPaid(order.id, {
-          paymentMethod: 'cash',
+          paymentMethod: String(invoice?.paymentMode || order?.paymentMethod || 'cash').toLowerCase(),
           amountReceived: numericReceivedAmount,
         });
         finalOrder = response.data?.data || null;
@@ -290,6 +305,11 @@ export default function BillView() {
             <p className="mt-2 text-sm text-[var(--color-text-muted)]">
               Review items, CGST, SGST, total, and payment details before printing the final bill.
             </p>
+            {lastSyncedLabel ? (
+              <div className="mt-3 inline-flex items-center rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-xs font-semibold text-emerald-300">
+                Synced from server: {lastSyncedLabel}
+              </div>
+            ) : null}
           </div>
           <div className="flex flex-wrap gap-3">
             <Link to={returnTo}>
@@ -312,7 +332,7 @@ export default function BillView() {
               disabled={markingPaid || printing}
             >
               <Printer className="h-4 w-4" />
-              {markingPaid || printing ? 'Processing...' : isPaid ? 'Print Bill' : 'Settle Bill'}
+              {markingPaid || printing ? 'Processing...' : isPaid ? 'Print Bill' : 'Confirm Payment'}
             </Button>
           </div>
         </div>
@@ -407,7 +427,10 @@ export default function BillView() {
 
             <div className="thermal-summary">
               <div className="thermal-summary-row"><span>Payment Mode</span><span>{String(invoice.paymentMode || 'cash').toUpperCase()}</span></div>
-              <div className="thermal-summary-row"><span>Paid Amount</span><span>{formatCurrency(invoice.paidAmount)}</span></div>
+              <div className="thermal-summary-row">
+                <span>{isPaid ? 'Paid Amount' : 'Amount Due'}</span>
+                <span>{formatCurrency(isPaid ? invoice.paidAmount : invoice.summary.grandTotal)}</span>
+              </div>
             </div>
 
             {qrCodeImage ? (

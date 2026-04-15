@@ -1,5 +1,6 @@
 import logger from '../utils/logger.js';
 import supabase from '../config/supabase.js';
+import { broadcastRestaurantEvent } from '../utils/realtimeEvents.js';
 
 export class TableService {
   static ACTIVE_ORDER_STATUSES = ['awaiting_waiter_approval', 'pending', 'preparing', 'ready', 'served', 'in_progress'];
@@ -286,6 +287,16 @@ export class TableService {
     if (updateError || !updatedTable) {
       throw updateError || new Error('Failed to sync table lifecycle');
     }
+
+    // ✅ EMIT SOCKET EVENT FOR REAL-TIME TABLE UPDATE
+    broadcastRestaurantEvent(restaurantId, 'table_updated', {
+      tableId,
+      status: updatedTable.status,
+      eventType: 'lifecycle_sync',
+      assignedTo: updatedTable.assigned_to,
+      reservedBy: updatedTable.reserved_by,
+      updatedAt: new Date().toISOString(),
+    });
 
     const [enrichedTable] = await this.attachAssignedWaiterNames(restaurantId, [updatedTable]);
     return this.transformTable(enrichedTable);
@@ -656,29 +667,40 @@ export class TableService {
 
   static async getTables(restaurantId, filters = {}) {
     try {
-      let query = supabase
-        .from('tables')
-        .select('id,restaurant_id,table_number,capacity,status,assigned_to')
-        .eq('restaurant_id', restaurantId)
-        .limit(150);
-
-      const { data: tables, error } = await query;
-      if (error) throw error;
-
       const skip = Math.max(parseInt(filters.skip) || 0, 0);
       const limit = Math.min(parseInt(filters.limit) || 100, 150);
-      const withAssignments = await this.applyAssignments(restaurantId, tables || []);
-      const enrichedTables = await this.attachAssignedWaiterNames(restaurantId, withAssignments || []);
-      const paginatedTables = enrichedTables?.slice(skip, skip + limit) || [];
+      const offset = skip;
+
+      // ⚡ OPTIMIZATION: Fetch ONLY essential columns for list view
+      // Skip enrichment queries for performance (assignments, waiter names)
+      const { data: tables, error, count } = await supabase
+        .from('tables')
+        .select('id, restaurant_id, table_number, capacity, status, assigned_to', { count: 'exact' })
+        .eq('restaurant_id', restaurantId)
+        .order('table_number', { ascending: true })
+        .range(offset, offset + limit - 1);
+
+      if (error) throw error;
+
+      // Transform minimal data for display
+      const transformedTables = (tables || []).map(table => ({
+        id: table.id,
+        restaurantId: table.restaurant_id,
+        tableNumber: table.table_number,
+        seatCapacity: table.capacity,
+        status: table.status,
+        assignedTo: table.assigned_to || null,
+        assignedWaiterName: '', // Empty for list view, fetch on-demand if needed
+      }));
 
       return {
-        tables: this.transformTables(paginatedTables),
-        total: enrichedTables?.length || 0,
+        tables: transformedTables,
+        total: count || 0,
         limit,
         skip,
       };
     } catch (error) {
-      logger.error('Get tables error:', error?.message);
+      logger.error('❌ Get tables error:', error?.message);
       throw error;
     }
   }
@@ -850,6 +872,34 @@ export class TableService {
       logger.info(`✅ Cleaned up ${staleTableIds.length} stale table(s)`, {
         restaurantId,
         cleanedTableIds: staleTableIds,
+      });
+
+      const nowISO = new Date().toISOString();
+      const { error: assignmentError } = await supabase
+        .from('table_assignments')
+        .update({
+          is_active: false,
+          updated_at: nowISO,
+        })
+        .eq('restaurant_id', restaurantId)
+        .in('table_id', staleTableIds);
+
+      if (assignmentError) {
+        logger.warn('Failed to deactivate stale table assignments during cleanup', {
+          restaurantId,
+          staleTableIds,
+          error: assignmentError.message,
+        });
+      }
+
+      this.invalidateActiveTableStateCache(restaurantId);
+
+      staleTableIds.forEach((tableId) => {
+        broadcastRestaurantEvent(restaurantId, 'table_updated', {
+          tableId,
+          status: 'available',
+          updatedAt: nowISO,
+        });
       });
 
       return {

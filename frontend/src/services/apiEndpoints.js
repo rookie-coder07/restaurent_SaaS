@@ -1,21 +1,133 @@
 import api from './api.js';
 import { getCurrentPortalAccessToken, getCurrentRestaurantId } from './api.js';
+import { deduplicator, responseCache } from '../utils/requestDedup';
+
+const DEFAULT_CACHE_TTL_MS = 30 * 1000;
+
+function stableStringify(value) {
+  if (value === null || value === undefined) {
+    return '';
+  }
+
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableStringify(item)).join(',')}]`;
+  }
+
+  if (typeof value === 'object') {
+    return `{${Object.keys(value)
+      .sort()
+      .map((key) => `${key}:${stableStringify(value[key])}`)
+      .join(',')}}`;
+  }
+
+  return String(value);
+}
+
+function buildGetRequestKey(url, config = {}) {
+  const token = getCurrentPortalAccessToken();
+  const restaurantId = getCurrentRestaurantId();
+
+  return [
+    'GET',
+    url,
+    stableStringify(config.params || {}),
+    stableStringify(config.headers || {}),
+    restaurantId,
+    token ? token.slice(-16) : '',
+  ].join('|');
+}
+
+function getCacheTtlMs(url) {
+  if (url.includes('/v1/customer/menu')) {
+    return 60 * 1000;
+  }
+
+  if (
+    url.includes('/v1/menu/items') ||
+    url.includes('/v1/menu/categories') ||
+    url.includes('/v1/tables') ||
+    url.includes('/v1/restaurants/profile')
+  ) {
+    return 2 * 60 * 1000;
+  }
+
+  if (
+    url.includes('/v1/orders?') ||
+    url.endsWith('/v1/orders') ||
+    url.includes('/v1/orders/open') ||
+    url.includes('/v1/orders/active') ||
+    url.includes('/v1/orders/inbox/online') ||
+    url.includes('/v1/kitchen/orders')
+  ) {
+    return 20 * 1000;
+  }
+
+  return DEFAULT_CACHE_TTL_MS;
+}
+
+function cachedGet(url, config = {}, { forceRefresh = false, ttlMs = getCacheTtlMs(url) } = {}) {
+  const requestKey = buildGetRequestKey(url, config);
+
+  if (!forceRefresh) {
+    const cachedResponse = responseCache.get(requestKey);
+    if (cachedResponse) {
+      return Promise.resolve(cachedResponse);
+    }
+  } else {
+    responseCache.invalidatePrefix(requestKey);
+  }
+
+  return deduplicator.deduplicate(requestKey, async () => {
+    const response = await api.get(url, config);
+    responseCache.set(requestKey, response, ttlMs);
+    return response;
+  });
+}
+
+export function invalidateOrderReadCaches({ orderId = '', tableId = '' } = {}) {
+  const normalizedOrderId = String(orderId || '').trim();
+  const normalizedTableId = String(tableId || '').trim();
+
+  responseCache.clear();
+  deduplicator.clear();
+
+  if (normalizedOrderId) {
+    responseCache.invalidatePrefix(`GET|/v1/orders/${normalizedOrderId}`);
+  }
+
+  if (normalizedTableId) {
+    responseCache.invalidatePrefix(`GET|/v1/orders/table/${normalizedTableId}/active`);
+  }
+
+  responseCache.invalidatePrefix('GET|/v1/orders');
+  responseCache.invalidatePrefix('GET|/v1/tables');
+}
+
+export function preloadManagerOrderWorkspace() {
+  return Promise.allSettled([
+    cachedGet('/v1/restaurants/profile', {}, { ttlMs: 2 * 60 * 1000 }),
+    cachedGet('/v1/menu/categories', {}, { ttlMs: 2 * 60 * 1000 }),
+    cachedGet('/v1/menu/items', { params: { limit: 300 } }, { ttlMs: 2 * 60 * 1000 }),
+    cachedGet('/v1/orders', { params: { limit: 20, skip: 0 } }, { ttlMs: 20 * 1000 }),
+    cachedGet('/v1/orders/open', {}, { ttlMs: 20 * 1000 }),
+  ]);
+}
 
 export const authAPI = {
   register: (data) => api.post('/v1/auth/register', data),
   login: (email, password, portal = 'admin') => api.post('/v1/auth/login', { email, password, portal }),
   logout: () => api.post('/v1/auth/logout'),
-  getCurrentUser: () => api.get('/v1/auth/me'),
+  getCurrentUser: () => cachedGet('/v1/auth/me', {}, { ttlMs: 8 * 1000 }),
   changePassword: (data) => api.post('/v1/auth/change-password', data),
   resetUserPassword: (data) => api.post('/v1/manager/reset-user-password', data),
 };
 
 export const restaurantAPI = {
-  getProfile: () => api.get('/v1/restaurants/profile'),
+  getProfile: () => cachedGet('/v1/restaurants/profile'),
   updateProfile: (data) => api.put('/v1/restaurants/profile', data),
   updateSettings: (data) => api.put('/v1/restaurants/settings', data),
   updateInvoiceSettings: (data) => api.put('/v1/restaurants/settings/invoice', data),
-  getBroadcasts: (params) => api.get('/v1/restaurants/broadcasts', { params }),
+  getBroadcasts: (params) => cachedGet('/v1/restaurants/broadcasts', { params }),
   createStaff: (data) => api.post('/v1/restaurants/staff', data),
   updateStaff: (staffId, data) => api.put(`/v1/restaurants/staff/${staffId}`, data),
   getStaff: (filtersOrLimit = {}, skip) => {
@@ -24,19 +136,19 @@ export const restaurantAPI = {
         ? filtersOrLimit
         : { limit: filtersOrLimit, skip };
 
-    return api.get('/v1/restaurants/staff', { params });
+    return cachedGet('/v1/restaurants/staff', { params });
   },
   deactivateStaff: (staffId) => api.delete(`/v1/restaurants/staff/${staffId}`),
   resetStaffPassword: (staffId, data) => api.put(`/v1/restaurants/staff/${staffId}/reset-password`, data),
   
   // Activity API
-  getActivityStaffList: () => api.get('/v1/activity/staff'),
-  getActivityLogs: (userId) => api.get(`/v1/activity/${userId}/logs`),
-  getUserActivityInfo: (userId) => api.get(`/v1/activity/${userId}/info`),
+  getActivityStaffList: () => cachedGet('/v1/activity/staff'),
+  getActivityLogs: (userId) => cachedGet(`/v1/activity/${userId}/logs`),
+  getUserActivityInfo: (userId) => cachedGet(`/v1/activity/${userId}/info`),
 };
 
 export const menuAPI = {
-  getCategories: () => api.get('/v1/menu/categories'),
+  getCategories: () => cachedGet('/v1/menu/categories'),
   createCategory: (data) => api.post('/v1/menu/categories', data),
   updateCategory: (categoryId, data) => api.put(`/v1/menu/categories/${categoryId}`, data),
   deleteCategory: (categoryId) => api.delete(`/v1/menu/categories/${categoryId}`),
@@ -47,9 +159,9 @@ export const menuAPI = {
       },
     }),
 
-  getItems: (filters) => api.get('/v1/menu/items', { params: filters }),
+  getItems: (filters) => cachedGet('/v1/menu/items', { params: filters }),
   createItem: (data) => api.post('/v1/menu/items', data),
-  getItem: (itemId) => api.get(`/v1/menu/items/${itemId}`),
+  getItem: (itemId) => cachedGet(`/v1/menu/items/${itemId}`),
   updateItem: (itemId, data) => api.put(`/v1/menu/items/${itemId}`, data),
   deleteItem: (itemId) => api.delete(`/v1/menu/items/${itemId}`),
   toggleAvailability: (itemId, isAvailable) =>
@@ -58,22 +170,22 @@ export const menuAPI = {
 
 export const orderAPI = {
   createOrder: (data) => api.post('/v1/orders', data),
-  getOrders: (filters) => api.get('/v1/orders', { params: filters }),
-  getActiveOrders: () => api.get('/v1/orders/active'),
-  getOpenBills: () => api.get('/v1/orders/open'),
-  getOnlineInbox: (filters) => api.get('/v1/orders/inbox/online', { params: filters }),
+  getOrders: (filters, options = {}) => cachedGet('/v1/orders', { params: filters }, options),
+  getActiveOrders: () => cachedGet('/v1/orders/active'),
+  getOpenBills: (options = {}) => cachedGet('/v1/orders/open', {}, options),
+  getOnlineInbox: (filters) => cachedGet('/v1/orders/inbox/online', { params: filters }),
   cancelPendingBills: (data) => api.post('/v1/orders/cancel-pending', data),
-  getActiveOrderForTable: (tableId) => {
+  getActiveOrderForTable: (tableId, options = {}) => {
     const token = getCurrentPortalAccessToken();
     const restaurantId = getCurrentRestaurantId();
-    return api.get(`/v1/orders/table/${tableId}/active`, {
+    return cachedGet(`/v1/orders/table/${tableId}/active`, {
       headers: {
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
         ...(restaurantId ? { 'X-Restaurant-Id': restaurantId } : {}),
       },
-    });
+    }, options);
   },
-  getOrder: (orderId) => api.get(`/v1/orders/${orderId}`),
+  getOrder: (orderId, options = {}) => cachedGet(`/v1/orders/${orderId}`, {}, options),
   updateOrder: (orderId, data) => api.put(`/v1/orders/${orderId}`, data),
   approveDiscount: (orderId, data) => api.post(`/v1/orders/${orderId}/discount-approval`, data),
   updateOnlineOrder: (orderId, data) => api.patch(`/v1/orders/${orderId}/online`, data),
@@ -105,22 +217,22 @@ export const orderAPI = {
       },
     });
   },
-  getLoyaltyProfile: (phone) => api.get('/v1/orders/loyalty/profile', { params: { phone } }),
+  getLoyaltyProfile: (phone) => cachedGet('/v1/orders/loyalty/profile', { params: { phone } }, { ttlMs: 15 * 1000 }),
   updateStatus: (orderId, data) => api.put(`/v1/orders/${orderId}/status`, data),
   updateKitchenStatus: (orderId, data) => api.patch(`/v1/orders/${orderId}/status`, data),
 };
 
 export const kitchenAPI = {
-  getActiveOrders: () => api.get('/v1/kitchen/orders'),
-  getAllOrders: (filters) => api.get('/v1/kitchen/orders/all', { params: filters }),
-  getOrderDetail: (orderId) => api.get(`/v1/kitchen/orders/${orderId}`),
+  getActiveOrders: () => cachedGet('/v1/kitchen/orders', {}, { ttlMs: 10 * 1000 }),
+  getAllOrders: (filters) => cachedGet('/v1/kitchen/orders/all', { params: filters }, { ttlMs: 10 * 1000 }),
+  getOrderDetail: (orderId) => cachedGet(`/v1/kitchen/orders/${orderId}`, {}, { ttlMs: 10 * 1000 }),
   updateStatus: (orderId, ticketId, data) => api.put(`/v1/kitchen/orders/${orderId}/tickets/${ticketId}/status`, data),
   reprintTicket: (orderId, ticketId) => api.post(`/v1/kitchen/orders/${orderId}/tickets/${ticketId}/reprint`),
   refireTicket: (orderId, ticketId) => api.post(`/v1/kitchen/orders/${orderId}/tickets/${ticketId}/refire`),
 };
 
 export const tableAPI = {
-  getTables: (filters) => api.get('/v1/tables', { params: filters }),
+  getTables: (filters) => cachedGet('/v1/tables', { params: filters }),
   createTable: (data) => api.post('/v1/tables', data),
   createMultipleTables: (data) => api.post('/v1/tables/batch', data),
   updateTable: (tableId, data) => api.put(`/v1/tables/${tableId}`, data),
@@ -132,19 +244,19 @@ export const tableAPI = {
 };
 
 export const analyticsAPI = {
-  getDailySalesReport: (filters) => api.get('/v1/analytics/daily-sales', { params: filters }),
-  getMonthlySalesReport: (filters) => api.get('/v1/analytics/monthly-sales', { params: filters }),
-  getTopItems: (filters) => api.get('/v1/analytics/top-items', { params: filters }),
-  getPeakHours: (date) => api.get('/v1/analytics/peak-hours', { params: { date } }),
-  getLatestEodSummary: (filters) => api.get('/v1/analytics/eod/latest', { params: filters }),
-  getEodSummaryHistory: (filters) => api.get('/v1/analytics/eod/history', { params: filters }),
-  getLoyaltySummary: () => api.get('/v1/analytics/loyalty'),
+  getDailySalesReport: (filters) => cachedGet('/v1/analytics/daily-sales', { params: filters }),
+  getMonthlySalesReport: (filters) => cachedGet('/v1/analytics/monthly-sales', { params: filters }),
+  getTopItems: (filters) => cachedGet('/v1/analytics/top-items', { params: filters }),
+  getPeakHours: (date) => cachedGet('/v1/analytics/peak-hours', { params: { date } }),
+  getLatestEodSummary: (filters) => cachedGet('/v1/analytics/eod/latest', { params: filters }, { ttlMs: 20 * 1000 }),
+  getEodSummaryHistory: (filters) => cachedGet('/v1/analytics/eod/history', { params: filters }),
+  getLoyaltySummary: () => cachedGet('/v1/analytics/loyalty'),
 };
 
 export const inventoryAPI = {
-  getItems: () => api.get('/v1/inventory/items'),
-  getSummary: () => api.get('/v1/inventory/summary'),
-  getHistory: (filters) => api.get('/v1/inventory/history', { params: filters }),
+  getItems: () => cachedGet('/v1/inventory/items'),
+  getSummary: () => cachedGet('/v1/inventory/summary'),
+  getHistory: (filters) => cachedGet('/v1/inventory/history', { params: filters }),
   createItem: (data) => api.post('/v1/inventory/items', data),
   updateItem: (itemId, data) => api.put(`/v1/inventory/items/${itemId}`, data),
   addStock: (itemId, data) => api.post(`/v1/inventory/items/${itemId}/add-stock`, data),
@@ -152,49 +264,49 @@ export const inventoryAPI = {
 };
 
 export const customerAPI = {
-  getPublicMenu: ({ tableNumber, tableId }) => api.get('/v1/customer/menu/items', {
+  getPublicMenu: ({ tableNumber, tableId }) => cachedGet('/v1/customer/menu/items', {
     params: {
       ...(tableNumber ? { table: tableNumber } : {}),
       ...(tableId ? { tableId } : {}),
     },
-  }),
-  getMenuByQR: (qrCodeData) => api.get(`/v1/customer/menu/${qrCodeData}/items`),
+  }, { ttlMs: 60 * 1000 }),
+  getMenuByQR: (qrCodeData) => cachedGet(`/v1/customer/menu/${qrCodeData}/items`, {}, { ttlMs: 60 * 1000 }),
   createOrder: (data) => api.post('/v1/customer/orders', data),
   placeOrder: (data) => api.post('/v1/customer/orders', data),
   getOrder: (orderId, tableNumber) => {
     if (!orderId) {
       return Promise.reject(new Error('Order ID is required'));
     }
-    return api.get(`/v1/customer/orders/${orderId}`, {
+    return cachedGet(`/v1/customer/orders/${orderId}`, {
       params: tableNumber ? { table: tableNumber } : {},
     });
   },
-  getOrderByTable: (tableNumber) => api.get(`/v1/customer/orders/table/${tableNumber}`),
+  getOrderByTable: (tableNumber) => cachedGet(`/v1/customer/orders/table/${tableNumber}`),
 };
 
 export const developerAPI = {
-  getDashboard: () => api.get('/developer/dashboard'),
-  getOverview: () => api.get('/developer/control-center/overview'),
-  getLiveMonitor: () => api.get('/developer/control-center/live'),
-  getSecurityOverview: () => api.get('/developer/control-center/security'),
-  getErrorTracking: (params) => api.get('/developer/control-center/errors', { params }),
-  exportData: (resource) => api.get(`/developer/control-center/exports/${resource}`),
+  getDashboard: () => cachedGet('/developer/dashboard'),
+  getOverview: () => cachedGet('/developer/control-center/overview'),
+  getLiveMonitor: () => cachedGet('/developer/control-center/live'),
+  getSecurityOverview: () => cachedGet('/developer/control-center/security'),
+  getErrorTracking: (params) => cachedGet('/developer/control-center/errors', { params }),
+  exportData: (resource) => cachedGet(`/developer/control-center/exports/${resource}`),
   createRestaurant: (data) => api.post('/developer/restaurants', data),
-  getRestaurants: (params) => api.get('/developer/restaurants', { params }),
+  getRestaurants: (params) => cachedGet('/developer/restaurants', { params }),
   updateRestaurantAccess: (restaurantId, data) => api.patch(`/developer/restaurants/${restaurantId}/access`, data),
   forceLogoutRestaurantUsers: (restaurantId) => api.post(`/developer/restaurants/${restaurantId}/force-logout`),
-  getUsers: (params) => api.get('/developer/users', { params }),
+  getUsers: (params) => cachedGet('/developer/users', { params }),
   updateUserStatus: (userId, data) => api.patch(`/developer/users/${userId}/status`, data),
   updateUserRole: (userId, data) => api.patch(`/developer/users/${userId}/role`, data),
   resetUserPassword: (userId, data) => api.post(`/developer/users/${userId}/reset-password`, data),
   forceLogoutUser: (userId) => api.post(`/developer/users/${userId}/force-logout`),
-  getUserLoginHistory: (userId, params) => api.get(`/developer/users/${userId}/login-history`, { params }),
-  getSystemSettings: () => api.get('/developer/settings'),
+  getUserLoginHistory: (userId, params) => cachedGet(`/developer/users/${userId}/login-history`, { params }),
+  getSystemSettings: () => cachedGet('/developer/settings'),
   updateSystemSettings: (data) => api.put('/developer/settings', data),
-  getFeatureFlags: () => api.get('/developer/feature-flags'),
+  getFeatureFlags: () => cachedGet('/developer/feature-flags'),
   updateMaintenance: (data) => api.put('/developer/settings/maintenance', data),
   updateFeatureFlag: (data) => api.put('/developer/feature-flags', data),
-  getAuditLogs: (params) => api.get('/developer/audit-logs', { params }),
-  getHealth: () => api.get('/developer/health'),
+  getAuditLogs: (params) => cachedGet('/developer/audit-logs', { params }),
+  getHealth: () => cachedGet('/developer/health', {}, { ttlMs: 10 * 1000 }),
   createBroadcast: (data) => api.post('/developer/broadcasts', data),
 };
