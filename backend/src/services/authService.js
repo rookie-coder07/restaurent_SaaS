@@ -1264,13 +1264,23 @@ export class AuthService {
       }
 
       // ✅ FIX: Clear database password_hash - Supabase Auth is now authoritative
-      const passwordHash = await this.hashPassword(newPassword);
-      await this.updatePasswordTrackingColumns(
-        'users',
-        { id: user.id, restaurant_id: restaurantId },
-        passwordHash,
-        handledAt
-      );
+      // This is non-blocking - if it fails, password is still reset in Supabase Auth
+      try {
+        const passwordHash = await this.hashPassword(newPassword);
+        await this.updatePasswordTrackingColumns(
+          'users',
+          { id: user.id, restaurant_id: restaurantId },
+          passwordHash,
+          handledAt
+        );
+      } catch (trackingError) {
+        logger.warn('Password tracking column update failed during password reset (non-blocking):', {
+          userId: user.id,
+          userEmail: user.email,
+          error: trackingError.message,
+        });
+        // Continue anyway - password was successfully reset in Supabase Auth
+      }
 
       const { error: updateRequestError } = await supabase
         .from('password_reset_requests')
