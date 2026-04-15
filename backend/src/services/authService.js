@@ -978,13 +978,31 @@ export class AuthService {
       }
 
       // ✅ FIX: Clear database password_hash - Supabase Auth is now authoritative
-      const passwordHash = await this.hashPassword(newPassword);
-      await this.updatePasswordTrackingColumns(table, { [column]: userId }, passwordHash);
+      // This is non-blocking - if it fails, password is still changed in Supabase Auth
+      try {
+        const passwordHash = await this.hashPassword(newPassword);
+        await this.updatePasswordTrackingColumns(table, { [column]: userId }, passwordHash);
+      } catch (trackingError) {
+        logger.warn('Password tracking column update failed (non-blocking):', {
+          userId,
+          error: trackingError.message,
+        });
+        // Continue anyway - password was successfully changed in Supabase Auth
+      }
 
       // Revoke all refresh tokens for this user (force re-login for security)
-      await revokeAllUserTokens(userId);
+      // This is also non-blocking - best effort
+      try {
+        await revokeAllUserTokens(userId);
+      } catch (revokeError) {
+        logger.warn('Token revocation failed (non-blocking):', {
+          userId,
+          error: revokeError.message,
+        });
+        // Continue anyway - password change succeeded
+      }
 
-      logger.warn(`✅ Password changed for user: ${userId} - Supabase Auth updated, all tokens revoked`, { userId });
+      logger.warn(`✅ Password changed for user: ${userId} - Supabase Auth updated`, { userId });
 
       return { message: 'Password changed successfully. Please log in again.' };
     } catch (error) {
