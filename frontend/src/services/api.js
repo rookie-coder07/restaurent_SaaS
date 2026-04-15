@@ -195,6 +195,9 @@ api.interceptors.request.use(
     const isPublicEndpoint = publicEndpoints.some(endpoint => url.includes(endpoint));
     
     if (isPublicEndpoint) {
+      delete config.headers.Authorization;
+      delete config.headers['X-Restaurant-Id'];
+
       if (shouldDebugApi) {
         logger.debug(`⏭️  Skipping auth headers for public endpoint: ${url}`);
       }
@@ -352,8 +355,9 @@ api.interceptors.response.use(
     try {
       const portal = getPortalKeyFromPathname(window.location.pathname);
       const existingSession = readPortalSession(portal);
+      const isPublicAuthRequest = RETRYABLE_AUTH_ENDPOINTS.some((endpoint) => String(originalRequest?.url || '').includes(endpoint));
       
-      if (error.response?.status === 401 && existingSession?.refreshToken) {
+      if (!isPublicAuthRequest && error.response?.status === 401 && existingSession?.refreshToken) {
         const refreshedSession = await refreshPortalAccessToken(portal, existingSession);
         originalRequest.headers.Authorization = `Bearer ${refreshedSession.accessToken}`;
         persistPrimaryToken(
