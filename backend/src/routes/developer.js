@@ -6,6 +6,7 @@ import {
   createBroadcastSchema,
   createRestaurantSchema,
   createDeveloperUserSchema,
+  reconcileAuthMappingsSchema,
   resetDeveloperUserPasswordSchema,
   updateFeatureFlagSchema,
   updateMaintenanceSchema,
@@ -60,6 +61,8 @@ router.get('/users', developerController.getUsers);
 router.patch('/users/:userId/status', validateRequest(updateUserStatusSchema), developerController.updateUserStatus);
 router.patch('/users/:userId/role', validateRequest(updateUserRoleSchema), developerController.updateUserRole);
 router.post('/users/:userId/reset-password', validateRequest(resetDeveloperUserPasswordSchema), developerController.resetUserPassword);
+router.get('/auth-reconciliation/audit', developerController.auditAuthMappings);
+router.post('/auth-reconciliation/reconcile', validateRequest(reconcileAuthMappingsSchema), developerController.reconcileAuthMappings);
 router.post('/users/:userId/force-logout', developerController.forceLogoutUser);
 router.get('/users/:userId/login-history', developerController.getUserLoginHistory);
 
@@ -78,4 +81,3 @@ router.get('/health', developerController.getSystemHealth);
 router.post('/broadcasts', validateRequest(createBroadcastSchema), developerController.createBroadcast);
 
 export default router;
-

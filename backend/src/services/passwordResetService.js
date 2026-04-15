@@ -160,7 +160,7 @@ class PasswordResetService {
       // Check if it's a restaurant owner
       const { data: restaurant, error: restaurantError } = await supabase
         .from('restaurants')
-        .select('id, email')
+        .select('*')
         .eq('email', normalizedEmail)
         .maybeSingle();
 
@@ -172,7 +172,7 @@ class PasswordResetService {
         // Check if it's a staff/user account
         const { data: staffUser, error: userError } = await supabase
           .from('users')
-          .select('id, restaurant_id, email')
+          .select('*')
           .eq('email', normalizedEmail)
           .maybeSingle();
 
@@ -190,6 +190,8 @@ class PasswordResetService {
         throw new Error('User not found');
       }
 
+      const targetAuthUserId = AuthService.getMappedSupabaseUserId(user) || userId;
+
       // Update password via Supabase Auth
       let authError;
       let authUpdateResponse;
@@ -198,7 +200,7 @@ class PasswordResetService {
         logger.info(`🔄 Attempting to update password in Supabase Auth for user: ${userId}`);
         
         ({ data: authUpdateResponse, error: authError } = await adminClient.auth.admin.updateUserById(
-          userId,
+          targetAuthUserId,
           { password: newPassword }
         ));
         
@@ -208,6 +210,7 @@ class PasswordResetService {
           errorMsg: authError?.message || null,
           hasData: !!authUpdateResponse,
           dataUser: authUpdateResponse?.user?.id || null,
+          targetAuthUserId,
         });
       } catch (adminInitError) {
         logger.error('❌ Admin client initialization error during password reset:', {
@@ -264,12 +267,7 @@ class PasswordResetService {
       // ✅ FIXED: Clear password_hash from database after reset
       // This ensures old passwords cannot be used
       const tableToUpdate = isRestaurant ? 'restaurants' : 'users';
-      const { error: updateError } = await supabase
-        .from(tableToUpdate)
-        .update(AuthService.buildPasswordUpdatePayload(await AuthService.hashPassword(newPassword)))
-        .eq('id', userId);
-
-      if (updateError) throw updateError;
+      await AuthService.syncPasswordHash(tableToUpdate, userId, newPassword);
 
       // Clear verified reset state after successful password update
       await OTPService.invalidateOTP(normalizedEmail);
@@ -340,7 +338,7 @@ class PasswordResetService {
       if (!user) {
         const { data: restaurant, error: restaurantError } = await supabase
           .from('restaurants')
-          .select('id, email, name')
+          .select('*')
           .eq('id', userId)
           .maybeSingle();
 
@@ -355,7 +353,7 @@ class PasswordResetService {
       if (!user) {
         const { data: staffUser, error: userError } = await supabase
           .from('users')
-          .select('id, restaurant_id, name, email')
+          .select('*')
           .eq('id', userId)
           .maybeSingle();
 
@@ -372,6 +370,8 @@ class PasswordResetService {
         throw new Error('User not found');
       }
 
+      const targetAuthUserId = AuthService.getMappedSupabaseUserId(user) || userId;
+
       // Update password via Supabase Auth
       let authError;
       let authUpdateResponse;
@@ -380,7 +380,7 @@ class PasswordResetService {
         logger.info(`🔄 Updating password in Supabase Auth for user: ${userId}`);
         
         ({ data: authUpdateResponse, error: authError } = await adminClient.auth.admin.updateUserById(
-          userId,
+          targetAuthUserId,
           { password: newPassword }
         ));
         
@@ -390,6 +390,7 @@ class PasswordResetService {
           errorMsg: authError?.message || null,
           hasData: !!authUpdateResponse,
           dataUser: authUpdateResponse?.user?.id || null,
+          targetAuthUserId,
         });
       } catch (adminInitError) {
         logger.error('❌ Admin client error during password reset:', {
@@ -443,19 +444,7 @@ class PasswordResetService {
       // ✅ Clear password_hash from database - Supabase Auth is now source of truth
       const tableToUpdate = isRestaurant ? 'restaurants' : 'users';
       const handledAt = new Date().toISOString();
-      const { error: updateError } = await supabase
-        .from(tableToUpdate)
-        .update(AuthService.buildPasswordUpdatePayload(await AuthService.hashPassword(newPassword), handledAt))
-        .eq('id', userId);
-
-      if (updateError) {
-        logger.error('❌ Failed to clear password_hash from database:', {
-          userId,
-          table: tableToUpdate,
-          error: updateError.message,
-        });
-        throw updateError;
-      }
+      await AuthService.syncPasswordHash(tableToUpdate, userId, newPassword, handledAt);
 
       logger.info(`✅ Password reset completed for user: ${userId}`, {
         email: user.email,

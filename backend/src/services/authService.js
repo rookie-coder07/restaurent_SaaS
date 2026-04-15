@@ -96,6 +96,40 @@ export class AuthService {
     return passwordHash;
   }
 
+  static buildSupabaseUserMappingPayload(supabaseUserId, timestamp = new Date().toISOString()) {
+    return {
+      supabase_user_id: supabaseUserId,
+      updated_at: timestamp,
+    };
+  }
+
+  static async updateSupabaseUserMapping(table, matcher = {}, supabaseUserId, timestamp = new Date().toISOString()) {
+    let query = supabase
+      .from(table)
+      .update(this.buildSupabaseUserMappingPayload(supabaseUserId, timestamp));
+
+    Object.entries(matcher || {}).forEach(([key, value]) => {
+      query = query.eq(key, value);
+    });
+
+    const { error } = await query;
+
+    if (!error) {
+      return supabaseUserId;
+    }
+
+    if (this.isMissingColumnError(error, 'supabase_user_id')) {
+      logger.warn('Supabase user mapping column update skipped', {
+        table,
+        reason: 'supabase_user_id column is not available in this database version yet',
+        errorMessage: error?.message,
+      });
+      return supabaseUserId;
+    }
+
+    throw error;
+  }
+
   static async persistRefreshToken(refreshToken, userId, restaurantId) {
     const expiresAt = new Date(Date.now() + TOKEN_CONFIG.REFRESH_TOKEN_SECONDS * 1000).toISOString();
     try {
@@ -159,23 +193,130 @@ export class AuthService {
     }
   }
 
+  static getStoredPasswordHash(account) {
+    return String(account?.password_hash || '').trim();
+  }
+
+  static logPasswordDebug(context, password, account = {}) {
+    const storedHash = this.getStoredPasswordHash(account);
+
+    logger.info(`[AUTH_PASSWORD] ${context}`, {
+      accountId: account?.id || null,
+      email: account?.email || null,
+      inputPasswordLength: String(password || '').length,
+      storedHashLength: storedHash.length,
+      hasStoredPasswordHash: Boolean(storedHash),
+      passwordUpdatedAt: account?.password_updated_at || null,
+    });
+  }
+
+  static getMappedSupabaseUserId(account = {}) {
+    return String(account?.supabase_user_id || '').trim();
+  }
+
+  static async findAuthUsersByEmail(email) {
+    const normalizedEmail = String(email || '').trim().toLowerCase();
+    if (!normalizedEmail) {
+      return [];
+    }
+
+    const adminClient = getSupabaseAdmin();
+    const { data, error } = await adminClient.auth.admin.listUsers({ email: normalizedEmail });
+    if (error) {
+      throw error;
+    }
+
+    return (data?.users || []).filter((user) => String(user?.email || '').trim().toLowerCase() === normalizedEmail);
+  }
+
+  static async findAuthUserByEmail(email) {
+    const users = await this.findAuthUsersByEmail(email);
+    return users[0] || null;
+  }
+
+  static getPreferredSupabaseUserIds(account = {}, preferredUserId = '') {
+    const ids = [
+      String(preferredUserId || '').trim(),
+      this.getMappedSupabaseUserId(account),
+      String(account?.id || '').trim(),
+    ].filter(Boolean);
+
+    return Array.from(new Set(ids));
+  }
+
+  static async resolveSupabaseUserForAccount(account = {}, { preferredUserId = '' } = {}) {
+    const candidateIds = this.getPreferredSupabaseUserIds(account, preferredUserId);
+
+    if (candidateIds.length > 0) {
+      return {
+        id: candidateIds[0],
+        email: String(account?.email || '').trim().toLowerCase() || null,
+        source: preferredUserId ? 'preferred' : this.getMappedSupabaseUserId(account) ? 'mapped' : 'database_id',
+      };
+    }
+
+    const authUser = await this.findAuthUserByEmail(account?.email);
+    if (!authUser?.id) {
+      return null;
+    }
+
+    return {
+      id: authUser.id,
+      email: String(authUser.email || '').trim().toLowerCase(),
+      source: 'email_lookup',
+    };
+  }
+
   static async verifyPasswordAgainstStoredHash(password, account, accountType = 'user') {
-    const isValid = await this.comparePassword(password, account?.password_hash);
+    const storedHash = this.getStoredPasswordHash(account);
+    const isValid = storedHash ? await this.comparePassword(password, storedHash) : false;
 
     logger.info(`[LOGIN] Stored password hash verification for ${accountType}`, {
       accountId: account?.id,
       email: account?.email,
       isValid,
-      hasPasswordHash: !!account?.password_hash,
+      hasPasswordHash: Boolean(storedHash),
       passwordUpdatedAt: account?.password_updated_at || null,
     });
 
     return isValid;
   }
 
-  static async syncPasswordHashIfMissing(table, accountId, password) {
+  static async syncPasswordHash(table, accountId, password, timestamp = new Date().toISOString()) {
     const passwordHash = await this.hashPassword(password);
-    return await this.updatePasswordTrackingColumns(table, { id: accountId }, passwordHash);
+    return await this.updatePasswordTrackingColumns(table, { id: accountId }, passwordHash, timestamp);
+  }
+
+  static async syncPasswordHashIfMissing(table, accountId, password) {
+    return await this.syncPasswordHash(table, accountId, password);
+  }
+
+  static async ensurePasswordHashMatches(table, account, password, accountType = 'user') {
+    const storedHash = this.getStoredPasswordHash(account);
+
+    if (!storedHash) {
+      logger.info(`[LOGIN] No stored password hash found for ${accountType}; syncing tracking hash`, {
+        accountId: account?.id,
+        email: account?.email,
+      });
+      return await this.syncPasswordHashIfMissing(table, account.id, password);
+    }
+
+    const isValid = await this.verifyPasswordAgainstStoredHash(password, account, accountType);
+    if (isValid) {
+      return storedHash;
+    }
+
+    logger.warn(`[LOGIN] Stored password hash mismatch for ${accountType}; refreshing tracking hash from verified auth password`, {
+      accountId: account?.id,
+      email: account?.email,
+    });
+    return await this.syncPasswordHash(table, account.id, password);
+  }
+
+  static isSupabaseUserNotFoundError(error) {
+    const combined = `${error?.name || ''} ${error?.message || ''} ${error?.code || ''} ${error?.status || ''}`.toLowerCase();
+    return combined.includes('user not found');
   }
 
   static normalizeResetRequestRole(role) {
@@ -294,6 +435,8 @@ export class AuthService {
         throw restaurantError;
       }
 
+      await this.updateSupabaseUserMapping('restaurants', { id: restaurant.id }, authData.user.id);
+
       logger.info(`✅ Restaurant registered: ${restaurant.id} - ${restaurant.name}`);
 
       const accessToken = this.generateAccessToken(
@@ -393,6 +536,14 @@ export class AuthService {
         logger.info(`✅ User authenticated in Supabase Auth: ${authData.user.id}`);
       }
 
+      if (authFailedMessage || !authData?.user?.id) {
+        logger.error('[LOGIN] Supabase Auth rejected credentials', {
+          email: email.toLowerCase(),
+          portal,
+          errorMessage: authFailedMessage || 'Missing auth user ID',
+        });
+        throw new AppError('INVALID_CREDENTIALS', authFailedMessage || 'Invalid email or password');
+      }
 
       const authUserId = authData?.user?.id || null;
 
@@ -422,14 +573,7 @@ export class AuthService {
         }
 
         if (restaurant && !restaurantError) {
-          if (!restaurant.password_hash) {
-            restaurant.password_hash = await this.syncPasswordHashIfMissing('restaurants', restaurant.id, password);
-          }
-
-          const restaurantPasswordValid = await this.verifyPasswordAgainstStoredHash(password, restaurant, 'restaurant');
-          if (!restaurantPasswordValid) {
-            throw new AppError('INVALID_CREDENTIALS');
-          }
+          restaurant.password_hash = await this.ensurePasswordHashMatches('restaurants', restaurant, password, 'restaurant');
 
           const userRole = ROLES.ADMIN;
           const accessToken = this.generateAccessToken(
@@ -627,19 +771,7 @@ export class AuthService {
         authVerified: !!authData?.user?.id,
       });
 
-      if (!user.password_hash) {
-        user.password_hash = await this.syncPasswordHashIfMissing('users', user.id, password);
-      }
-
-      const localPasswordValid = await this.verifyPasswordAgainstStoredHash(password, user, 'user');
-      if (!localPasswordValid) {
-        logger.warn('[LOGIN] Rejecting login because stored password hash does not match', {
-          userId: user.id,
-          email: user.email,
-          portal,
-        });
-        throw new AppError('INVALID_CREDENTIALS');
-      }
+      user.password_hash = await this.ensurePasswordHashMatches('users', user, password, 'user');
 
       // ✅ TASK 3: REMOVE INVALID COMPARISON
       // ✅ FIXED: Only trust Supabase Auth - no custom password checking
@@ -647,23 +779,6 @@ export class AuthService {
       // ❌ DO NOT: Use bcrypt.compare with database password_hash
       // ❌ DO NOT: Use inputPassword === user.password comparison
       // ✅ DO: Use Supabase Auth result which already verified the password
-      
-      if (authFailedMessage) {
-        logger.error(`[LOGIN] Supabase Auth failed:`, {
-          email: email.toLowerCase(),
-          errorMessage: authFailedMessage,
-          portal,
-        });
-        throw new AppError('INVALID_CREDENTIALS', authFailedMessage || 'Invalid email or password');
-      }
-      if (!authData?.user?.id) {
-        logger.error(`[LOGIN] Authentication failed - no auth user ID:`, {
-          email: email.toLowerCase(),
-          hasAuthData: !!authData,
-          portal,
-        });
-        throw new AppError('INVALID_CREDENTIALS', 'Invalid email or password');
-      }
       
       logger.info(`[LOGIN] Password verified by Supabase Auth for: ${email.toLowerCase()}`);
 
@@ -809,6 +924,8 @@ export class AuthService {
         throw userError;
       }
 
+      await this.updateSupabaseUserMapping('users', { id: user.id }, authData.user.id);
+
       logger.info(`✅ User registered: ${user.id} - ${user.name}`);
 
       const accessToken = this.generateAccessToken(
@@ -876,17 +993,22 @@ export class AuthService {
         throw new AppError('INVALID_CREDENTIALS', 'User not found');
       }
 
+      this.logPasswordDebug('change-password:before-verify', currentPassword, account);
       const currentPasswordValid = await this.verifyPasswordAgainstStoredHash(currentPassword, account, table);
-      if (!currentPasswordValid) {
-        throw new Error('Current password is incorrect');
-      }
+      logger.info('[AUTH_PASSWORD] Local current password verification result', {
+        userId,
+        accountType: table,
+        isValid: currentPasswordValid,
+      });
 
       // ✅ FIX: Authenticate against Supabase Auth, not database hash
       // Verify current password via Supabase Auth
       let authVerifyError = null;
+      let authVerifyData = null;
+      let fallbackToDatabaseOnly = false;
       try {
         logger.info(`🔄 Verifying current password for change-password: ${account.email}`);
-        ({ data: {}, error: authVerifyError } = await supabase.auth.signInWithPassword({
+        ({ data: authVerifyData, error: authVerifyError } = await supabase.auth.signInWithPassword({
           email: account.email,
           password: currentPassword,
         }));
@@ -909,12 +1031,24 @@ export class AuthService {
       }
 
       if (authVerifyError) {
-        throw new AppError('INVALID_CREDENTIALS', 'Current password is incorrect');
+        if (this.isSupabaseUserNotFoundError(authVerifyError) && currentPasswordValid) {
+          fallbackToDatabaseOnly = true;
+          logger.warn('Supabase Auth user missing during password verification; using database-only fallback for change password', {
+            userId,
+            email: account.email,
+            error: authVerifyError.message,
+          });
+        } else {
+          throw new AppError('VALIDATION_ERROR', 'Current password is incorrect');
+        }
       }
 
       // ✅ FIX: Update password in Supabase Auth (PRIMARY source of truth)
+      let didUpdateSupabase = false;
+      let resolvedSupabaseUserId = authVerifyData?.user?.id || null;
       let authUpdateError = null;
       let authUpdateResponse = null;
+      if (!fallbackToDatabaseOnly) {
       try {
         const adminClient = getSupabaseAdmin();
         logger.info(`🔄 Updating password in Supabase Auth for user: ${userId}`);
@@ -930,6 +1064,18 @@ export class AuthService {
           hasData: !!authUpdateResponse,
           dataUser: authUpdateResponse?.user?.id || null,
         });
+
+        if (authUpdateError && this.isSupabaseUserNotFoundError(authUpdateError) && resolvedSupabaseUserId && resolvedSupabaseUserId !== userId) {
+          logger.warn('Supabase password update failed for database user id; retrying with verified auth user id', {
+            userId,
+            resolvedSupabaseUserId,
+            email: account.email,
+          });
+
+          ({ data: authUpdateResponse, error: authUpdateError } = await adminClient.auth.admin.updateUserById(resolvedSupabaseUserId, {
+            password: newPassword
+          }));
+        }
       } catch (adminInitError) {
         logger.error('❌ Admin client init error during password change:', {
           error: adminInitError.message,
@@ -940,6 +1086,15 @@ export class AuthService {
       }
 
       if (authUpdateError) {
+        if (this.isSupabaseUserNotFoundError(authUpdateError) && currentPasswordValid) {
+          fallbackToDatabaseOnly = true;
+          logger.warn('Supabase Auth user missing during password update; using database-only fallback for change password', {
+            userId,
+            email: account.email,
+            resolvedSupabaseUserId,
+            error: authUpdateError.message,
+          });
+        } else {
         logger.error('❌ Failed to update Supabase Auth password:', {
           userId,
           errorCode: authUpdateError.code,
@@ -947,16 +1102,48 @@ export class AuthService {
           errorStatus: authUpdateError.status,
         });
         throw authUpdateError;
+        }
       }
       
       logger.info(`✅ Password successfully updated in Supabase Auth for user: ${userId}`);
 
+      }
+
       // Return success immediately - all other operations are fire-and-forget background tasks
+      if (!fallbackToDatabaseOnly) {
+        didUpdateSupabase = true;
+        resolvedSupabaseUserId = authUpdateResponse?.user?.id || resolvedSupabaseUserId || userId;
+      } else {
+        logger.warn('Password change completed with database-only fallback because Supabase Auth user was not found', {
+          userId,
+          email: account.email,
+          resolvedSupabaseUserId,
+        });
+      }
+
+      const handledAt = new Date().toISOString();
+      await this.syncPasswordHash(table, userId, newPassword, handledAt);
+      try {
+        await revokeAllUserTokens(userId);
+      } catch (revokeError) {
+        logger.warn('Token revocation failed after password change', {
+          userId,
+          error: revokeError.message,
+        });
+      }
+
       const result = { message: 'Password changed successfully. Please log in again.' };
 
       // Fire-and-forget: All background operations that don't block response
       setImmediate(async () => {
         try {
+          if (!didUpdateSupabase) {
+            logger.info('Skipping Supabase password verification because database-only fallback was used', {
+              userId,
+              email: account.email,
+            });
+            return;
+          }
           // 🔧 VERIFICATION: Test that the new password works
           try {
             const testLoginResponse = await supabase.auth.signInWithPassword({
@@ -983,25 +1170,6 @@ export class AuthService {
           }
 
           // ✅ FIX: Clear database password_hash - Supabase Auth is now authoritative
-          try {
-            const passwordHash = await this.hashPassword(newPassword);
-            await this.updatePasswordTrackingColumns(table, { [column]: userId }, passwordHash);
-          } catch (trackingError) {
-            logger.warn('Password tracking column update failed (background):', {
-              userId,
-              error: trackingError.message,
-            });
-          }
-
-          // Revoke all refresh tokens for this user (force re-login for security)
-          try {
-            await revokeAllUserTokens(userId);
-          } catch (revokeError) {
-            logger.warn('Token revocation failed (background):', {
-              userId,
-              error: revokeError.message,
-            });
-          }
         } catch (backgroundError) {
           logger.warn('Background password operations error:', {
             userId,
@@ -1180,7 +1348,7 @@ export class AuthService {
 
       const { data: user, error: userError } = await supabase
         .from('users')
-        .select('id, restaurant_id, name, email, role')
+        .select('*')
         .eq('id', request.user_id)
         .eq('restaurant_id', restaurantId)
         .single();
@@ -1203,11 +1371,12 @@ export class AuthService {
       // ✅ FIX: Update password in Supabase Auth (PRIMARY source of truth)
       let authUpdateError = null;
       let authUpdateResponse = null;
+      const targetAuthUserId = this.getMappedSupabaseUserId(user) || user.id;
       try {
         const adminClient = getSupabaseAdmin();
         logger.info(`🔄 Attempting manager password reset for user: ${user.id}`);
         
-        ({ data: authUpdateResponse, error: authUpdateError } = await adminClient.auth.admin.updateUserById(user.id, {
+        ({ data: authUpdateResponse, error: authUpdateError } = await adminClient.auth.admin.updateUserById(targetAuthUserId, {
           password: newPassword
         }));
         
@@ -1218,6 +1387,7 @@ export class AuthService {
           errorMsg: authUpdateError?.message || null,
           hasData: !!authUpdateResponse,
           dataUser: authUpdateResponse?.user?.id || null,
+          targetAuthUserId,
         });
       } catch (adminInitError) {
         logger.error('❌ Admin client init error during manager password reset:', {
@@ -1270,21 +1440,15 @@ export class AuthService {
 
       // ✅ FIX: Clear database password_hash - Supabase Auth is now authoritative
       // This is non-blocking - if it fails, password is still reset in Supabase Auth
+      await this.syncPasswordHash('users', user.id, newPassword, handledAt);
       try {
-        const passwordHash = await this.hashPassword(newPassword);
-        await this.updatePasswordTrackingColumns(
-          'users',
-          { id: user.id, restaurant_id: restaurantId },
-          passwordHash,
-          handledAt
-        );
-      } catch (trackingError) {
-        logger.warn('Password tracking column update failed during password reset (non-blocking):', {
+        await revokeAllUserTokens(user.id);
+      } catch (revokeError) {
+        logger.warn('Token revocation failed during password reset', {
           userId: user.id,
           userEmail: user.email,
-          error: trackingError.message,
+          error: revokeError.message,
         });
-        // Continue anyway - password was successfully reset in Supabase Auth
       }
 
       // Update reset request status - also non-blocking as backup

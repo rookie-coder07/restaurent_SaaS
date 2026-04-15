@@ -658,6 +658,8 @@ export class RestaurantService {
         throw error;
       }
 
+      await AuthService.updateSupabaseUserMapping('users', { id: user.id }, authUser.user.id);
+
       if (staffData.role === 'staff' && assignedTableValidation.conflictingAssignments.length > 0) {
         await this.releaseAssignedTablesFromOtherWaiters(
           restaurantId,
@@ -1126,7 +1128,7 @@ export class RestaurantService {
     try {
       const { data: existingUser, error: existingError } = await supabase
         .from('users')
-        .select('id, email')
+        .select('*')
         .eq('restaurant_id', restaurantId)
         .eq('id', staffId)
         .single();
@@ -1135,6 +1137,8 @@ export class RestaurantService {
         throw existingError || new Error('Staff user not found');
       }
 
+      const targetAuthUserId = AuthService.getMappedSupabaseUserId(existingUser) || staffId;
+
       // Update password via Supabase Auth (not in database)
       let authError;
       let authUpdateResponse;
@@ -1142,7 +1146,7 @@ export class RestaurantService {
         logger.info(`🔄 Attempting to update password in Supabase Auth for staff: ${staffId}`);
         
         ({ data: authUpdateResponse, error: authError } = await getSupabaseAdmin().auth.admin.updateUserById(
-          staffId,
+          targetAuthUserId,
           { password: newPassword }
         ));
         
@@ -1152,6 +1156,7 @@ export class RestaurantService {
           errorMsg: authError?.message || null,
           hasData: !!authUpdateResponse,
           dataUser: authUpdateResponse?.user?.id || null,
+          targetAuthUserId,
         });
       } catch (adminInitError) {
         logger.error('❌ Admin client error during staff password reset:', {

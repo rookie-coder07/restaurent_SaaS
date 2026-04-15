@@ -19,6 +19,12 @@ export const resetDeveloperUserPasswordSchema = Joi.object({
   newPassword: Joi.string().min(6).max(128).required(),
 });
 
+export const reconcileAuthMappingsSchema = Joi.object({
+  scope: Joi.string().valid('all', 'users', 'restaurants').default('all'),
+  createMissingUsers: Joi.boolean().default(true),
+  linkByEmail: Joi.boolean().default(true),
+});
+
 export const updateMaintenanceSchema = Joi.object({
   enabled: Joi.boolean().required(),
   message: Joi.string().trim().max(240).allow('').default(''),

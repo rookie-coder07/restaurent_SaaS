@@ -1,6 +1,7 @@
 ﻿import { asyncHandler } from '../middleware/errorHandler.js';
 import { sendSuccess } from '../utils/apiResponse.js';
 import DeveloperService from '../services/developerService.js';
+import AuthReconciliationService from '../services/authReconciliationService.js';
 
 export const getDashboard = asyncHandler(async (req, res) => {
   console.log('[DEVELOPER_API] getDashboard called', {
@@ -20,6 +21,8 @@ export const getUsers = asyncHandler(async (req, res) => sendSuccess(res, 200, a
 export const updateUserStatus = asyncHandler(async (req, res) => sendSuccess(res, 200, await DeveloperService.updateUserStatus(req.params.userId, req.body.status, req.user), 'User status updated successfully'));
 export const updateUserRole = asyncHandler(async (req, res) => sendSuccess(res, 200, await DeveloperService.updateUserRole(req.params.userId, req.body.role, req.user), 'User role updated successfully'));
 export const resetUserPassword = asyncHandler(async (req, res) => sendSuccess(res, 200, await DeveloperService.resetUserPassword(req.params.userId, req.body.newPassword, req.user), 'User password reset successfully'));
+export const auditAuthMappings = asyncHandler(async (req, res) => sendSuccess(res, 200, await AuthReconciliationService.buildAudit(req.query.scope || 'all'), 'Auth mapping audit fetched successfully'));
+export const reconcileAuthMappings = asyncHandler(async (req, res) => sendSuccess(res, 200, await AuthReconciliationService.reconcile(req.body, req.user), 'Auth mappings reconciled successfully'));
 export const forceLogoutUser = asyncHandler(async (req, res) => sendSuccess(res, 200, await DeveloperService.forceLogoutUser(req.params.userId, req.user), 'User logged out successfully'));
 export const getUserLoginHistory = asyncHandler(async (req, res) => sendSuccess(res, 200, { items: await DeveloperService.getUserLoginHistory(req.params.userId, Number(req.query.limit) || 20) }, 'User login history fetched successfully'));
 export const getSystemSettings = asyncHandler(async (req, res) => sendSuccess(res, 200, await DeveloperService.getSystemSettings(), 'System settings fetched successfully'));
@@ -33,4 +36,3 @@ export const getErrorTracking = asyncHandler(async (req, res) => sendSuccess(res
 export const getSystemHealth = asyncHandler(async (req, res) => sendSuccess(res, 200, await DeveloperService.getSystemHealth(), 'System health fetched successfully'));
 export const createBroadcast = asyncHandler(async (req, res) => sendSuccess(res, 201, await DeveloperService.createBroadcast(req.body, req.user), 'Broadcast created successfully'));
 export const exportData = asyncHandler(async (req, res) => sendSuccess(res, 200, await DeveloperService.exportData(req.params.resource), 'Export prepared successfully'));
-

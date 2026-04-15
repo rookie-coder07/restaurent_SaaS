@@ -191,7 +191,7 @@ export const login = asyncHandler(async (req, res) => {
       redirectTo,
     }, 'Login successful');
   } catch (error) {
-    const statusCode = error.message === 'Invalid email or password' ? 401 : 500;
+    const statusCode = error?.statusCode || error?.status || (error.message === 'Invalid email or password' ? 401 : 500);
     logError(error, {
       message: 'Login failed',
       endpoint: req.path,
@@ -309,12 +309,15 @@ export const changePassword = asyncHandler(async (req, res) => {
       return sendError(res, 401, 'User not authenticated. Please log in again.');
     }
 
-    const isRestaurant = ['admin'].includes(req.user.role);
+    const normalizedRole = String(req.user.role || '').trim().toLowerCase();
+    const isRestaurant = ['admin', 'owner'].includes(normalizedRole);
 
     logger.info('Change password attempt', {
       userId: req.user.userId,
       role: req.user.role,
       isRestaurant,
+      currentPasswordLength: String(currentPassword || '').length,
+      newPasswordLength: String(newPassword || '').length,
     });
 
     // Change password with non-blocking operations

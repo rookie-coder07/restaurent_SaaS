@@ -3,6 +3,7 @@
 -- Create Restaurants Table
 CREATE TABLE IF NOT EXISTS restaurants (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  supabase_user_id UUID,
   name VARCHAR(255) NOT NULL,
   business_name VARCHAR(255),
   email VARCHAR(255) UNIQUE NOT NULL,
@@ -41,6 +42,7 @@ CREATE TABLE IF NOT EXISTS restaurants (
 -- Create Users Table (for staff)
 CREATE TABLE IF NOT EXISTS users (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  supabase_user_id UUID,
   restaurant_id UUID NOT NULL REFERENCES restaurants(id) ON DELETE CASCADE,
   name VARCHAR(255) NOT NULL,
   email VARCHAR(255) NOT NULL,

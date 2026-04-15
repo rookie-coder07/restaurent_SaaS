@@ -207,6 +207,7 @@ export class DeveloperService {
       status: 'active',
     }]).select('id, name, email, role, status').single();
     if (error) throw error;
+    await AuthService.updateSupabaseUserMapping('users', { id: data.id }, authData.user.id);
     await this.logAudit({ actor, action: 'developer.user_created', targetType: 'user', targetId: data.id, metadata: { email: data.email } });
     return { id: data.id, name: data.name, email: data.email, role: this.roleLabel(data.role), status: data.status };
   }
@@ -312,6 +313,8 @@ export class DeveloperService {
       if (createRestaurantError || !restaurant) {
         throw createRestaurantError || new Error('Failed to create restaurant');
       }
+
+      await AuthService.updateSupabaseUserMapping('restaurants', { id: restaurant.id }, authData.user.id);
 
       createdRestaurant = restaurant;
 
@@ -434,10 +437,10 @@ export class DeveloperService {
 
   static async updateUserRole(userId, role, actor) {
     const nextRole = this.roleInput(role);
-    const { data, error } = await getSupabase().from('users').update({ role: nextRole, updated_at: new Date().toISOString() }).eq('id', userId).select('id, restaurant_id, name, email, role, status').single();
+    const { data, error } = await getSupabase().from('users').update({ role: nextRole, updated_at: new Date().toISOString() }).eq('id', userId).select('*').single();
     if (error || !data) throw error || new Error('User not found');
     try {
-      await getSupabaseAdmin().auth.admin.updateUserById(userId, { user_metadata: { role: nextRole } });
+      await getSupabaseAdmin().auth.admin.updateUserById(AuthService.getMappedSupabaseUserId(data) || userId, { user_metadata: { role: nextRole } });
     } catch (syncError) {
       logger.warn('Role sync warning', { userId, error: syncError?.message });
     }
@@ -446,7 +449,14 @@ export class DeveloperService {
   }
 
   static async resetUserPassword(userId, newPassword, actor) {
-    const { error: authError } = await getSupabaseAdmin().auth.admin.updateUserById(userId, { password: newPassword });
+    const { data: existingUser, error: userLookupError } = await getSupabase()
+      .from('users')
+      .select('*')
+      .eq('id', userId)
+      .single();
+    if (userLookupError || !existingUser) throw userLookupError || new Error('User not found');
+
+    const { error: authError } = await getSupabaseAdmin().auth.admin.updateUserById(AuthService.getMappedSupabaseUserId(existingUser) || userId, { password: newPassword });
     if (authError) throw authError;
     
     // 🔧 FIXED: Clear password_hash from database - Supabase Auth is now source of truth
@@ -455,7 +465,7 @@ export class DeveloperService {
       .from('users')
       .update(AuthService.buildPasswordUpdatePayload(passwordHash))
       .eq('id', userId)
-      .select('id, restaurant_id, name, email, role')
+      .select('*')
       .single();
     
     if (error || !data) throw error || new Error('User not found');
