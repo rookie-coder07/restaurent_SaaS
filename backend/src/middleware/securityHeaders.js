@@ -51,6 +51,7 @@ export const corsConfiguration = () => {
   const corsOriginEnv = process.env.CORS_ORIGIN || '';
   const defaultOrigins = [
     'https://restaurent-saas.vercel.app',
+    'https://restaurentsaas.vercel.app',
     'https://restaurentsaas-seven.vercel.app',
     'http://localhost:5173',
     'http://localhost:3000',
