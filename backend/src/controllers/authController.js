@@ -94,6 +94,13 @@ export const login = asyncHandler(async (req, res) => {
   const { email, password, portal = 'admin' } = req.body;
 
   try {
+    logger.info('Login request received', {
+      email: String(email || '').trim().toLowerCase() || null,
+      portal: String(portal || 'admin').trim().toLowerCase(),
+      passwordLength: String(password || '').length,
+      bodyKeys: Object.keys(req.body || {}),
+    });
+
     if (!email || !password) {
       logFailedRequest(new Error('Missing credentials'), {
         message: 'Login validation failed',

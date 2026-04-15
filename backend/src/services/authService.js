@@ -234,6 +234,44 @@ export class AuthService {
     return users[0] || null;
   }
 
+  static async findRestaurantByEmail(email) {
+    const normalizedEmail = String(email || '').trim().toLowerCase();
+    if (!normalizedEmail) {
+      return null;
+    }
+
+    const { data, error } = await supabase
+      .from('restaurants')
+      .select('*')
+      .eq('email', normalizedEmail)
+      .maybeSingle();
+
+    if (error) {
+      throw error;
+    }
+
+    return data || null;
+  }
+
+  static async findUserByEmail(email) {
+    const normalizedEmail = String(email || '').trim().toLowerCase();
+    if (!normalizedEmail) {
+      return null;
+    }
+
+    const { data, error } = await supabase
+      .from('users')
+      .select('*, restaurants!inner(id, name, email, status)')
+      .eq('email', normalizedEmail)
+      .maybeSingle();
+
+    if (error) {
+      throw error;
+    }
+
+    return data || null;
+  }
+
   static getPreferredSupabaseUserIds(account = {}, preferredUserId = '') {
     const ids = [
       String(preferredUserId || '').trim(),
@@ -317,6 +355,140 @@ export class AuthService {
   static isSupabaseUserNotFoundError(error) {
     const combined = `${error?.name || ''} ${error?.message || ''} ${error?.code || ''} ${error?.status || ''}`.toLowerCase();
     return combined.includes('user not found');
+  }
+
+  static buildRestaurantLoginResult(restaurant) {
+    const userRole = ROLES.ADMIN;
+    const accessToken = this.generateAccessToken(
+      restaurant.id,
+      restaurant.id,
+      restaurant.email,
+      userRole
+    );
+    const refreshToken = this.generateRefreshToken(
+      restaurant.id,
+      restaurant.id,
+      restaurant.email,
+      userRole
+    );
+
+    return {
+      accessToken,
+      refreshToken,
+      role: userRole,
+      restaurantId: restaurant.id,
+      userId: restaurant.id,
+      redirectTo: 'admin-dashboard',
+    };
+  }
+
+  static async buildStaffLoginResult(user, normalizedRole) {
+    const accessToken = this.generateAccessToken(
+      user.id,
+      user.restaurant_id,
+      user.email,
+      normalizedRole
+    );
+    const refreshToken = this.generateRefreshToken(
+      user.id,
+      user.restaurant_id,
+      user.email,
+      normalizedRole
+    );
+    await this.persistRefreshToken(refreshToken, user.id, user.restaurant_id);
+
+    let redirectTo = 'pos';
+    if (normalizedRole === ROLES.ADMIN) redirectTo = 'admin-dashboard';
+    if (normalizedRole === ROLES.MANAGER) redirectTo = 'manager-dashboard';
+    if (normalizedRole === ROLES.DEVELOPER) redirectTo = 'developer-dashboard';
+
+    return {
+      accessToken,
+      refreshToken,
+      role: normalizedRole,
+      restaurantId: user.restaurant_id,
+      userId: user.id,
+      redirectTo,
+    };
+  }
+
+  static async tryDatabaseOnlyLogin(email, password, portal = 'admin', authFailedMessage = '') {
+    const normalizedEmail = String(email || '').trim().toLowerCase();
+    const portalKey = String(portal || 'admin').trim().toLowerCase();
+    const shouldPrioritizeRestaurant = portalKey === 'admin' || portalKey === 'owner';
+    const authUser = await this.findAuthUserByEmail(normalizedEmail);
+
+    logger.info('[LOGIN_FALLBACK] Evaluating database-only login fallback', {
+      email: normalizedEmail,
+      portal: portalKey,
+      authFailedMessage,
+      hasSupabaseAuthUser: Boolean(authUser?.id),
+      inputPasswordLength: String(password || '').length,
+    });
+
+    if (authUser?.id) {
+      logger.info('[LOGIN_FALLBACK] Skipping database-only fallback because auth.users record already exists', {
+        email: normalizedEmail,
+        authUserId: authUser.id,
+      });
+      return null;
+    }
+
+    if (shouldPrioritizeRestaurant) {
+      const restaurant = await this.findRestaurantByEmail(normalizedEmail);
+      if (restaurant) {
+        this.logPasswordDebug('login:fallback-restaurant', password, restaurant);
+        const passwordMatched = await this.verifyPasswordAgainstStoredHash(password, restaurant, 'restaurant');
+        logger.info('[LOGIN_FALLBACK] Restaurant password comparison result', {
+          email: normalizedEmail,
+          restaurantId: restaurant.id,
+          passwordMatched,
+        });
+
+        if (passwordMatched) {
+          const result = this.buildRestaurantLoginResult(restaurant);
+          await this.persistRefreshToken(result.refreshToken, restaurant.id, restaurant.id);
+          return result;
+        }
+      }
+    }
+
+    const user = await this.findUserByEmail(normalizedEmail);
+    if (!user) {
+      logger.info('[LOGIN_FALLBACK] No database user found for fallback', {
+        email: normalizedEmail,
+        portal: portalKey,
+      });
+      return null;
+    }
+
+    this.logPasswordDebug('login:fallback-user', password, user);
+    const passwordMatched = await this.verifyPasswordAgainstStoredHash(password, user, 'user');
+    logger.info('[LOGIN_FALLBACK] User password comparison result', {
+      email: normalizedEmail,
+      userId: user.id,
+      role: user.role,
+      status: user.status,
+      passwordMatched,
+    });
+
+    if (!passwordMatched) {
+      return null;
+    }
+
+    const normalizedRole = normalizeRole(user.role);
+    if (!user.role || !VALID_ROLES.includes(normalizedRole) || user.status !== 'active') {
+      logger.warn('[LOGIN_FALLBACK] Database user found but not eligible for login', {
+        email: normalizedEmail,
+        userId: user.id,
+        role: user.role,
+        normalizedRole,
+        status: user.status,
+      });
+      return null;
+    }
+
+    return await this.buildStaffLoginResult(user, normalizedRole);
   }
 
   static normalizeResetRequestRole(role) {
@@ -484,6 +656,9 @@ export class AuthService {
     try {
       logger.info(`Unified login attempt for: ${email}, portal: ${portal}`);
       console.log('Login attempt:', { email, role: portal });
+      this.logPasswordDebug('login:request', password, {
+        email: String(email || '').trim().toLowerCase(),
+      });
       
       // Authenticate with Supabase Auth
       let authError = null;
@@ -537,6 +712,17 @@ export class AuthService {
       }
 
       if (authFailedMessage || !authData?.user?.id) {
+        const fallbackResult = await this.tryDatabaseOnlyLogin(email, password, portal, authFailedMessage || 'Missing auth user ID');
+        if (fallbackResult) {
+          logger.warn('[LOGIN] Login succeeded via database-only fallback', {
+            email: String(email || '').trim().toLowerCase(),
+            portal,
+            role: fallbackResult.role,
+            userId: fallbackResult.userId,
+          });
+          return fallbackResult;
+        }
+
         logger.error('[LOGIN] Supabase Auth rejected credentials', {
           email: email.toLowerCase(),
           portal,
