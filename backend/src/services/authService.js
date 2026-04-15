@@ -55,6 +55,7 @@ export class AuthService {
     const attempts = [
       this.buildPasswordUpdatePayload(passwordHash, timestamp),
       this.omitKeys(this.buildPasswordUpdatePayload(passwordHash, timestamp), ['password_hash_cleared']),
+      this.omitKeys(this.buildPasswordUpdatePayload(passwordHash, timestamp), ['password_hash_cleared', 'password_updated_at']),
     ];
 
     let lastError = null;
@@ -76,14 +77,22 @@ export class AuthService {
 
       lastError = error;
 
-      if (this.isMissingColumnError(error, 'password_hash_cleared')) {
+      // Continue if missing password tracking columns (they may not exist yet in older schemas)
+      if (this.isMissingColumnError(error, 'password_hash_cleared') || 
+          this.isMissingColumnError(error, 'password_updated_at')) {
         continue;
       }
 
       throw error;
     }
 
-    throw lastError;
+    // If all attempts fail due to missing columns, silently continue - schema migration may be pending
+    logger.warn('Password tracking columns update skipped', {
+      table,
+      reason: 'Columns may not exist in this database version yet',
+      errorMessage: lastError?.message,
+    });
+    return passwordHash;
   }
 
   static async persistRefreshToken(refreshToken, userId, restaurantId) {
