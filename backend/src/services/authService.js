@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken';
 import logger from '../utils/logger.js';
 import supabaseImport, { getSupabaseAdmin } from '../config/supabase.js';
 import { normalizeRole, ROLES, VALID_ROLES } from '../constants/index.js';
+import { AppError } from '../utils/errorCodes.js';
 import { 
   generateAccessToken, 
   generateRefreshToken, 
@@ -374,7 +375,7 @@ export class AuthService {
         });
         if (process.env.NODE_ENV === 'test' && (networkError.message?.includes('fetch failed') || networkError.message?.includes('ENOTFOUND'))) {
           logger.warn(`Login network error in test mode for email: ${email} - returning error response`);
-          throw new Error('Invalid email or password');
+          throw new AppError('INVALID_CREDENTIALS', 'Invalid email or password');
         }
         throw networkError;
       }
@@ -427,7 +428,7 @@ export class AuthService {
 
           const restaurantPasswordValid = await this.verifyPasswordAgainstStoredHash(password, restaurant, 'restaurant');
           if (!restaurantPasswordValid) {
-            throw new Error('Invalid email or password');
+            throw new AppError('INVALID_CREDENTIALS');
           }
 
           const userRole = ROLES.ADMIN;
@@ -555,12 +556,12 @@ export class AuthService {
       } else if (userError || !user) {
         // User not found AND auth failed
         logger.warn(`Login failed for ${email}: ${authFailedMessage || 'User not found'}`);
-        throw new Error(authFailedMessage || 'Invalid email or password');
+        throw new AppError('INVALID_CREDENTIALS', authFailedMessage || 'Invalid email or password');
       }
 
       if (!user) {
         logger.error(`[LOGIN] User not found in profile store for email: ${email}`);
-        throw new Error('User not found in profile store');
+        throw new AppError('INVALID_CREDENTIALS', 'Invalid email or password');
       }
 
       logger.debug(`[LOGIN] User validation:`, {
@@ -573,12 +574,12 @@ export class AuthService {
 
       if (!user.role) {
         logger.error(`[LOGIN] User role is missing for user: ${user.id}`);
-        throw new Error('User role is missing');
+        throw new AppError('INVALID_CREDENTIALS', 'User account is not properly configured');
       }
 
       if (user.status !== 'active') {
         logger.warn(`[LOGIN] User account is inactive for: ${user.email}, status: ${user.status}`);
-        throw new Error('User account is inactive');
+        throw new AppError('INVALID_CREDENTIALS', 'User account is inactive');
       }
 
       // \u2705 TASK 4: FIX ROLE CHECK - Allow admin, manager, staff\n      // CRITICAL FIX: If user has NO restaurant_id, assign one automatically\n      // This prevents managers from seeing 0 data due to null restaurant_id\n      if (!user.restaurant_id && normalizeRole(user.role) === ROLES.MANAGER) {\n        logger.warn(`[LOGIN] 🚨 Manager has NULL restaurant_id: ${user.email} - attempting to assign one`);\n        \n        // Try to find restaurant by email match first, then use first available\n        let restaurantId = null;\n        \n        const { data: emailMatchRestaurant } = await supabase\n          .from('restaurants')\n          .select('id, name')\n          .eq('email', email.toLowerCase())\n          .maybeSingle();\n        \n        if (emailMatchRestaurant?.id) {\n          restaurantId = emailMatchRestaurant.id;\n          logger.info(`[LOGIN] ✅ Found restaurant by email match: ${emailMatchRestaurant.name} (${restaurantId})`);\n        } else {\n          // Fallback: use first restaurant\n          const { data: firstRestaurant } = await supabase\n            .from('restaurants')\n            .select('id, name')\n            .limit(1)\n            .maybeSingle();\n          restaurantId = firstRestaurant?.id || null;\n          if (restaurantId) {\n            logger.info(`[LOGIN] ✅ No email match, using first restaurant: ${firstRestaurant.name} (${restaurantId})`);\n          }\n        }\n        \n        if (restaurantId) {\n          logger.info(`[LOGIN] ✅ Assigning restaurant ${restaurantId} to manager ${user.email}`);\n          const { error: assignError } = await supabase\n            .from('users')\n            .update({ restaurant_id: restaurantId })\n            .eq('id', user.id);\n          \n          if (assignError) {\n            logger.error(`[LOGIN] ❌ Failed to assign restaurant to manager: ${assignError.message}`);\n          } else {\n            user.restaurant_id = restaurantId;\n            logger.info(`[LOGIN] ✅ Manager restaurant assignment successful`);\n          }\n        } else {\n          logger.error('[LOGIN] ❌ No restaurant available to assign to manager');\n        }\n      }"
@@ -593,7 +594,7 @@ export class AuthService {
       
       if (!VALID_ROLES.includes(normalizedRole)) {
         logger.error(`[LOGIN] User has unsupported role: ${normalizedRole} (raw: ${user.role})`);
-        throw new Error('User account has an unsupported role');
+        throw new AppError('INVALID_CREDENTIALS', 'User account has an unsupported role');
       }
 
       console.log('[AUTH_LOGIN] User authenticated:', {
@@ -637,7 +638,7 @@ export class AuthService {
           email: user.email,
           portal,
         });
-        throw new Error('Invalid email or password');
+        throw new AppError('INVALID_CREDENTIALS');
       }
 
       // ✅ TASK 3: REMOVE INVALID COMPARISON
@@ -653,7 +654,7 @@ export class AuthService {
           errorMessage: authFailedMessage,
           portal,
         });
-        throw new Error(authFailedMessage || 'Invalid email or password');
+        throw new AppError('INVALID_CREDENTIALS', authFailedMessage || 'Invalid email or password');
       }
       if (!authData?.user?.id) {
         logger.error(`[LOGIN] Authentication failed - no auth user ID:`, {
@@ -661,7 +662,7 @@ export class AuthService {
           hasAuthData: !!authData,
           portal,
         });
-        throw new Error('Authentication failed. Invalid email or password.');
+        throw new AppError('INVALID_CREDENTIALS', 'Invalid email or password');
       }
       
       logger.info(`[LOGIN] Password verified by Supabase Auth for: ${email.toLowerCase()}`);
@@ -707,12 +708,12 @@ export class AuthService {
     try {
       const normalizedEmail = data.email.toLowerCase();
       if (!data.role) {
-        throw new Error('Role is required');
+        throw new AppError('VALIDATION_ERROR', 'Role is required');
       }
 
       const normalizedRole = normalizeRole(data.role);
       if (!VALID_ROLES.includes(normalizedRole)) {
-        throw new Error('Invalid role');
+        throw new AppError('VALIDATION_ERROR', 'Invalid role');
       }
 
       // Prevent conflicts with owner accounts
@@ -872,7 +873,7 @@ export class AuthService {
         .single();
 
       if (!account) {
-        throw new Error('User not found');
+        throw new AppError('INVALID_CREDENTIALS', 'User not found');
       }
 
       const currentPasswordValid = await this.verifyPasswordAgainstStoredHash(currentPassword, account, table);
@@ -908,7 +909,7 @@ export class AuthService {
       }
 
       if (authVerifyError) {
-        throw new Error('Current password is incorrect');
+        throw new AppError('INVALID_CREDENTIALS', 'Current password is incorrect');
       }
 
       // ✅ FIX: Update password in Supabase Auth (PRIMARY source of truth)
