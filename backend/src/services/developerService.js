@@ -416,15 +416,49 @@ export class DeveloperService {
   static async listUsers(filters = {}) {
     const limit = Math.min(num(filters.limit, 20), 20);
     const offset = Math.max(num(filters.offset, 0), 0);
-    let query = getSupabase().from('users').select(`id, restaurant_id, name, email, phone, role, status, created_at, updated_at, restaurants:restaurant_id ( id, name, business_name )`, { count: 'exact' }).order('created_at', { ascending: false }).range(offset, offset + limit - 1);
-    if (filters.role) query = query.eq('role', this.roleInput(filters.role));
+    const search = String(filters.search || '').trim().toLowerCase();
+    const isFilteringByAdmin = filters.role && String(filters.role || '').trim().toLowerCase() === 'admin';
+    
+    // Build users query
+    let query = getSupabase().from('users').select(`id, restaurant_id, name, email, phone, role, status, created_at, updated_at, restaurants:restaurant_id ( id, name, business_name )`, { count: 'exact' }).order('created_at', { ascending: false });
+    
+    // Apply role filter
+    if (filters.role) {
+      const normalized = String(filters.role || '').trim().toLowerCase();
+      const dbRole = normalized === 'admin' ? 'owner' : normalized;
+      query = query.eq('role', dbRole);
+    }
+    
     if (filters.status) query = query.eq('status', filters.status);
     if (filters.restaurantId) query = query.eq('restaurant_id', filters.restaurantId);
-    const { data, error, count } = await query;
+    
+    const { data, error } = await query;
     if (error && error.code !== 'PGRST116') throw error;
-    const search = String(filters.search || '').trim().toLowerCase();
-    const items = (data || []).filter((user) => !search || String(user.name || '').toLowerCase().includes(search) || String(user.email || '').toLowerCase().includes(search)).map((user) => ({ id: user.id, restaurantId: user.restaurant_id, restaurantName: user.restaurants?.name || user.restaurants?.business_name || 'Unknown Restaurant', name: user.name || 'Unknown User', email: user.email || '', phone: user.phone || '', role: this.roleLabel(user.role), rawRole: user.role, status: user.status || 'active', createdAt: user.created_at, updatedAt: user.updated_at }));
-    return { items, total: count || items.length, limit, offset };
+    
+    let items = (data || [])
+      .filter((user) => !search || String(user.name || '').toLowerCase().includes(search) || String(user.email || '').toLowerCase().includes(search))
+      .map((user) => ({ id: user.id, restaurantId: user.restaurant_id, restaurantName: user.restaurants?.name || user.restaurants?.business_name || 'Unknown Restaurant', name: user.name || 'Unknown User', email: user.email || '', phone: user.phone || '', role: this.roleLabel(user.role), rawRole: user.role, status: user.status || 'active', createdAt: user.created_at, updatedAt: user.updated_at }));
+    
+    // If filtering by admin, also include restaurant owners from restaurants table
+    if (isFilteringByAdmin) {
+      const { data: restaurants } = await getSupabase()
+        .from('restaurants')
+        .select('id, name, business_name, email, status, created_at, updated_at');
+      
+      if (restaurants) {
+        const owners = restaurants
+          .filter((r) => !search || String(r.name || '').toLowerCase().includes(search) || String(r.business_name || '').toLowerCase().includes(search) || String(r.email || '').toLowerCase().includes(search))
+          .map((r) => ({ id: r.id, restaurantId: r.id, restaurantName: r.name || r.business_name || 'Unknown', name: r.name || r.business_name || 'Unknown', email: r.email || '', phone: '', role: 'admin', rawRole: 'owner', status: r.status || 'active', createdAt: r.created_at, updatedAt: r.updated_at }));
+        items = [...items, ...owners];
+      }
+    }
+    
+    // Sort and paginate
+    items = items.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    const total = items.length;
+    items = items.slice(offset, offset + limit);
+    
+    return { items, total, limit, offset };
   }
 
   static async updateUserStatus(userId, status, actor) {
@@ -449,29 +483,71 @@ export class DeveloperService {
   }
 
   static async resetUserPassword(userId, newPassword, actor) {
-    const { data: existingUser, error: userLookupError } = await getSupabase()
-      .from('users')
-      .select('*')
-      .eq('id', userId)
-      .single();
-    if (userLookupError || !existingUser) throw userLookupError || new Error('User not found');
+    try {
+      // Try to find user in users table first
+      const { data: userAccount, error: userError } = await getSupabase()
+        .from('users')
+        .select('id, email, name, role, restaurant_id')
+        .eq('id', userId)
+        .limit(1);
 
-    const { error: authError } = await getSupabaseAdmin().auth.admin.updateUserById(AuthService.getMappedSupabaseUserId(existingUser) || userId, { password: newPassword });
-    if (authError) throw authError;
-    
-    // 🔧 FIXED: Clear password_hash from database - Supabase Auth is now source of truth
-    const passwordHash = await AuthService.hashPassword(newPassword);
-    const { data, error } = await getSupabase()
-      .from('users')
-      .update(AuthService.buildPasswordUpdatePayload(passwordHash))
-      .eq('id', userId)
-      .select('*')
-      .single();
-    
-    if (error || !data) throw error || new Error('User not found');
-    await revokeAllUserTokens(userId);
-    await this.logAudit({ actor, action: 'developer.password_reset', targetType: 'user', targetId: userId, restaurantId: data.restaurant_id, metadata: { email: data.email, role: data.role } });
-    return { id: data.id, email: data.email, name: data.name, role: this.roleLabel(data.role) };
+      let account = null;
+      if (!userError && userAccount && userAccount.length > 0) {
+        account = userAccount[0];
+      }
+
+      // If not found in users table, try restaurants table (for restaurant owners)
+      if (!account) {
+        const { data: restaurantAccount, error: restaurantError } = await getSupabase()
+          .from('restaurants')
+          .select('id, email, name')
+          .eq('id', userId)
+          .limit(1);
+
+        if (!restaurantError && restaurantAccount && restaurantAccount.length > 0) {
+          account = {
+            ...restaurantAccount[0],
+            role: 'owner',
+            restaurant_id: restaurantAccount[0].id
+          };
+        }
+      }
+
+      if (!account) {
+        throw new Error('User not found');
+      }
+
+      // Update password in Supabase Auth
+      const { error: authError } = await getSupabaseAdmin().auth.admin.updateUserById(userId, { password: newPassword });
+      if (authError) throw authError;
+
+      // Sync password hash to database
+      const passwordHash = await AuthService.hashPassword(newPassword);
+      const { error: updateError } = await getSupabase()
+        .from(account.restaurant_id === account.id ? 'restaurants' : 'users')
+        .update(AuthService.buildPasswordUpdatePayload(passwordHash))
+        .eq('id', userId);
+      if (updateError) throw updateError;
+
+      await revokeAllUserTokens(userId);
+      await this.logAudit({ 
+        actor, 
+        action: 'developer.password_reset', 
+        targetType: 'user', 
+        targetId: userId, 
+        restaurantId: account.restaurant_id, 
+        metadata: { email: account.email, role: account.role } 
+      });
+      
+      return { 
+        id: account.id, 
+        email: account.email, 
+        name: account.name, 
+        role: this.roleLabel(account.role) 
+      };
+    } catch (error) {
+      throw error;
+    }
   }
 
   static async forceLogoutUser(userId, actor) {

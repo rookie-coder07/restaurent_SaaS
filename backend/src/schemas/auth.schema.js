@@ -43,7 +43,6 @@ export const refreshTokenSchema = Joi.object({
 export const changePasswordSchema = Joi.object({
   currentPassword: Joi.string().required(),
   newPassword: Joi.string().required(),
-  confirmPassword: Joi.string().valid(Joi.ref('newPassword')).required(),
 });
 
 export const requestPasswordResetSchema = Joi.object({

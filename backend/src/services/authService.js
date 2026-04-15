@@ -850,7 +850,13 @@ export class AuthService {
           }
         }
 
-        const inferredRole = normalizeRole(portalKey === 'developer' ? ROLES.DEVELOPER : portalKey === 'manager' ? ROLES.MANAGER : ROLES.STAFF);
+        const inferredRole = normalizeRole(
+          portalKey === 'developer' ? ROLES.DEVELOPER 
+          : portalKey === 'owner' ? ROLES.OWNER
+          : portalKey === 'manager' ? ROLES.MANAGER 
+          : portalKey === 'staff' ? ROLES.STAFF
+          : ROLES.STAFF
+        );
 
         const provisionPayload = {
           id: authData.user.id,
@@ -868,11 +874,28 @@ export class AuthService {
           .single();
 
         if (createError) {
-          logger.error(`Auto-provisioning failed: ${createError.message}`);
-          throw createError;
+          // If it's a duplicate key error, the user actually exists - fetch it instead
+          if (createError.message?.includes('duplicate key') || createError.code === '23505') {
+            logger.warn(`User already exists with ID ${authData.user.id}, fetching existing user...`);
+            const { data: existingUser, error: fetchError } = await supabase
+              .from('users')
+              .select('*')
+              .eq('id', authData.user.id)
+              .single();
+            
+            if (fetchError) {
+              logger.error(`Failed to fetch existing user: ${fetchError.message}`);
+              throw fetchError;
+            }
+            
+            user = existingUser;
+          } else {
+            logger.error(`Auto-provisioning failed: ${createError.message}`);
+            throw createError;
+          }
+        } else {
+          user = newUser;
         }
-
-        user = newUser;
       } else if (userError || !user) {
         // User not found AND auth failed
         logger.warn(`Login failed for ${email}: ${authFailedMessage || 'User not found'}`);
