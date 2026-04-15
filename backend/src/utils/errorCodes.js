@@ -3,7 +3,7 @@ export const ERROR_CODES = {
   INVALID_CREDENTIALS: { code: 'AUTH_001', statusCode: 401, message: 'Invalid email or password' },
   TOKEN_EXPIRED: { code: 'AUTH_002', statusCode: 401, message: 'Token has expired' },
   INVALID_TOKEN: { code: 'AUTH_003', statusCode: 401, message: 'Invalid token' },
-  UNAUTHORIZED: { code: 'AUTH_004', statusCode: 403, message: 'Unauthorized access' },
+  UNAUTHORIZED: { code: 'AUTH_004', statusCode: 401, message: 'Unauthorized access' },
   
   // Validation errors
   VALIDATION_ERROR: { code: 'VAL_001', statusCode: 400, message: 'Validation failed' },

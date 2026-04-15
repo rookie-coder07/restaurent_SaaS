@@ -65,27 +65,59 @@ export const verifyAccessToken = (token) => {
 };
 
 function handleAuthError(res, error) {
+  // Handle JWT library errors
   if (error.name === 'TokenExpiredError') {
-    return sendError(res, 401, 'Unauthorized access');
+    logger.warn('Token expired', { message: error.message });
+    return sendError(res, 401, 'Token has expired. Please log in again.');
   }
 
   if (error.name === 'JsonWebTokenError') {
-    return sendError(res, 401, 'Unauthorized access');
+    logger.warn('JWT verification failed', { message: error.message });
+    return sendError(res, 401, 'Invalid token. Please log in again.');
   }
 
+  // Handle AppError from our error codes
   if (error instanceof AppError) {
-    return sendError(res, error.statusCode, error.statusCode === 401 ? 'Unauthorized access' : error.message);
+    const statusCode = error.statusCode || 401;
+    const message = error.message || 'Unauthorized access';
+    logger.warn('Auth error:', { code: error.code, statusCode, message });
+    return sendError(res, statusCode, message);
   }
 
-  return sendError(res, 401, 'Unauthorized access');
+  // Default to 401 for any other error
+  logger.error('Unexpected auth error:', { error: error.message || error });
+  return sendError(res, 401, 'Unauthorized access. Please log in again.');
 }
 
 export const authMiddleware = (req, res, next) => {
   try {
     const token = extractAuthToken(req);
+    
+    if (!token) {
+      logger.warn('Auth middleware: No token found', {
+        path: req.path,
+        method: req.method,
+        hasAuthHeader: !!req.headers.authorization,
+        hasCookie: !!req.cookies?.accessToken,
+        hasQueryToken: !!req.query?.accessToken,
+      });
+    }
+
     req.user = verifyAccessToken(token);
+    
+    logger.info('Auth middleware: User authenticated', {
+      userId: req.user.userId,
+      role: req.user.role,
+      path: req.path,
+    });
+    
     next();
   } catch (error) {
+    logger.error('Auth middleware error:', {
+      message: error.message,
+      path: req.path,
+      method: req.method,
+    });
     return handleAuthError(res, error);
   }
 };

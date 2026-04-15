@@ -300,7 +300,22 @@ export const changePassword = asyncHandler(async (req, res) => {
       return sendError(res, 400, 'Current password and new password are required');
     }
 
+    // Check if user is authenticated
+    if (!req.user || !req.user.userId) {
+      logger.error('Change password: No authenticated user in request', {
+        path: req.path,
+        headers: req.headers,
+      });
+      return sendError(res, 401, 'User not authenticated. Please log in again.');
+    }
+
     const isRestaurant = ['admin'].includes(req.user.role);
+
+    logger.info('Change password attempt', {
+      userId: req.user.userId,
+      role: req.user.role,
+      isRestaurant,
+    });
 
     // Change password with non-blocking operations
     await AuthService.changePassword(
@@ -314,7 +329,14 @@ export const changePassword = asyncHandler(async (req, res) => {
   } catch (error) {
     // Catch any errors and return proper response
     const errorMessage = error?.message || 'Failed to change password';
-    const statusCode = error?.status || 500;
+    const statusCode = error?.status || error?.statusCode || 500;
+    
+    logger.error('Change password error:', {
+      message: errorMessage,
+      statusCode,
+      userId: req.user?.userId,
+      stack: error?.stack,
+    });
     
     // Don't throw - always return a proper error response
     return sendError(res, statusCode, errorMessage);
