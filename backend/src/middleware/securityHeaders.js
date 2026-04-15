@@ -11,6 +11,11 @@ const isAllowedWildcardOrigin = (origin = '') => {
   );
 };
 
+const isAllowedDevelopmentOrigin = (origin = '') => {
+  const normalizedOrigin = normalizeOrigin(origin);
+  return /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(normalizedOrigin);
+};
+
 export const secureHeadersMiddleware = (req, res, next) => {
   const isProduction = process.env.NODE_ENV === 'production';
 
@@ -90,13 +95,17 @@ export const corsConfiguration = () => {
       }
       
       // Check if origin is in allowed list
-      if (allowedOrigins.includes(normalizedOrigin) || isAllowedWildcardOrigin(normalizedOrigin)) {
+      if (
+        allowedOrigins.includes(normalizedOrigin) ||
+        isAllowedWildcardOrigin(normalizedOrigin) ||
+        isAllowedDevelopmentOrigin(normalizedOrigin)
+      ) {
         return callback(null, true);
       }
       
       // Allow all localhost variations in development
       const isDev = process.env.NODE_ENV !== 'production';
-      if (isDev && (normalizedOrigin.includes('localhost') || normalizedOrigin.includes('127.0.0.1'))) {
+      if (isDev && isAllowedDevelopmentOrigin(normalizedOrigin)) {
         return callback(null, true);
       }
       
