@@ -46,13 +46,53 @@ export const secureHeadersMiddleware = (req, res, next) => {
 };
 
 export const corsConfiguration = () => {
-  // CORS completely open - all origins allowed
+  // Get allowed origins from environment or use defaults
+  const corsOriginEnv = process.env.CORS_ORIGIN || '';
+  const defaultOrigins = [
+    'https://restaurent-saas.vercel.app',
+    'http://localhost:5173',
+    'http://localhost:3000',
+    'http://127.0.0.1:5173',
+    'http://127.0.0.1:3000',
+  ];
+  
+  const allowedOrigins = corsOriginEnv
+    ? corsOriginEnv.split(',').map(o => o.trim()).filter(Boolean)
+    : defaultOrigins;
+  
   return {
-    origin: true,
+    origin: (origin, callback) => {
+      // Allow requests with no origin (like mobile apps or curl)
+      if (!origin) {
+        return callback(null, true);
+      }
+      
+      // Check if origin is in allowed list
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+      
+      // Allow all localhost variations in development
+      const isDev = process.env.NODE_ENV !== 'production';
+      if (isDev && (origin.includes('localhost') || origin.includes('127.0.0.1'))) {
+        return callback(null, true);
+      }
+      
+      // In production, be more strict but still allow (can be changed to reject)
+      const isProduction = process.env.NODE_ENV === 'production';
+      if (!isProduction) {
+        logWarn(`[CORS] Origin not in allowlist: ${origin}. Allowing anyway in development.`);
+        return callback(null, true);
+      }
+      
+      // Production: reject unknown origins
+      logWarn(`[CORS] Rejecting origin in production: ${origin}`);
+      return callback(new Error('CORS policy violation'), false);
+    },
     credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-Request-Id', 'X-XSRF-Token', 'X-Restaurant-Id'],
-    exposedHeaders: ['X-Request-Id', 'X-Response-Time', 'X-RateLimit-Remaining', 'X-RateLimit-Reset'],
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-Request-Id', 'X-XSRF-Token', 'X-Restaurant-Id', 'Accept'],
+    exposedHeaders: ['X-Request-Id', 'X-Response-Time', 'X-RateLimit-Remaining', 'X-RateLimit-Reset', 'Content-Length'],
     maxAge: 3600,
     optionsSuccessStatus: 200,
   };

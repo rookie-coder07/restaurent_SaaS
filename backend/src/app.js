@@ -57,11 +57,8 @@ app.use(cookieParser());
 app.use(timeoutMiddleware(60000)); // 60 second timeout for settlement operations
 
 // CORS configuration - Open for all origins with credentials
-app.use(cors({
-  origin: true,
-  credentials: true
-}));
-app.options('*', cors());
+app.use(cors(corsConfiguration()));
+app.options('*', cors(corsConfiguration()));
 
 // Security headers middleware
 app.use(secureHeadersMiddleware);
