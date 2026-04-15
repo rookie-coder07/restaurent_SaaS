@@ -70,6 +70,8 @@ export const corsConfiguration = () => {
   
   return {
     origin: (origin, callback) => {
+      logWarn(`[CORS] Incoming origin: ${origin || 'no-origin'}`);
+
       // Allow requests with no origin (like mobile apps or curl)
       if (!origin) {
         return callback(null, true);
@@ -93,9 +95,9 @@ export const corsConfiguration = () => {
         return callback(null, true);
       }
       
-      // Production: reject unknown origins
-      logWarn(`[CORS] Rejecting origin in production: ${origin}`);
-      return callback(new Error('CORS policy violation'), false);
+      // Production: reject unknown origins without throwing an application error
+      logWarn(`[CORS] Blocked origin in production: ${origin}`);
+      return callback(null, false);
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'],
