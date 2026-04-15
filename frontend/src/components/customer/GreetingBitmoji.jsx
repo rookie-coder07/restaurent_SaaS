@@ -104,7 +104,7 @@ function GreetingBitmoji() {
       </div>
 
       {/* Add custom animations */}
-      <style jsx>{`
+      <style>{`
         @keyframes fadeInScale {
           from {
             opacity: 0;

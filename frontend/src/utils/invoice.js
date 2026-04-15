@@ -1,7 +1,45 @@
 const DEFAULT_CGST_RATE = 2.5;
 const DEFAULT_SGST_RATE = 2.5;
+const invoiceBuildCache = new Map();
 
 const roundCurrency = (value) => Number(Number(value || 0).toFixed(2));
+
+function getStoredInvoiceSummary(billing = {}) {
+  const subtotal = Number(billing.subtotal ?? 0);
+  const grandTotal = Number(billing.grandTotal ?? 0);
+  const taxableAmount = Number(billing.taxableAmount ?? 0);
+  const cgstAmount = Number(billing.cgstAmount ?? 0);
+  const sgstAmount = Number(billing.sgstAmount ?? 0);
+
+  if (subtotal <= 0 || grandTotal <= 0) {
+    return null;
+  }
+
+  return {
+    subtotal: roundCurrency(subtotal),
+    orderDiscountAmount: roundCurrency(billing.orderDiscountAmount ?? 0),
+    managerDiscountPercent: roundCurrency(billing.managerDiscountPercent ?? 0),
+    managerDiscountAmount: roundCurrency(billing.managerDiscountAmount ?? 0),
+    taxableAmount: roundCurrency(taxableAmount || subtotal),
+    gstPercent: roundCurrency(billing.gstPercent ?? Number(billing.cgstRate ?? 0) + Number(billing.sgstRate ?? 0)),
+    cgstRate: roundCurrency(billing.cgstRate ?? 0),
+    sgstRate: roundCurrency(billing.sgstRate ?? 0),
+    cgstAmount: roundCurrency(cgstAmount),
+    sgstAmount: roundCurrency(sgstAmount),
+    packingCharge: roundCurrency(billing.packingCharge ?? 0),
+    serviceCharge: roundCurrency(billing.serviceCharge ?? 0),
+    deliveryCharge: roundCurrency(billing.deliveryCharge ?? 0),
+    chargesTotal: roundCurrency(
+      Number(billing.packingCharge ?? 0) +
+      Number(billing.serviceCharge ?? 0) +
+      Number(billing.deliveryCharge ?? 0)
+    ),
+    loyaltyRedeemedAmount: roundCurrency(billing.loyaltyRedeemedAmount ?? 0),
+    payableBeforeRound: roundCurrency(billing.payableBeforeRound ?? grandTotal),
+    roundOff: roundCurrency(billing.roundOff ?? 0),
+    grandTotal: roundCurrency(grandTotal),
+  };
+}
 
 export const getRestaurantBillingSettings = (restaurant = {}) => {
   const gstEnabled = restaurant?.enableGST !== false && Number(restaurant?.defaultGSTPercent ?? 5) > 0;
@@ -104,6 +142,18 @@ export const buildInvoiceData = ({
     return null;
   }
 
+  const cacheKey = [
+    order.id || '',
+    order.updatedAt || order.createdAt || '',
+    order.invoiceNumber || '',
+    order.paymentStatus || '',
+    cashierName || '',
+  ].join('|');
+  const cachedInvoice = invoiceBuildCache.get(cacheKey);
+  if (cachedInvoice) {
+    return cachedInvoice;
+  }
+
   const items = Array.isArray(order.items) ? order.items : Array.isArray(order.orderItems) ? order.orderItems : [];
   const subtotalFromItems = roundCurrency(
     items.reduce(
@@ -113,7 +163,8 @@ export const buildInvoiceData = ({
   );
   const restaurantSettings = getRestaurantBillingSettings(restaurant);
   const billing = billingOverride || order.billing || order.settlement?.billing || {};
-  const computedSummary = calculateInvoiceSummary({
+  const storedSummary = getStoredInvoiceSummary(billing);
+  const computedSummary = storedSummary || calculateInvoiceSummary({
     subtotal: billing.subtotal || subtotalFromItems,
     orderDiscountAmount:
       billing.orderDiscountAmount ?? Math.max(0, roundCurrency(subtotalFromItems - Number(order.totalAmount || 0))),
@@ -148,7 +199,7 @@ export const buildInvoiceData = ({
       )
       : 0;
 
-  return {
+  const invoiceData = {
     restaurantName: restaurant?.name || order?.restaurantName || 'Restaurant',
     address: restaurant?.address || '',
     phone: restaurant?.phone || '',
@@ -177,6 +228,16 @@ export const buildInvoiceData = ({
     })),
     summary: computedSummary,
   };
+
+  if (invoiceBuildCache.size > 100) {
+    const oldestKey = invoiceBuildCache.keys().next().value;
+    if (oldestKey) {
+      invoiceBuildCache.delete(oldestKey);
+    }
+  }
+
+  invoiceBuildCache.set(cacheKey, invoiceData);
+  return invoiceData;
 };
 
 export const printInvoice = (invoice) => {

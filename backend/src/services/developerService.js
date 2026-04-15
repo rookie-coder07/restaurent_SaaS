@@ -8,6 +8,7 @@ import { clearFeatureFlagCache } from '../middleware/featureFlags.js';
 import { metricsInstance } from '../middleware/monitoring.js';
 import { revokeAllUserTokens } from '../utils/tokenManager.js';
 import { broadcastRestaurantEvent } from '../utils/realtimeEvents.js';
+import AuthService from './authService.js';
 
 let injectedSupabase = null;
 const getSupabase = () => injectedSupabase || supabaseImport;
@@ -294,7 +295,9 @@ export class DeveloperService {
           name: restaurantData.restaurantName,
           business_name: restaurantData.restaurantName,
           email: normalizedEmail,
-          password_hash: '',
+          password_hash: await AuthService.hashPassword(temporaryPassword),
+          password_hash_cleared: false,
+          password_updated_at: new Date().toISOString(),
           phone: restaurantData.phone,
           address: restaurantData.address || '',
           gst_number: restaurantData.gstNumber || '',
@@ -447,14 +450,10 @@ export class DeveloperService {
     if (authError) throw authError;
     
     // 🔧 FIXED: Clear password_hash from database - Supabase Auth is now source of truth
+    const passwordHash = await AuthService.hashPassword(newPassword);
     const { data, error } = await getSupabase()
       .from('users')
-      .update({
-        password_hash: null, // Clear old password hash - Supabase Auth is authoritative
-        password_hash_cleared: true,
-        password_updated_at: new Date().toISOString(),  // Track password update time
-        updated_at: new Date().toISOString()
-      })
+      .update(AuthService.buildPasswordUpdatePayload(passwordHash))
       .eq('id', userId)
       .select('id, restaurant_id, name, email, role')
       .single();

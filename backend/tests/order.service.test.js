@@ -270,6 +270,14 @@ describe('OrderService stability', () => {
     const updateEqRestaurant = jest.fn().mockResolvedValue({ error: null });
     const updateEqId = jest.fn(() => ({ eq: updateEqRestaurant }));
     const update = jest.fn(() => ({ eq: updateEqId }));
+    const remainingOrdersTerminal = {
+      neq: jest.fn().mockResolvedValue({ data: [{ id: 'other-open-order' }], error: null }),
+    };
+    const remainingOrdersQuery = {
+      eq: jest.fn().mockReturnThis(),
+      neq: jest.fn().mockReturnThis(),
+      in: jest.fn(() => remainingOrdersTerminal),
+    };
     const single = jest.fn().mockResolvedValue({
       data: {
         id: 'rest-1',
@@ -286,7 +294,10 @@ describe('OrderService stability', () => {
       }
 
       if (table === 'orders') {
-        return { update };
+        return {
+          update,
+          select: jest.fn(() => remainingOrdersQuery),
+        };
       }
 
       throw new Error(`Unexpected table ${table}`);
@@ -304,5 +315,97 @@ describe('OrderService stability', () => {
     expect(result.settlement.finalTotal).toBe(0);
     expect(result.settlement.amountReceived).toBe(0);
     expect(result.settlement.loyalty.redeemedPoints).toBe(1);
+  });
+
+  test('settleOrder falls back when invoice counter and settled_at column are unavailable', async () => {
+    const existingOrder = {
+      id: 'order-legacy',
+      restaurant_id: 'rest-1',
+      table_id: null,
+      status: 'pending',
+      payment_status: 'pending',
+      total_amount: 120,
+      final_amount: 120,
+      payment_method: 'cash',
+      display_order_number: 'ORD-1024',
+      notes: '',
+      created_at: '2026-04-05T08:00:00.000Z',
+      updated_at: '2026-04-05T08:00:00.000Z',
+      order_items: [
+        {
+          id: 'line-1',
+          menu_item_id: 'item-1',
+          quantity: 2,
+          unit_price: 60,
+          menu_items: {
+            name: 'Mint',
+            preparation_time: 5,
+          },
+        },
+      ],
+    };
+    const settledOrder = OrderService.transformOrder({
+      ...existingOrder,
+      status: 'settled',
+      payment_status: 'pending',
+      invoice_number: 'INV-20260405-RD1024',
+      final_amount: 126,
+      updated_at: '2026-04-05T08:05:00.000Z',
+    });
+
+    jest.spyOn(OrderService, 'fetchOrderRecord').mockResolvedValue(existingOrder);
+    jest.spyOn(OrderService, 'getLoyaltyProfile').mockResolvedValue(null);
+    jest.spyOn(OrderService, 'getOrderById').mockResolvedValue(settledOrder);
+    jest.spyOn(OrderService, 'getNextInvoiceNumber').mockRejectedValue(
+      new Error('Database schema is missing the invoice counter setup. Run backend/src/config/migrations/2026-04-06-add-invoice-counter.sql and retry.')
+    );
+
+    const updateEqRestaurant = jest
+      .fn()
+      .mockResolvedValueOnce({
+        error: {
+          code: '42703',
+          message: 'column orders.settled_at does not exist',
+        },
+      })
+      .mockResolvedValueOnce({ error: null });
+    const updateEqId = jest.fn(() => ({ eq: updateEqRestaurant }));
+    const update = jest.fn(() => ({ eq: updateEqId }));
+    const single = jest.fn().mockResolvedValue({
+      data: {
+        id: 'rest-1',
+        enable_gst: true,
+        default_gst_percent: 5,
+      },
+      error: null,
+    });
+    const selectRestaurants = jest.fn(() => ({ eq: jest.fn(() => ({ single })) }));
+
+    jest.spyOn(supabase, 'from').mockImplementation((table) => {
+      if (table === 'restaurants') {
+        return { select: selectRestaurants };
+      }
+
+      if (table === 'orders') {
+        return {
+          update,
+          select: jest.fn(() => remainingOrdersQuery),
+        };
+      }
+
+      throw new Error(`Unexpected table ${table}`);
+    });
+
+    const result = await OrderService.settleOrder('rest-1', 'order-legacy', {
+      method: 'cash',
+      amountReceived: 126,
+    });
+
+    expect(update).toHaveBeenCalledTimes(2);
+    expect(update.mock.calls[0][0]).toHaveProperty('settled_at');
+    expect(update.mock.calls[1][0]).not.toHaveProperty('settled_at');
+    expect(update.mock.calls[1][0].final_amount).toBe(126);
+    expect(update.mock.calls[1][0].invoice_number).toBe('INV-20260405-RD1024');
+    expect(result.invoiceNumber).toBe('INV-20260405-RD1024');
   });
 });

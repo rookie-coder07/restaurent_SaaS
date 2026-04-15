@@ -24,6 +24,7 @@ import { getMenuItemImageUrl } from '../utils/menuItemImage';
 import CartDrawer from '../components/customer/CartDrawer';
 import FloatingCartButton from '../components/customer/FloatingCartButton';
 import { useCustomerCartStore } from '../context/customerCartStore';
+import OptimizedImage from '../components/common/OptimizedImage';
 
 // Lazy load QR-exclusive components for better performance
 const SignatureDishShowcase = lazy(() => import('../components/customer/SignatureDishShowcase'));
@@ -35,6 +36,24 @@ function buildStableRequestId() {
   }
 
   return `req-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function normalizeMenuItemsForOrdering(source) {
+  const rawItems = Array.isArray(source?.items)
+    ? source.items
+    : Array.isArray(source)
+      ? source
+      : [];
+
+  return rawItems
+    .map((item) => ({
+      ...item,
+      id: String(item?.id || item?._id || '').trim(),
+      categoryId: item?.categoryId || item?.category_id || item?.category?.id || item?.category?._id || '',
+      price: Number(item?.price ?? 0),
+      isAvailable: item?.isAvailable !== false,
+    }))
+    .filter((item) => item.id);
 }
 
 export default function CustomerMenu() {
@@ -81,7 +100,8 @@ export default function CustomerMenu() {
       hasValidQrParams
         ? customerAPI.getPublicMenu({ tableNumber, tableId })
         : Promise.resolve({ data: { data: { restaurantName: 'Restaurant Menu', categories: [], items: [] } } }),
-    [tableNumber, tableId, hasValidQrParams, menuRetryCount]
+    [tableNumber, tableId, hasValidQrParams, menuRetryCount],
+    { trackRestaurantContext: false }
   );
 
   const restaurantName = menuData?.restaurantName || 'Restaurant Menu';
@@ -91,19 +111,50 @@ export default function CustomerMenu() {
         id: category.id || category._id || category.categoryId || '',
       }))
     : [];
-  const menuItems = Array.isArray(menuData?.items)
-    ? menuData.items.map((item) => ({
-        ...item,
-        id: item.id || item._id || '',
-        categoryId: item.categoryId || item.category_id || item.category?.id || item.category?._id || '',
-      }))
-    : Array.isArray(menuData)
-      ? menuData.map((item) => ({
-          ...item,
-          id: item.id || item._id || '',
-          categoryId: item.categoryId || item.category_id || item.category?.id || item.category?._id || '',
-        }))
-      : [];
+  const menuItems = normalizeMenuItemsForOrdering(menuData);
+
+  const menuItemsById = useMemo(
+    () =>
+      new Map(
+        menuItems
+          .map((item) => {
+            const itemId = String(item.id || '').trim();
+            return itemId ? [itemId, { ...item, id: itemId }] : null;
+          })
+          .filter(Boolean)
+      ),
+    [menuItems]
+  );
+
+  const hydratedCart = useMemo(
+    () =>
+      cart
+        .map((cartItem) => {
+          const itemId = String(cartItem.id || '').trim();
+          if (!itemId) {
+            return null;
+          }
+
+          const liveMenuItem = menuItemsById.get(itemId);
+
+          return {
+            ...cartItem,
+            id: itemId,
+            name: liveMenuItem?.name || cartItem.name,
+            price: Number(liveMenuItem?.price ?? cartItem.price ?? 0),
+            description: liveMenuItem?.description || cartItem.description || '',
+            existsInMenu: Boolean(liveMenuItem),
+            isAvailable: liveMenuItem?.isAvailable !== false,
+          };
+        })
+        .filter(Boolean),
+    [cart, menuItemsById]
+  );
+
+  const orderableCart = useMemo(
+    () => hydratedCart.filter((item) => item.existsInMenu && item.isAvailable && item.quantity > 0),
+    [hydratedCart]
+  );
 
   // ✅ Show warning if table already has a running order
   useEffect(() => {
@@ -133,16 +184,33 @@ export default function CustomerMenu() {
     return grouped;
   }, [categories, menuItems]);
 
-  const cartItemCount = useMemo(() => cart.reduce((sum, item) => sum + item.quantity, 0), [cart]);
-  const cartTotal = useMemo(() => cart.reduce((sum, item) => sum + item.price * item.quantity, 0), [cart]);
+  const cartItemCount = useMemo(() => hydratedCart.reduce((sum, item) => sum + item.quantity, 0), [hydratedCart]);
+  const cartTotal = useMemo(() => hydratedCart.reduce((sum, item) => sum + item.price * item.quantity, 0), [hydratedCart]);
   const cartQuantityByItemId = useMemo(
     () =>
-      cart.reduce((accumulator, item) => {
+      hydratedCart.reduce((accumulator, item) => {
         accumulator[item.id] = item.quantity;
         return accumulator;
       }, {}),
-    [cart]
+    [hydratedCart]
   );
+
+  useEffect(() => {
+    if (!hydratedCart.length || menuItems.length === 0) {
+      return;
+    }
+
+    const invalidCartEntries = hydratedCart.filter((item) => !item.existsInMenu || !item.isAvailable);
+    if (invalidCartEntries.length === 0) {
+      return;
+    }
+
+    invalidCartEntries.forEach((item) => {
+      updateQuantity(cartKey, item.id, 0);
+    });
+
+    setCartToast('Cart updated with the latest menu');
+  }, [cartKey, hydratedCart, menuItems.length, updateQuantity]);
 
   useEffect(() => {
     if (!cartToast) {
@@ -231,12 +299,15 @@ export default function CustomerMenu() {
   }
 
   const handleAddToCart = (item) => {
-    if (!item.isAvailable) {
+    const itemId = String(item.id || '').trim();
+    if (!item.isAvailable || !itemId) {
+      setOrderStatus('error');
+      setOrderMessage('This item is not available to order right now. Please refresh the menu.');
       return;
     }
 
     addItem(cartKey, {
-      id: item.id,
+      id: itemId,
       name: item.name,
       price: item.price,
       description: item.description,
@@ -259,7 +330,7 @@ export default function CustomerMenu() {
   };
 
   const handlePlaceOrder = async () => {
-    if (cart.length === 0 || isPlacingOrder) {
+    if (hydratedCart.length === 0 || isPlacingOrder) {
       return;
     }
 
@@ -267,15 +338,59 @@ export default function CustomerMenu() {
     setOrderStatus(null);
 
     try {
+      const latestMenuData = await refetch();
+      const latestMenuItems = normalizeMenuItemsForOrdering(latestMenuData);
+      const latestMenuItemMap = new Map(latestMenuItems.map((item) => [item.id, item]));
+      const latestOrderableCart = hydratedCart
+        .map((cartItem) => {
+          const latestItem = latestMenuItemMap.get(String(cartItem.id || '').trim());
+
+          if (!latestItem) {
+            return {
+              ...cartItem,
+              existsInMenu: false,
+              isAvailable: false,
+            };
+          }
+
+          return {
+            ...cartItem,
+            id: latestItem.id,
+            name: latestItem.name || cartItem.name,
+            description: latestItem.description || cartItem.description || '',
+            price: Number(latestItem.price ?? cartItem.price ?? 0),
+            existsInMenu: true,
+            isAvailable: latestItem.isAvailable !== false,
+          };
+        })
+        .filter((item) => item.quantity > 0);
+
+      const staleCartItems = latestOrderableCart.filter((item) => !item.existsInMenu || !item.isAvailable);
+      if (staleCartItems.length > 0) {
+        staleCartItems.forEach((item) => {
+          updateQuantity(cartKey, item.id, 0);
+        });
+
+        setOrderStatus('error');
+        setOrderMessage('Your cart had outdated items and was refreshed. Please review it and place the order again.');
+        return;
+      }
+
+      if (latestOrderableCart.length === 0) {
+        setOrderStatus('error');
+        setOrderMessage('Your cart is empty. Please add available items before placing the order.');
+        return;
+      }
+
       const orderData = {
         ...(tableId ? { tableId } : {}),
         ...(tableNumber ? { tableNumber } : {}),
-        items: cart.map((item) => ({
+        items: latestOrderableCart.map((item) => ({
           menuItemId: item.id,
           quantity: item.quantity,
           unitPrice: item.price,
         })),
-        totalAmount: cartTotal,
+        totalAmount: latestOrderableCart.reduce((sum, item) => sum + item.price * item.quantity, 0),
         paymentMethod: 'cash',
       };
 
@@ -283,7 +398,7 @@ export default function CustomerMenu() {
         tableId: orderData.tableId || '',
         tableNumber: orderData.tableNumber || '',
         totalAmount: Number(orderData.totalAmount || 0),
-        items: cart
+        items: latestOrderableCart
           .map((item) => `${item.id}:${Number(item.quantity || 0)}:${Number(item.price || 0).toFixed(2)}`)
           .sort()
           .join('|'),
@@ -339,11 +454,11 @@ export default function CustomerMenu() {
       removeCart(cartKey);
       setShowCart(false);
 
-      logOrderFlowDiagnostic('ORDER_CREATED_SUCCESS', {
-        orderId,
-        tableNumber: tableNumber || 'N/A',
-        itemCount: cart.length,
-      });
+        logOrderFlowDiagnostic('ORDER_CREATED_SUCCESS', {
+          orderId,
+          tableNumber: tableNumber || 'N/A',
+          itemCount: latestOrderableCart.length,
+        });
 
       window.setTimeout(() => {
         const targetUrl = `/order-status?orderId=${orderId}&table=${tableNumber || ''}`;
@@ -372,6 +487,21 @@ export default function CustomerMenu() {
       if (isBusyTableError) {
         setOrderStatus('error');
         setOrderMessage(backendMessage || 'This table already has a running bill. New QR orders are blocked until that bill is cleared.');
+      } else if (statusCode === 400 && /no longer available|invalid or unavailable/i.test(backendMessage || '')) {
+        try {
+          const latestMenuData = await refetch();
+          const latestMenuItemIds = new Set(normalizeMenuItemsForOrdering(latestMenuData).map((item) => item.id));
+          hydratedCart.forEach((item) => {
+            if (!latestMenuItemIds.has(String(item.id || '').trim())) {
+              updateQuantity(cartKey, item.id, 0);
+            }
+          });
+        } catch {
+          // Keep the user-facing error even if the refresh attempt fails.
+        }
+
+        setOrderStatus('error');
+        setOrderMessage('Some items changed just now, so your cart was refreshed. Please review it and place the order again.');
       } else {
         setOrderStatus('error');
         setOrderMessage(backendMessage || error.message || 'Failed to place order. Please try again.');
@@ -493,7 +623,7 @@ export default function CustomerMenu() {
 
       <CartDrawer
         isOpen={showCart}
-        items={cart}
+        items={hydratedCart}
         total={cartTotal}
         isPlacingOrder={isPlacingOrder}
         onClose={() => setShowCart(false)}
@@ -675,7 +805,7 @@ export default function CustomerMenu() {
                           >
                             <div className="aspect-[4/3] w-full">
                               {itemImageUrl ? (
-                                <img
+                                <OptimizedImage
                                   src={itemImageUrl}
                                   alt={item.name}
                                   className="h-full w-full object-cover transition duration-500 hover:scale-[1.04]"

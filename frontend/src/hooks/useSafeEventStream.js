@@ -5,6 +5,7 @@
 
 import { useEffect, useRef } from 'react';
 import { useAuthStore } from '../context/authStore';
+import { API_BASE_URL } from '../config/api.js';
 
 export const useSafeEventStream = (eventName, callback, shouldInitialize = true) => {
   const callbackRef = useRef(callback);
@@ -95,7 +96,7 @@ export const useSafeEventStream = (eventName, callback, shouldInitialize = true)
         eventSourceRef.current.close();
       }
 
-      eventSourceRef.current = new EventSource(`/api/v1/stream/${eventName}`);
+      eventSourceRef.current = new EventSource(`${API_BASE_URL}/stream/${eventName}`);
       eventSourceRef.current.addEventListener('message', handleMessage);
       eventSourceRef.current.addEventListener('error', handleError);
       retryCountRef.current = 0;

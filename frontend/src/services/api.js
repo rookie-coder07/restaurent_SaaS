@@ -4,6 +4,7 @@ import { clearPortalSession, readPortalSession, savePortalSession } from '../uti
 import { PORTAL_LOGIN, canAccessPortal, getPortalKeyFromPathname, normalizePortalRole } from '../utils/portalRouting';
 import logger from '../utils/logger';
 import { getUserErrorMessage, isDeveloperConsoleContext, showToast, handleError } from '../utils/errorHandling';
+import { deduplicator, responseCache } from '../utils/requestDedup';
 
 const isDevelopmentHost =
   window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
@@ -330,6 +331,12 @@ api.interceptors.request.use(
 
 api.interceptors.response.use(
   (response) => {
+    const method = String(response?.config?.method || 'get').toLowerCase();
+    if (method !== 'get') {
+      responseCache.clear();
+      deduplicator.clear();
+    }
+
     if (!isDeveloperConsoleContext() && response?.status >= 400 && response?.data?.message) {
       response.data.message = getUserErrorMessage({ response });
     }

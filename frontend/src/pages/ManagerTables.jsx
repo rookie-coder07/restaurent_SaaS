@@ -40,17 +40,31 @@ export default function ManagerTables() {
   const tables = tablesData?.tables || [];
   
   const persistedTableAssignments = useMemo(
-    () =>
-      waiters.reduce((accumulator, waiter) => {
+    () => {
+      const assignmentsFromStaff = waiters.reduce((accumulator, waiter) => {
         (waiter.assignedTables || []).forEach((tableId) => {
-          if (tableId) {
+          if (tableId && !accumulator[tableId]) {
             accumulator[tableId] = waiter.id;
           }
         });
 
         return accumulator;
-      }, {}),
-    [waiters]
+      }, {});
+
+      const assignmentsFromTables = (tables || []).reduce((accumulator, table) => {
+        if (table?.id && table?.assignedTo) {
+          accumulator[table.id] = table.assignedTo;
+        }
+
+        return accumulator;
+      }, {});
+
+      return {
+        ...assignmentsFromStaff,
+        ...assignmentsFromTables,
+      };
+    },
+    [tables, waiters]
   );
   const enrichedTables = useMemo(
     () =>
@@ -109,12 +123,15 @@ export default function ManagerTables() {
   useAutoRefresh(() => Promise.allSettled([refetchTables(), refetchOrders(), refetchStaff()]), 12000);
 
   useEffect(() => {
-    const cleanup = subscribeToOrderEvents(() => {
+    const cleanup = subscribeToOrderEvents((payload) => {
+      if (String(payload?.type || '') === 'order.deleted' && payload?.tableId) {
+        unassignTable(payload.tableId);
+      }
       debouncedRefetch();
     });
 
     return cleanup;
-  }, []);
+  }, [unassignTable]);
 
   useOrderSubscription(restaurantId, () => {
     debouncedRefetch();

@@ -538,6 +538,9 @@ export const createOrder = asyncHandler(async (req, res) => {
     if (errorMessage.includes('Cart is empty') || errorMessage.includes('0 items')) {
       errorMessage = 'Your cart is empty. Please add at least one item to place an order.';
       statusCode = 400;
+    } else if (errorMessage.includes('invalid or unavailable')) {
+      errorMessage = 'One or more items in your cart are no longer available. Please refresh the menu and try again.';
+      statusCode = 400;
     } else if (errorMessage.includes('Table not found') || errorMessage.includes('invalid table')) {
       errorMessage = 'The selected table is not available. Please try again or select a different table.';
       statusCode = 404;

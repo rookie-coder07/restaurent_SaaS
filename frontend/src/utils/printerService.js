@@ -117,6 +117,12 @@ export async function printKotReceipt({ ticket, order, restaurant, fallbackToBro
     throw new Error('No kitchen ticket is available for printing.');
   }
 
+  const hasTicketItems = Array.isArray(ticket?.items) && ticket.items.length > 0;
+  const hasOrderItems = Array.isArray(order?.items) && order.items.length > 0;
+  if (!hasTicketItems && !hasOrderItems) {
+    throw new Error('No order items are available for this KOT. Save the takeaway items before printing.');
+  }
+
   const settings = getRestaurantPrinterSettings(restaurant);
   const html = buildKotPrintHtml({ ticket, restaurant, order });
   const title = `KOT ${ticket?.sequence || ''}`.trim();

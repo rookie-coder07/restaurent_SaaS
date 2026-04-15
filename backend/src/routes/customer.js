@@ -90,24 +90,91 @@ router.get('/menu/items', requireFeatureFlag('qr_ordering', 'QR ordering is curr
     // Let user browse menu even if table has running order
     // Order creation endpoint will handle busy table conflict
     const activeOrder = await getBusyTableOrder(restaurantId, tableData.id);
-
-    const [{ data: restaurantData }, categories, items] = await Promise.all([
+    // 🚀 PERFORMANCE: Fetch minimal data for QR menu (no recipes needed for customers)
+    const [{ data: restaurantData }, { data: categories }, { count: totalItemsInDb }] = await Promise.all([
       supabase
         .from('restaurants')
         .select('name')
         .eq('id', restaurantId)
         .single(),
-      MenuService.getCategories(restaurantId),
-      MenuService.getMenuItems(restaurantId, {
-        limit: 100,
-        skip: 0,
-      }),
+      supabase
+        .from('menu_categories')
+        .select('id, name, description, display_order')
+        .eq('restaurant_id', restaurantId)
+        .eq('status', 'active')
+        .order('display_order', { ascending: true }),
+      supabase
+        .from('menu_items')
+        .select('*', { count: 'exact', head: true })
+        .eq('restaurant_id', restaurantId),
     ]);
+
+    // Only expose orderable items to QR customers so the menu stays aligned
+    // with backend order validation, which accepts active items only.
+    const { data: items, error: itemsError } = await supabase
+      .from('menu_items')
+      .select('id, category_id, name, description, price, image_url, status')
+      .eq('restaurant_id', restaurantId)
+      .eq('status', 'active')
+      .order('created_at', { ascending: false });
+
+    // 🔴 LOG ERRORS if query failed
+    if (itemsError) {
+      console.error('❌ ERROR FETCHING ITEMS:', {
+        error: itemsError.message,
+        code: itemsError.code,
+        details: itemsError.details,
+      });
+    }
+
+    // Debug: Log data fetched - DETAILED
+    console.log('📊 QR MENU DATA FETCHED', {
+      tableNumber: normalizeTableLabel(table) || tableId,
+      restaurantId,
+      restaurantName: restaurantData?.name,
+      categoriesCount: (categories || []).length,
+      totalItemsInDb: totalItemsInDb || 0,
+      itemsFetched: (items || []).length,
+      itemsIsNull: items === null,
+      itemsIsUndefined: items === undefined,
+      itemStatusBreakdown: items ? {
+        active: items.filter(i => i.status === 'active').length,
+        draft: items.filter(i => i.status === 'draft').length,
+        inactive: items.filter(i => i.status === 'inactive').length,
+        other: items.filter(i => !['active', 'draft', 'inactive'].includes(i.status)).length,
+      } : null,
+    });
+
+    // Transform items to match frontend expectations
+    const transformedItems = (items || [])
+      .map((item) => ({
+        id: item.id,
+        name: item.name,
+        description: item.description,
+        price: Number(item.price || 0),
+        image_url: item.image_url,
+        categoryId: item.category_id,
+        isAvailable: item.status === 'active',
+      }));
+
+    // Transform categories to match frontend expectations
+    const transformedCategories = (categories || []).map((cat) => ({
+      id: cat.id,
+      name: cat.name,
+      description: cat.description,
+    }));
+
+    // Debug: Log transformed data
+    console.log('✅ QR MENU TRANSFORMED', {
+      transformedCategoriesCount: transformedCategories.length,
+      transformedItemsCount: transformedItems.length,
+      itemsWithoutCategory: transformedItems.filter(i => !i.categoryId).length,
+    });
 
     const result = {
       restaurantName: restaurantData?.name || 'Restaurant Menu',
-      categories,
-      items,
+      categories: transformedCategories,
+      items: transformedItems,
       // ✅ Include busy table info so frontend can show a warning
       tableBusyStatus: activeOrder ? {
         isBusy: true,
@@ -425,6 +492,7 @@ router.get('/orders/table/:tableNumber', requireFeatureFlag('qr_ordering', 'QR o
       .select('id, restaurant_id, status, total_amount, created_at')
       .eq('restaurant_id', table.restaurant_id)
       .eq('table_id', table.id)
+      .or('is_deleted.is.null,is_deleted.eq.false')
       .order('created_at', { ascending: false });
 
     if (error) throw error;

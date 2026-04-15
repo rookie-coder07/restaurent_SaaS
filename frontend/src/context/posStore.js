@@ -3,6 +3,8 @@ import { menuAPI, orderAPI, tableAPI } from '../services/apiEndpoints';
 
 const CACHE_TTL_MS = 60 * 1000;
 const BILLING_TARGET_TTL_MS = 10 * 1000;
+let preloadCoreDataPromise = null;
+let refreshTableOverviewPromise = null;
 
 const DEFAULT_WORKSPACE = {
   orderType: '',
@@ -55,6 +57,10 @@ export const usePosStore = create((set, get) => ({
   pendingBillingTarget: null,
 
   preloadCoreData: async ({ force = false } = {}) => {
+    if (!force && preloadCoreDataPromise) {
+      return preloadCoreDataPromise;
+    }
+
     const state = get();
     const requests = [];
 
@@ -112,10 +118,21 @@ export const usePosStore = create((set, get) => ({
       );
     }
 
-    await Promise.all(requests);
+    const pendingWork = Promise.all(requests).finally(() => {
+      if (preloadCoreDataPromise === pendingWork) {
+        preloadCoreDataPromise = null;
+      }
+    });
+
+    preloadCoreDataPromise = pendingWork;
+    await pendingWork;
   },
 
   refreshTableOverview: async ({ force = false, silent = false, includeTables = true, includeOpenBills = true } = {}) => {
+    if (!force && refreshTableOverviewPromise) {
+      return refreshTableOverviewPromise;
+    }
+
     const state = get();
     const requests = [];
 
@@ -167,7 +184,14 @@ export const usePosStore = create((set, get) => ({
       );
     }
 
-    await Promise.all(requests);
+    const pendingWork = Promise.all(requests).finally(() => {
+      if (refreshTableOverviewPromise === pendingWork) {
+        refreshTableOverviewPromise = null;
+      }
+    });
+
+    refreshTableOverviewPromise = pendingWork;
+    await pendingWork;
   },
 
   refreshOnlineInbox: async ({ force = false } = {}) => {
@@ -226,6 +250,45 @@ export const usePosStore = create((set, get) => ({
       delete nextCache[tableId];
       return { tableOrderCache: nextCache };
     }),
+  removeOpenBillById: (orderId) =>
+    set((state) => ({
+      openBillsData: (Array.isArray(state.openBillsData) ? state.openBillsData : []).filter(
+        (order) => String(order?.id || '') !== String(orderId || '')
+      ),
+      openBillsLoadedAt: Date.now(),
+    })),
+  patchTableRealtime: ({ tableId, status, assignedTo, assignedWaiterName } = {}) =>
+    set((state) => ({
+      tableData: {
+        ...(state.tableData || {}),
+        tables: (Array.isArray(state.tableData?.tables) ? state.tableData.tables : []).map((table) => {
+          if (String(table?.id || '') !== String(tableId || '')) {
+            return table;
+          }
+
+          const nextStatus = status || table.status;
+          const shouldClearAssignment = nextStatus === 'available';
+
+          return {
+            ...table,
+            status: nextStatus,
+            assignedTo:
+              assignedTo !== undefined
+                ? assignedTo
+                : shouldClearAssignment
+                  ? null
+                  : table.assignedTo,
+            assignedWaiterName:
+              assignedWaiterName !== undefined
+                ? assignedWaiterName
+                : shouldClearAssignment
+                  ? ''
+                  : table.assignedWaiterName,
+          };
+        }),
+      },
+      tableLoadedAt: Date.now(),
+    })),
   setPendingBillingTarget: ({ tableId = '', orderId = '', message = '' } = {}) =>
     set({
       pendingBillingTarget: {

@@ -34,6 +34,18 @@ function getTicketFromOrder(order, ticketId = '') {
   return [...tickets].sort((left, right) => Number(right.sequence || 0) - Number(left.sequence || 0))[0];
 }
 
+function resolveDisplayItems(ticket, order) {
+  if (Array.isArray(ticket?.items) && ticket.items.length > 0) {
+    return ticket.items;
+  }
+
+  if (Array.isArray(order?.items) && order.items.length > 0) {
+    return order.items;
+  }
+
+  return [];
+}
+
 function resolvePaperWidthMm(location, restaurant) {
   const params = new URLSearchParams(location.search || '');
   const queryValue = Number(params.get('paper') || '');
@@ -128,6 +140,7 @@ export default function KitchenTicket() {
     () => resolvePaperWidthMm(location, restaurant),
     [location, restaurant]
   );
+  const ticketItems = useMemo(() => resolveDisplayItems(ticket, order), [ticket, order]);
 
   const handlePrint = async () => {
     if (!ticket) {
@@ -183,15 +196,15 @@ export default function KitchenTicket() {
     );
   }
 
-  if (!order || !ticket) {
+  if (!order || !ticket || ticketItems.length === 0) {
     return (
       <div className="space-y-6">
         {error ? <Toast type="error" message={error} /> : null}
         <Card>
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--color-text-subtle)]">Kitchen Ticket</p>
-          <h1 className="mt-3 text-3xl font-bold text-[var(--color-text)]">No Order Found</h1>
+          <h1 className="mt-3 text-3xl font-bold text-[var(--color-text)]">No Printable KOT Found</h1>
           <p className="mt-2 text-sm text-[var(--color-text-muted)]">
-            The kitchen ticket could not be rendered because the order or ticket data was missing.
+            The kitchen ticket could not be rendered because the order items were missing from the takeaway order.
           </p>
           <div className="mt-5">
             <Button onClick={() => navigate(returnTo)}>
@@ -251,7 +264,7 @@ export default function KitchenTicket() {
               <span>KOT Number</span>
               <span className="thermal-align-right">{ticket.sequence || '-'}</span>
               <span>Table Number</span>
-              <span className="thermal-align-right">{ticket.tableNumber || 'Walk-in'}</span>
+              <span className="thermal-align-right">{ticket.tableNumber || (String(order.orderType || '').toLowerCase() === 'takeaway' ? 'Takeaway' : 'Walk-in')}</span>
               <span>Order Type</span>
               <span className="thermal-align-right">{String(order.orderType || '').replace('-', ' ') || 'Dine-in'}</span>
               <span>Time</span>
@@ -268,10 +281,10 @@ export default function KitchenTicket() {
             <div className="thermal-separator">--------------------------------</div>
 
             <div className="thermal-items">
-              {(ticket.items || []).map((item, index) => (
+              {ticketItems.map((item, index) => (
                 <div key={`${item.name}-${index}`} className="thermal-kot-row">
                   <span className="thermal-item-name thermal-strong">{item.name}</span>
-                  <span className="thermal-align-right thermal-strong">{item.quantity}</span>
+                  <span className="thermal-align-right thermal-strong">{item.quantity || item.qty}</span>
                 </div>
               ))}
             </div>

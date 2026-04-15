@@ -4,8 +4,8 @@
  */
 
 import axios from 'axios';
+import { API_BASE_URL } from '../config/api.js';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
 const HEALTH_CHECK_INTERVAL = 5 * 60 * 1000; // 5 minutes between checks
 const HEALTH_CHECK_TIMEOUT = 10000; // 10 second timeout
 

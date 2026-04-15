@@ -54,7 +54,7 @@ app.use(express.urlencoded({ limit: '10mb', extended: true }));
 app.use(cookieParser());
 
 // Timeout middleware
-app.use(timeoutMiddleware(30000)); // 30 second timeout
+app.use(timeoutMiddleware(60000)); // 60 second timeout for settlement operations
 
 // CORS configuration - Open for all origins with credentials
 app.use(cors({

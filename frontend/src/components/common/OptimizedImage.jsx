@@ -3,7 +3,7 @@
  * Supports progressive image loading and caching
  */
 
-import React, { memo, useState, useEffect } from 'react';
+import React, { memo, useEffect, useRef, useState } from 'react';
 import { Loader } from 'lucide-react';
 
 const OptimizedImage = memo(
@@ -18,20 +18,30 @@ const OptimizedImage = memo(
     lazyLoad = true,
     placeholder = null,
   }) => {
-    const [isLoading, setIsLoading] = useState(!lazyLoad);
+    const imageRef = useRef(null);
+    const [isLoading, setIsLoading] = useState(Boolean(src));
     const [error, setError] = useState(false);
     const [imageSrc, setImageSrc] = useState(lazyLoad ? null : src);
 
     useEffect(() => {
-      if (!lazyLoad) {
-        setImageSrc(src);
-        return;
+      setError(false);
+      setIsLoading(Boolean(src));
+
+      if (!src) {
+        setImageSrc(null);
+        setIsLoading(false);
+        return undefined;
       }
 
-      // Set up Intersection Observer for lazy loading
-      const image = document.querySelector(`img[data-src="${src}"]`);
-      if (!image) {
-        return;
+      if (!lazyLoad) {
+        setImageSrc(src);
+        return undefined;
+      }
+
+      const image = imageRef.current;
+      if (!image || typeof IntersectionObserver === 'undefined') {
+        setImageSrc(src);
+        return undefined;
       }
 
       const observer = new IntersectionObserver((entries) => {
@@ -41,6 +51,9 @@ const OptimizedImage = memo(
             observer.unobserve(entry.target);
           }
         });
+      }, {
+        rootMargin: '160px 0px',
+        threshold: 0.01,
       });
 
       observer.observe(image);
@@ -70,7 +83,7 @@ const OptimizedImage = memo(
     }
 
     return (
-      <div className="relative" style={{ width, height }}>
+      <div ref={imageRef} className="relative" style={{ width, height }}>
         {isLoading && placeholder && <div className="absolute inset-0">{placeholder}</div>}
 
         {isLoading && !placeholder && (
@@ -89,6 +102,8 @@ const OptimizedImage = memo(
             onError={handleError}
             width={width}
             height={height}
+            loading={lazyLoad ? 'lazy' : 'eager'}
+            decoding="async"
           />
         )}
       </div>

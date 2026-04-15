@@ -35,22 +35,36 @@ export default function ManagerWaiters() {
   const refetchDebounceRef = useRef(null);
   
   const waiters = useMemo(() => (staffData?.staff || []).filter((member) => member.role === 'staff'), [staffData]);
+  const tables = tablesData?.tables || [];
+  const orders = Array.isArray(ordersData) ? ordersData : [];
   
   const persistedTableAssignments = useMemo(
-    () =>
-      waiters.reduce((accumulator, waiter) => {
+    () => {
+      const assignmentsFromStaff = waiters.reduce((accumulator, waiter) => {
         (waiter.assignedTables || []).forEach((tableId) => {
-          if (tableId) {
+          if (tableId && !accumulator[tableId]) {
             accumulator[tableId] = waiter.id;
           }
         });
 
         return accumulator;
-      }, {}),
-    [waiters]
+      }, {});
+
+      const assignmentsFromTables = (tables || []).reduce((accumulator, table) => {
+        if (table?.id && table?.assignedTo) {
+          accumulator[table.id] = table.assignedTo;
+        }
+
+        return accumulator;
+      }, {});
+
+      return {
+        ...assignmentsFromStaff,
+        ...assignmentsFromTables,
+      };
+    },
+    [tables, waiters]
   );
-  const tables = tablesData?.tables || [];
-  const orders = Array.isArray(ordersData) ? ordersData : [];
   const enrichedTables = useMemo(
     () =>
       tables.map((table) =>
@@ -85,12 +99,15 @@ export default function ManagerWaiters() {
   };
 
   useEffect(() => {
-    const cleanup = subscribeToOrderEvents(() => {
+    const cleanup = subscribeToOrderEvents((payload) => {
+      if (String(payload?.type || '') === 'order.deleted' && payload?.tableId) {
+        unassignTable(payload.tableId);
+      }
       debouncedRefetch();
     });
 
     return cleanup;
-  }, []);
+  }, [unassignTable]);
 
   const persistTableAssignment = async (tableId, waiterId) => {
     const targetWaiter = waiters.find((waiter) => waiter.id === waiterId);

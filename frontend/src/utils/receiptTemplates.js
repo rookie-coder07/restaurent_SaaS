@@ -11,6 +11,24 @@ function escapeHtml(value) {
     .replaceAll("'", '&#39;');
 }
 
+function resolveKotItems(ticket, order) {
+  if (Array.isArray(ticket?.items) && ticket.items.length > 0) {
+    return ticket.items;
+  }
+
+  if (Array.isArray(order?.items) && order.items.length > 0) {
+    return order.items.map((item) => ({
+      name: item.name || `Item ${String(item.menuItemId || item.id || '').slice(0, 6)}`,
+      quantity: Number(item.quantity || item.qty || 0),
+      modifiers: Array.isArray(item.modifiers) ? item.modifiers : [],
+      note: item.itemNote || item.note || '',
+      station: item.station || 'Main Kitchen',
+    }));
+  }
+
+  return [];
+}
+
 function buildPrintShell({ title, paperWidthMm, bodyMarkup }) {
   return `<!doctype html>
   <html>
@@ -185,7 +203,8 @@ export function buildBillPrintHtml({ order, restaurant, invoice, cashierName }) 
 export function buildKotPrintHtml({ ticket, restaurant, order }) {
   const { receiptWidthMm } = getRestaurantPrinterSettings(restaurant);
   const createdAt = ticket?.createdAt || order?.createdAt || Date.now();
-  const itemsMarkup = (ticket?.items || [])
+  const ticketItems = resolveKotItems(ticket, order);
+  const itemsMarkup = ticketItems
     .map(
       (item) => `
         <div class="kot-row">
@@ -207,7 +226,7 @@ export function buildKotPrintHtml({ ticket, restaurant, order }) {
     <div class="meta">
       <span>KOT No</span><span class="right">${escapeHtml(ticket?.sequence || '-')}</span>
       <span>Order</span><span class="right">${escapeHtml(ticket?.displayOrderNumber || order?.displayOrderNumber || '-')}</span>
-      <span>Table</span><span class="right">${escapeHtml(ticket?.tableNumber || order?.tableNumber || 'Walk-in')}</span>
+      <span>Table</span><span class="right">${escapeHtml(ticket?.tableNumber || order?.tableNumber || (String(order?.orderType || '').toLowerCase() === 'takeaway' ? 'Takeaway' : 'Walk-in'))}</span>
       <span>Type</span><span class="right">${escapeHtml(String(ticket?.type || 'send').toUpperCase())}</span>
       <span>Time</span><span class="right">${escapeHtml(new Date(createdAt).toLocaleString('en-IN'))}</span>
     </div>

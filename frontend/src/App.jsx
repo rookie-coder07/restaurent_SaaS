@@ -8,50 +8,58 @@ import KOTLayout from './components/layout/KOTLayout';
 import { initializeAudioContext, setupAudioUnlock } from './utils/alerts';
 
 // Pages
-const HomeAccess = lazy(() => import('./pages/HomeAccess'));
-const Login = lazy(() => import('./pages/Login'));
-const PosLogin = lazy(() => import('./pages/pos/PosLogin'));
-const ResetPassword = lazy(() => import('./pages/ResetPassword'));
-const Register = lazy(() => import('./pages/Register'));
-const Dashboard = lazy(() => import('./pages/Dashboard'));
-const Notifications = lazy(() => import('./pages/Notifications'));
-const MenuManagement = lazy(() => import('./pages/MenuManagement'));
-const Orders = lazy(() => import('./pages/Orders'));
-const Analytics = lazy(() => import('./pages/Analytics'));
-const Loyalty = lazy(() => import('./pages/Loyalty'));
-const POS = lazy(() => import('./pages/POS'));
-const POSOrders = lazy(() => import('./pages/POSOrders'));
-const CustomerMenu = lazy(() => import('./pages/CustomerMenu'));
-const QRLanding = lazy(() => import('./pages/QRLanding'));
-const OrderStatus = lazy(() => import('./pages/OrderStatus'));
-const Tables = lazy(() => import('./pages/Tables'));
-const Staff = lazy(() => import('./pages/Staff'));
-const NotFound = lazy(() => import('./pages/NotFound'));
-const Settings = lazy(() => import('./pages/Settings'));
-const Inventory = lazy(() => import('./pages/Inventory'));
-const Kitchen = lazy(() => import('./pages/Kitchen'));
-const BillView = lazy(() => import('./pages/BillView'));
-const KitchenTicket = lazy(() => import('./pages/KitchenTicket'));
-const ManagerDashboard = lazy(() => import('./pages/ManagerDashboard'));
-const ManagerOrders = lazy(() => import('./pages/ManagerOrders'));
-const ManagerTables = lazy(() => import('./pages/ManagerTables'));
-const ManagerKitchen = lazy(() => import('./pages/ManagerKitchen'));
-const ManagerWaiters = lazy(() => import('./pages/ManagerWaiters'));
-const ManagerInventory = lazy(() => import('./pages/ManagerInventory'));
-const ManagerBills = lazy(() => import('./pages/ManagerBills'));
-const DeveloperConsole = lazy(() => import('./pages/DeveloperConsole'));
-const ChangePassword = lazy(() => import('./pages/ChangePassword'));
-const UserPasswordManagement = lazy(() => import('./pages/UserPasswordManagement'));
-const StaffActivity = lazy(() => import('./pages/StaffActivity'));
-const Terms = lazy(() => import('./pages/Terms'));
-const Privacy = lazy(() => import('./pages/Privacy'));
-const CreateRestaurant = lazy(() => import('./pages/developer/CreateRestaurant'));
+const HomeAccess = lazyWithPreload(() => import('./pages/HomeAccess'));
+const Login = lazyWithPreload(() => import('./pages/Login'));
+const PosLogin = lazyWithPreload(() => import('./pages/pos/PosLogin'));
+const ResetPassword = lazyWithPreload(() => import('./pages/ResetPassword'));
+const Register = lazyWithPreload(() => import('./pages/Register'));
+const Dashboard = lazyWithPreload(() => import('./pages/Dashboard'));
+const Notifications = lazyWithPreload(() => import('./pages/Notifications'));
+const MenuManagement = lazyWithPreload(() => import('./pages/MenuManagement'));
+const Orders = lazyWithPreload(() => import('./pages/Orders'));
+const Analytics = lazyWithPreload(() => import('./pages/Analytics'));
+const Loyalty = lazyWithPreload(() => import('./pages/Loyalty'));
+const POS = lazyWithPreload(() => import('./pages/POS'));
+const POSOrders = lazyWithPreload(() => import('./pages/POSOrders'));
+const CustomerMenu = lazyWithPreload(() => import('./pages/CustomerMenu'));
+const QRLanding = lazyWithPreload(() => import('./pages/QRLanding'));
+const OrderStatus = lazyWithPreload(() => import('./pages/OrderStatus'));
+const Tables = lazyWithPreload(() => import('./pages/Tables'));
+const Staff = lazyWithPreload(() => import('./pages/Staff'));
+const NotFound = lazyWithPreload(() => import('./pages/NotFound'));
+const Settings = lazyWithPreload(() => import('./pages/Settings'));
+const Inventory = lazyWithPreload(() => import('./pages/Inventory'));
+const Kitchen = lazyWithPreload(() => import('./pages/Kitchen'));
+const BillView = lazyWithPreload(() => import('./pages/BillView'));
+const KitchenTicket = lazyWithPreload(() => import('./pages/KitchenTicket'));
+const ManagerDashboard = lazyWithPreload(() => import('./pages/ManagerDashboard'));
+const ManagerOrders = lazyWithPreload(() => import('./pages/ManagerOrders'));
+const ManagerTables = lazyWithPreload(() => import('./pages/ManagerTables'));
+const ManagerKitchen = lazyWithPreload(() => import('./pages/ManagerKitchen'));
+const ManagerWaiters = lazyWithPreload(() => import('./pages/ManagerWaiters'));
+const ManagerInventory = lazyWithPreload(() => import('./pages/ManagerInventory'));
+const ManagerBills = lazyWithPreload(() => import('./pages/ManagerBills'));
+const DeveloperConsole = lazyWithPreload(() => import('./pages/DeveloperConsole'));
+const ChangePassword = lazyWithPreload(() => import('./pages/ChangePassword'));
+const UserPasswordManagement = lazyWithPreload(() => import('./pages/UserPasswordManagement'));
+const StaffActivity = lazyWithPreload(() => import('./pages/StaffActivity'));
+const Terms = lazyWithPreload(() => import('./pages/Terms'));
+const Privacy = lazyWithPreload(() => import('./pages/Privacy'));
+const CreateRestaurant = lazyWithPreload(() => import('./pages/developer/CreateRestaurant'));
 import { useAuthStore } from './context/authStore';
 import { useManagerStore } from './context/managerStore';
+import { usePosStore } from './context/posStore';
 import { readPortalSession } from './utils/authStorage';
 import { canAccessPortal, resolvePortalHome } from './utils/portalRouting';
 import { AuthSessionRedirectListener } from './components/shared/AuthSessionRedirectListener';
 import ToastViewport from './components/common/ToastViewport';
+import { restaurantAPI } from './services/apiEndpoints';
+
+function lazyWithPreload(factory) {
+  const Component = lazy(factory);
+  Component.preload = factory;
+  return Component;
+}
 
 function RouteLoader() {
   return (
@@ -95,6 +103,7 @@ function App() {
   const initializeAuth = useAuthStore((state) => state.initializeAuth);
   const isHydrated = useAuthStore((state) => state.isHydrated);
   const restaurantId = useAuthStore((state) => state.restaurantId);
+  const activePortal = useAuthStore((state) => state.activePortal);
   const setManagerRestaurantContext = useManagerStore((state) => state.setRestaurantContext);
   const clearManagerTenantState = useManagerStore((state) => state.clearTenantState);
 
@@ -114,6 +123,46 @@ function App() {
 
     clearManagerTenantState();
   }, [clearManagerTenantState, restaurantId, setManagerRestaurantContext]);
+
+  useEffect(() => {
+    if (!isHydrated) {
+      return;
+    }
+
+    const preloadTasks = [];
+
+    if (activePortal === 'pos') {
+      preloadTasks.push(POS.preload?.(), POSOrders.preload?.(), Tables.preload?.(), KitchenTicket.preload?.());
+      usePosStore.getState().preloadCoreData().catch(() => {});
+      usePosStore.getState().refreshTableOverview({ silent: true }).catch(() => {});
+    }
+
+    if (activePortal === 'admin') {
+      preloadTasks.push(
+        Dashboard.preload?.(),
+        Orders.preload?.(),
+        Tables.preload?.(),
+        MenuManagement.preload?.(),
+        Settings.preload?.()
+      );
+    }
+
+    if (window.location.pathname.startsWith('/manager')) {
+      preloadTasks.push(
+        ManagerDashboard.preload?.(),
+        ManagerTables.preload?.(),
+        ManagerOrders.preload?.(),
+        ManagerBills.preload?.(),
+        ManagerWaiters.preload?.()
+      );
+    }
+
+    if (restaurantId) {
+      restaurantAPI.getProfile().catch(() => {});
+    }
+
+    Promise.allSettled(preloadTasks.filter(Boolean));
+  }, [activePortal, isHydrated, restaurantId]);
 
   if (!isHydrated) {
     return null;

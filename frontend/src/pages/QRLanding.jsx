@@ -1,63 +1,87 @@
-import { useEffect, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useEffect, useMemo, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ExternalLink } from 'lucide-react';
 
 /**
  * QR Landing Page
- * 
- * Prevents session conflicts when QR codes are scanned:
- * 1. Clears existing session/localStorage on mount
- * 2. Extracts table info from URL params
- * 3. Provides button to open menu in new tab (clean session)
+ *
+ * Keeps the QR handoff isolated from POS/Admin sessions:
+ * 1. Clears only app auth/session keys
+ * 2. Normalizes QR params from the incoming URL
+ * 3. Redirects the user to the public menu in the same tab
  */
 export default function QRLanding() {
+  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const [isClearing, setIsClearing] = useState(true);
+  const [isPreparing, setIsPreparing] = useState(true);
 
-  const tableNumber = searchParams.get('table');
-  const tableId = searchParams.get('tableId');
+  const tableNumber = useMemo(
+    () => decodeURIComponent(String(searchParams.get('table') || '').replace(/\+/g, ' ')).trim(),
+    [searchParams]
+  );
+  const tableId = useMemo(
+    () => decodeURIComponent(String(searchParams.get('tableId') || '')).trim(),
+    [searchParams]
+  );
 
-  useEffect(() => {
-    // Clear existing session to prevent role conflicts
-    localStorage.removeItem('authStorage');
-    localStorage.removeItem('managerStore');
-    sessionStorage.clear();
-
-    // Also clear any auth-related cookies
-    const cookies = document.cookie.split(';');
-    cookies.forEach((cookie) => {
-      const eqPos = cookie.indexOf('=');
-      const name = eqPos > -1 ? cookie.substring(0, eqPos).trim() : cookie.trim();
-      document.cookie = `${name}=;expires=Thu, 01 Jan 1970 00:00:00 UTC;path=/;`;
-    });
-
-    // Done clearing
-    setIsClearing(false);
-  }, []);
-
-  const handleOpenMenu = () => {
-    // Build menu URL with table info
-    const menuUrl = new URL(`${window.location.origin}/menu`);
+  const menuPath = useMemo(() => {
+    const params = new URLSearchParams();
 
     if (tableNumber) {
-      menuUrl.searchParams.set('table', tableNumber);
-    }
-    if (tableId) {
-      menuUrl.searchParams.set('tableId', tableId);
+      params.set('table', tableNumber);
     }
 
-    // Open in new tab with clean session
-    window.open(menuUrl.toString(), '_blank', 'noopener,noreferrer');
+    if (tableId) {
+      params.set('tableId', tableId);
+    }
+
+    params.set('source', 'qr');
+    return `/menu?${params.toString()}`;
+  }, [tableId, tableNumber]);
+
+  useEffect(() => {
+    const storageKeysToClear = [
+      'authStorage',
+      'auth-store',
+      'managerStore',
+      'manager-ops-store',
+      'token',
+      'accessToken',
+      'restaurantId',
+    ];
+
+    storageKeysToClear.forEach((key) => {
+      localStorage.removeItem(key);
+      sessionStorage.removeItem(key);
+    });
+
+    setIsPreparing(false);
+  }, []);
+
+  useEffect(() => {
+    if (isPreparing) {
+      return undefined;
+    }
+
+    const timer = window.setTimeout(() => {
+      navigate(menuPath, { replace: true });
+    }, 250);
+
+    return () => window.clearTimeout(timer);
+  }, [isPreparing, menuPath, navigate]);
+
+  const handleContinue = () => {
+    navigate(menuPath, { replace: true });
   };
 
-  if (isClearing) {
+  if (isPreparing) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-[var(--bg-main)] to-[var(--bg-card)]">
         <div className="text-center">
           <div className="mb-4 inline-block rounded-full bg-[var(--bg-card)] p-4">
             <ExternalLink className="h-12 w-12 animate-pulse text-[var(--text-primary)]" />
           </div>
-          <p className="text-[var(--text-secondary)]">Preparing menu...</p>
+          <p className="text-[var(--text-secondary)]">Preparing your table menu...</p>
         </div>
       </div>
     );
@@ -66,7 +90,6 @@ export default function QRLanding() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-[var(--bg-main)] to-[var(--bg-card)] px-4">
       <div className="w-full max-w-md rounded-3xl border border-[var(--border-color)] bg-[var(--bg-card)] p-8 shadow-lg">
-        {/* Header */}
         <div className="mb-6 text-center">
           <div className="mb-4 inline-block rounded-full bg-[var(--bg-input)] p-4">
             <ExternalLink className="h-12 w-12 text-[var(--text-primary)]" />
@@ -77,24 +100,21 @@ export default function QRLanding() {
           </p>
         </div>
 
-        {/* Description */}
         <div className="mb-8 rounded-lg bg-[var(--bg-input)] p-4">
           <p className="text-center text-sm text-[var(--text-secondary)]">
-            Tap the button below to view our menu and place your order
+            Redirecting you to the public QR menu with a clean customer session.
           </p>
         </div>
 
-        {/* Action Button */}
         <button
-          onClick={handleOpenMenu}
+          onClick={handleContinue}
           className="w-full rounded-xl bg-gradient-to-r from-blue-500 to-blue-600 px-6 py-4 font-semibold text-white transition-all duration-200 hover:shadow-lg active:scale-95"
         >
-          View Menu & Order
+          Continue To Menu
         </button>
 
-        {/* Footer Info */}
         <p className="mt-6 text-center text-xs text-[var(--text-secondary)]">
-          📱 Menu opens in a new tab
+          If redirect does not happen, tap the button above.
         </p>
       </div>
     </div>

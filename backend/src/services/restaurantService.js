@@ -90,7 +90,6 @@ export class RestaurantService {
       email: user.email,
       phone: user.phone || user.phone_number || '',
       role: user.role,
-      password: user.password || '',
       assignedTables: Array.isArray(user.assigned_tables) ? user.assigned_tables.filter(Boolean) : [],
       status: user.status || 'active',
       createdAt: user.created_at,
@@ -1205,14 +1204,10 @@ export class RestaurantService {
 
       // 🔧 FIXED: Clear password_hash from database - Supabase Auth is now source of truth
       const handledAt = new Date().toISOString();
+      const passwordHash = await AuthService.hashPassword(newPassword);
       const { data: user, error } = await supabase
         .from('users')
-        .update({
-          password_hash: null, // Clear old password hash
-          password_hash_cleared: true,
-          password_updated_at: handledAt,  // Track password update time
-          updated_at: handledAt,
-        })
+        .update(AuthService.buildPasswordUpdatePayload(passwordHash, handledAt))
         .eq('restaurant_id', restaurantId)
         .eq('id', staffId)
         .select()

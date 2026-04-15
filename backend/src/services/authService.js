@@ -27,6 +27,15 @@ export class AuthService {
     POS: 'pos',
   };
 
+  static buildPasswordUpdatePayload(passwordHash, timestamp = new Date().toISOString()) {
+    return {
+      password_hash: passwordHash,
+      password_hash_cleared: false,
+      password_updated_at: timestamp,
+      updated_at: timestamp,
+    };
+  }
+
   static async persistRefreshToken(refreshToken, userId, restaurantId) {
     const expiresAt = new Date(Date.now() + TOKEN_CONFIG.REFRESH_TOKEN_SECONDS * 1000).toISOString();
     try {
@@ -80,11 +89,43 @@ export class AuthService {
   // Compare password with hash
   static async comparePassword(password, hash) {
     try {
+      if (!hash) {
+        return false;
+      }
       return await bcryptjs.compare(password, hash);
     } catch (error) {
       logger.error('Password comparison error:', error);
       throw new Error('Password comparison failed');
     }
+  }
+
+  static async verifyPasswordAgainstStoredHash(password, account, accountType = 'user') {
+    const isValid = await this.comparePassword(password, account?.password_hash);
+
+    logger.info(`[LOGIN] Stored password hash verification for ${accountType}`, {
+      accountId: account?.id,
+      email: account?.email,
+      isValid,
+      hasPasswordHash: !!account?.password_hash,
+      passwordUpdatedAt: account?.password_updated_at || null,
+    });
+
+    return isValid;
+  }
+
+  static async syncPasswordHashIfMissing(table, accountId, password) {
+    const passwordHash = await this.hashPassword(password);
+
+    const { error } = await supabase
+      .from(table)
+      .update(this.buildPasswordUpdatePayload(passwordHash))
+      .eq('id', accountId);
+
+    if (error) {
+      throw error;
+    }
+
+    return passwordHash;
   }
 
   static normalizeResetRequestRole(role) {
@@ -125,6 +166,7 @@ export class AuthService {
   static async registerRestaurant(data) {
     try {
       const normalizedEmail = data.email.toLowerCase();
+      const passwordHash = await this.hashPassword(data.password);
 
       // Block duplicate emails across any user/role
       const { data: existingStaff, error: staffLookupError } = await supabase
@@ -190,7 +232,9 @@ export class AuthService {
           city: data.city,
           address: data.address,
           gst_number: data.gstNumber,
-          password_hash: '', // Empty - auth managed by Supabase
+          password_hash: passwordHash,
+          password_hash_cleared: false,
+          password_updated_at: new Date().toISOString(),
         }])
         .select()
         .single();
@@ -328,6 +372,15 @@ export class AuthService {
         }
 
         if (restaurant && !restaurantError) {
+          if (!restaurant.password_hash) {
+            restaurant.password_hash = await this.syncPasswordHashIfMissing('restaurants', restaurant.id, password);
+          }
+
+          const restaurantPasswordValid = await this.verifyPasswordAgainstStoredHash(password, restaurant, 'restaurant');
+          if (!restaurantPasswordValid) {
+            throw new Error('Invalid email or password');
+          }
+
           const userRole = ROLES.ADMIN;
           const accessToken = this.generateAccessToken(
             restaurant.id,
@@ -524,6 +577,20 @@ export class AuthService {
         authVerified: !!authData?.user?.id,
       });
 
+      if (!user.password_hash) {
+        user.password_hash = await this.syncPasswordHashIfMissing('users', user.id, password);
+      }
+
+      const localPasswordValid = await this.verifyPasswordAgainstStoredHash(password, user, 'user');
+      if (!localPasswordValid) {
+        logger.warn('[LOGIN] Rejecting login because stored password hash does not match', {
+          userId: user.id,
+          email: user.email,
+          portal,
+        });
+        throw new Error('Invalid email or password');
+      }
+
       // ✅ TASK 3: REMOVE INVALID COMPARISON
       // ✅ FIXED: Only trust Supabase Auth - no custom password checking
       // Password is managed by Supabase auth system, not local database
@@ -624,6 +691,7 @@ export class AuthService {
       // Create auth user
       logger.info(`Creating Supabase Auth user for staff: ${normalizedEmail}`);
       let authData, authError;
+      const passwordHash = await this.hashPassword(data.password);
       try {
         const adminClient = getSupabaseAdmin();
         ({ data: authData, error: authError } = await adminClient.auth.admin.createUser({
@@ -662,6 +730,9 @@ export class AuthService {
         email: data.email.toLowerCase(),
         restaurant_id: data.restaurantId,
         role: normalizedRole,
+        password_hash: passwordHash,
+        password_hash_cleared: false,
+        password_updated_at: new Date().toISOString(),
         phone_number: data.phone,
         status: 'active',
       };
@@ -753,6 +824,11 @@ export class AuthService {
 
       if (!account) {
         throw new Error('User not found');
+      }
+
+      const currentPasswordValid = await this.verifyPasswordAgainstStoredHash(currentPassword, account, table);
+      if (!currentPasswordValid) {
+        throw new Error('Current password is incorrect');
       }
 
       // ✅ FIX: Authenticate against Supabase Auth, not database hash
@@ -853,14 +929,10 @@ export class AuthService {
       }
 
       // ✅ FIX: Clear database password_hash - Supabase Auth is now authoritative
+      const passwordHash = await this.hashPassword(newPassword);
       const { error: dbError } = await supabase
         .from(table)
-        .update({ 
-          password_hash: null,  // Clear old hash - Supabase Auth is source of truth
-          password_hash_cleared: true,
-          password_updated_at: new Date().toISOString(),  // Track password update time
-          updated_at: new Date().toISOString()
-        })
+        .update(this.buildPasswordUpdatePayload(passwordHash))
         .eq(column, userId);
 
       if (dbError) throw dbError;
@@ -1130,14 +1202,10 @@ export class AuthService {
       }
 
       // ✅ FIX: Clear database password_hash - Supabase Auth is now authoritative
+      const passwordHash = await this.hashPassword(newPassword);
       const { error: updateUserError } = await supabase
         .from('users')
-        .update({
-          password_hash: null,  // Clear old hash - Supabase Auth is source of truth
-          password_hash_cleared: true,
-          password_updated_at: handledAt,  // Track password update time
-          updated_at: handledAt,
-        })
+        .update(this.buildPasswordUpdatePayload(passwordHash, handledAt))
         .eq('id', user.id)
         .eq('restaurant_id', restaurantId);
 
@@ -1189,7 +1257,7 @@ export class AuthService {
         throw new Error('User not found');
       }
 
-      const isValid = await this.comparePassword(currentPassword, account.password_hash);
+      const isValid = await this.verifyPasswordAgainstStoredHash(currentPassword, account, table);
       if (!isValid) {
         throw new Error('Current password is incorrect');
       }

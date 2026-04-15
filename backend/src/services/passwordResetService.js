@@ -3,6 +3,7 @@ import logger from '../utils/logger.js';
 import { broadcastRestaurantEvent } from '../utils/realtimeEvents.js';
 import OTPService from '../utils/otpService.js';
 import EmailService from '../utils/emailService.js';
+import AuthService from './authService.js';
 
 class PasswordResetService {
 
@@ -265,12 +266,7 @@ class PasswordResetService {
       const tableToUpdate = isRestaurant ? 'restaurants' : 'users';
       const { error: updateError } = await supabase
         .from(tableToUpdate)
-        .update({
-          password_hash: null, // Clear old password hash
-          password_hash_cleared: true,
-          password_updated_at: new Date().toISOString(),  // Track password update time
-          updated_at: new Date().toISOString(),
-        })
+        .update(AuthService.buildPasswordUpdatePayload(await AuthService.hashPassword(newPassword)))
         .eq('id', userId);
 
       if (updateError) throw updateError;
@@ -449,12 +445,7 @@ class PasswordResetService {
       const handledAt = new Date().toISOString();
       const { error: updateError } = await supabase
         .from(tableToUpdate)
-        .update({
-          password_hash: null,  // Clear old hash - Supabase Auth is source of truth
-          password_hash_cleared: true,
-          password_updated_at: handledAt,  // Track password update time
-          updated_at: handledAt,
-        })
+        .update(AuthService.buildPasswordUpdatePayload(await AuthService.hashPassword(newPassword), handledAt))
         .eq('id', userId);
 
       if (updateError) {

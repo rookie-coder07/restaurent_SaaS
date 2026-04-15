@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { Suspense, lazy, memo, useEffect, useMemo, useState } from 'react';
 import {
   CalendarClock,
   Download,
@@ -18,7 +18,6 @@ import { useManagerStore } from '../context/managerStore';
 import { usePosStore } from '../context/posStore';
 import { useOrderSubscription } from '../hooks/useOrderSubscription';
 import { getTableActivity } from '../utils/managerPortal';
-import QRCodeModal from '../components/QRCodeModal';
 import { generateBulkQRCodes } from '../utils/qrCodeGenerator';
 import { compareTableLabels, formatCurrency, formatDate } from '../utils/formatters';
 import { formatDisplayOrderNumber } from '../utils/formatters';
@@ -33,6 +32,8 @@ import PaginationControls from '../components/common/PaginationControls';
 import useResponsivePagination from '../hooks/useResponsivePagination';
 import { playLoudBuzzer } from '../utils/alerts';
 import { subscribeToOrderEvents, subscribeToTableEvents } from '../utils/liveOrderEvents';
+
+const QRCodeModal = lazy(() => import('../components/QRCodeModal'));
 
 const TABLE_STATUS_META = {
   open: {
@@ -684,14 +685,16 @@ export default function Tables() {
       </Modal>
 
       {showQRModal && selectedTableForQR ? (
-        <QRCodeModal
-          table={selectedTableForQR}
-          restaurantName="Your Restaurant"
-          onClose={() => {
-            setShowQRModal(false);
-            setSelectedTableForQR(null);
-          }}
-        />
+        <Suspense fallback={null}>
+          <QRCodeModal
+            table={selectedTableForQR}
+            restaurantName="Your Restaurant"
+            onClose={() => {
+              setShowQRModal(false);
+              setSelectedTableForQR(null);
+            }}
+          />
+        </Suspense>
       ) : null}
 
       {canManageTableConfig ? (
@@ -781,7 +784,7 @@ export default function Tables() {
   );
 }
 
-function TableDetails({
+const TableDetails = memo(function TableDetails({
   table,
   onOpenBilling,
   onReserve,
@@ -995,9 +998,9 @@ function TableDetails({
       </div>
     </div>
   );
-}
+});
 
-function InfoChip({ icon: Icon, label, value }) {
+const InfoChip = memo(function InfoChip({ icon: Icon, label, value }) {
   return (
     <div className="rounded-[1.25rem] border border-[var(--border-color)] bg-[var(--color-surface)] p-3">
       <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-[var(--text-secondary)]">
@@ -1007,4 +1010,4 @@ function InfoChip({ icon: Icon, label, value }) {
       <p className="mt-2 text-sm font-bold text-[var(--text-primary)]">{value}</p>
     </div>
   );
-}
+});

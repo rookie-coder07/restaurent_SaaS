@@ -30,6 +30,10 @@ export function printKitchenTicket(ticket, options = {}) {
     return false;
   }
 
+  if (!Array.isArray(ticket.items) || ticket.items.length === 0) {
+    throw new Error('Kitchen ticket has no items to print.');
+  }
+
   const groupedStations = groupItemsByStation(ticket.items || []);
   const title = escapeHtml(options.title || `KOT ${ticket.sequence || ''}`.trim());
   const displayOrderNumber = escapeHtml(ticket.displayOrderNumber || '');

@@ -2,8 +2,13 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { useAuthStore } from '../context/authStore';
 import { getUserErrorMessage, showToast } from '../utils/errorHandling';
 import { apiCache } from '../utils/apiCache';
+import { responseCache } from '../utils/requestDedup';
 
-export const useApi = (apiFunction, deps = [], { enableCache = true, cacheTTL = 5 * 60 * 1000 } = {}) => {
+export const useApi = (
+  apiFunction,
+  deps = [],
+  { enableCache = true, cacheTTL = 5 * 60 * 1000, trackRestaurantContext = true } = {}
+) => {
   const restaurantId = useAuthStore((state) => state.restaurantId);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -27,8 +32,8 @@ export const useApi = (apiFunction, deps = [], { enableCache = true, cacheTTL = 
   useEffect(() => {
     setData(null);
     setError(null);
-    setLoading(Boolean(restaurantId));
-  }, [restaurantId]);
+    setLoading(trackRestaurantContext ? Boolean(restaurantId) : true);
+  }, [restaurantId, trackRestaurantContext]);
 
   const execute = useCallback(
     async (...args) => {
@@ -104,11 +109,17 @@ export const useApi = (apiFunction, deps = [], { enableCache = true, cacheTTL = 
         // Error state is already captured in the hook.
       });
     }
-  }, [execute, restaurantId, ...deps]);
+  }, [execute, ...(trackRestaurantContext ? [restaurantId] : []), ...deps]);
 
   const refetch = useCallback(async () => {
     const requestId = activeRequestRef.current + 1;
     activeRequestRef.current = requestId;
+    const cacheKey = cacheKeyRef.current;
+
+    if (cacheKey) {
+      apiCache.invalidate(cacheKey);
+    }
+    responseCache.clear();
 
     try {
       setLoading(true);
