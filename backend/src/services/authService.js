@@ -36,6 +36,56 @@ export class AuthService {
     };
   }
 
+  static isMissingColumnError(error, columnName = '') {
+    const normalizedColumnName = String(columnName || '').trim().toLowerCase();
+    const combined = `${error?.code || ''} ${error?.message || ''} ${error?.details || ''} ${error?.hint || ''}`.toLowerCase();
+    const isMissingError = combined.includes('could not find') || combined.includes('does not exist') || combined.includes('schema cache');
+    return isMissingError && normalizedColumnName ? combined.includes(normalizedColumnName) : false;
+  }
+
+  static omitKeys(payload = {}, keys = []) {
+    const clone = { ...payload };
+    for (const key of keys) {
+      delete clone[key];
+    }
+    return clone;
+  }
+
+  static async updatePasswordTrackingColumns(table, matcher = {}, passwordHash, timestamp = new Date().toISOString()) {
+    const attempts = [
+      this.buildPasswordUpdatePayload(passwordHash, timestamp),
+      this.omitKeys(this.buildPasswordUpdatePayload(passwordHash, timestamp), ['password_hash_cleared']),
+    ];
+
+    let lastError = null;
+
+    for (const payload of attempts) {
+      let query = supabase
+        .from(table)
+        .update(payload);
+
+      Object.entries(matcher || {}).forEach(([key, value]) => {
+        query = query.eq(key, value);
+      });
+
+      const { error } = await query;
+
+      if (!error) {
+        return passwordHash;
+      }
+
+      lastError = error;
+
+      if (this.isMissingColumnError(error, 'password_hash_cleared')) {
+        continue;
+      }
+
+      throw error;
+    }
+
+    throw lastError;
+  }
+
   static async persistRefreshToken(refreshToken, userId, restaurantId) {
     const expiresAt = new Date(Date.now() + TOKEN_CONFIG.REFRESH_TOKEN_SECONDS * 1000).toISOString();
     try {
@@ -115,17 +165,7 @@ export class AuthService {
 
   static async syncPasswordHashIfMissing(table, accountId, password) {
     const passwordHash = await this.hashPassword(password);
-
-    const { error } = await supabase
-      .from(table)
-      .update(this.buildPasswordUpdatePayload(passwordHash))
-      .eq('id', accountId);
-
-    if (error) {
-      throw error;
-    }
-
-    return passwordHash;
+    return await this.updatePasswordTrackingColumns(table, { id: accountId }, passwordHash);
   }
 
   static normalizeResetRequestRole(role) {
@@ -930,12 +970,7 @@ export class AuthService {
 
       // ✅ FIX: Clear database password_hash - Supabase Auth is now authoritative
       const passwordHash = await this.hashPassword(newPassword);
-      const { error: dbError } = await supabase
-        .from(table)
-        .update(this.buildPasswordUpdatePayload(passwordHash))
-        .eq(column, userId);
-
-      if (dbError) throw dbError;
+      await this.updatePasswordTrackingColumns(table, { [column]: userId }, passwordHash);
 
       // Revoke all refresh tokens for this user (force re-login for security)
       await revokeAllUserTokens(userId);
@@ -1203,13 +1238,12 @@ export class AuthService {
 
       // ✅ FIX: Clear database password_hash - Supabase Auth is now authoritative
       const passwordHash = await this.hashPassword(newPassword);
-      const { error: updateUserError } = await supabase
-        .from('users')
-        .update(this.buildPasswordUpdatePayload(passwordHash, handledAt))
-        .eq('id', user.id)
-        .eq('restaurant_id', restaurantId);
-
-      if (updateUserError) throw updateUserError;
+      await this.updatePasswordTrackingColumns(
+        'users',
+        { id: user.id, restaurant_id: restaurantId },
+        passwordHash,
+        handledAt
+      );
 
       const { error: updateRequestError } = await supabase
         .from('password_reset_requests')
